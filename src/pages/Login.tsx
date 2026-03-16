@@ -16,7 +16,7 @@ export function Login() {
 
     try {
       // 1. Bate na porta do nosso Backend
-      const response = await axios.post('http://localhost:3333/login', {
+      const response = await axios.post('https://pdv-inteligente-api.onrender.com/login', {
         email,
         senha
       });

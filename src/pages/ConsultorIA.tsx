@@ -11,7 +11,7 @@ export function ConsultorIA() {
     setInsight(null); // Limpa o anterior
     try {
       const token = localStorage.getItem('@PDVToken');
-      const response = await axios.get(`http://localhost:3333/ia/${tipo}/analise`, {
+      const response = await axios.get(`https://pdv-inteligente-api.onrender.com/ia/${tipo}/analise`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       

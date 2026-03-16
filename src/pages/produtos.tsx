@@ -36,8 +36,8 @@ export function Produtos() {
       const headers = { Authorization: `Bearer ${token}` };
 
       const [resProdutos, resCategorias] = await Promise.all([
-        axios.get('http://localhost:3333/produtos', { headers }),
-        axios.get('http://localhost:3333/categorias', { headers })
+        axios.get('https://pdv-inteligente-api.onrender.com/produtos', { headers }),
+        axios.get('https://pdv-inteligente-api.onrender.com/categorias', { headers })
       ]);
       
       setProdutos(resProdutos.data);
@@ -63,7 +63,7 @@ export function Produtos() {
       const token = localStorage.getItem('@PDVToken');
       
       // Aqui está o segredo: enviamos exatamente o que o Prisma quer!
-      await axios.post('http://localhost:3333/produtos', 
+      await axios.post('https://pdv-inteligente-api.onrender.com/produtos', 
         { 
           nome, 
           precoCusto: parseFloat(precoCusto), 

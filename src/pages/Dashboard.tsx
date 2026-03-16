@@ -23,7 +23,7 @@ export function Dashboard() {
     const carregarDashboard = async () => {
       try {
         const token = localStorage.getItem('@PDVToken');
-        const response = await axios.get('http://localhost:3333/dashboard/resumo', {
+        const response = await axios.get('https://pdv-inteligente-api.onrender.com/dashboard/resumo', {
           headers: { Authorization: `Bearer ${token}` }
         });
 

@@ -28,7 +28,7 @@ export function FrenteCaixa() {
     if (e.key === 'Enter' && codigoBarras.trim() !== '') {
       try {
         const token = localStorage.getItem('@PDVToken');
-        const response = await axios.get('http://localhost:3333/produtos', {
+        const response = await axios.get('https://pdv-inteligente-api.onrender.com/produtos', {
           headers: { Authorization: `Bearer ${token}` }
         });
         
@@ -74,7 +74,7 @@ export function FrenteCaixa() {
         precoUnitario: item.precoVenda
       }));
 
-      await axios.post('http://localhost:3333/vendas', {
+      await axios.post('https://pdv-inteligente-api.onrender.com/vendas', {
         itens: itensVenda,
         formaPagamento: 'DINHEIRO'
       }, {

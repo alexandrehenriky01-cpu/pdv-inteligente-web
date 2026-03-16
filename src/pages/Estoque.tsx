@@ -24,7 +24,7 @@ export function Estoque() {
   const carregarEstoque = async () => {
     try {
       const token = localStorage.getItem('@PDVToken');
-      const response = await axios.get('http://localhost:3333/produtos', {
+      const response = await axios.get('https://pdv-inteligente-api.onrender.com/produtos', {
         headers: { Authorization: `Bearer ${token}` }
       });
       setProdutos(response.data);
@@ -49,7 +49,7 @@ export function Estoque() {
       const token = localStorage.getItem('@PDVToken');
       
       // Enviando a requisição para o backend registrar a entrada
-      await axios.post('http://localhost:3333/estoque/entrada', {
+      await axios.post('https://pdv-inteligente-api.onrender.com/estoque/entrada', {
         produtoId: produtoSelecionado,
         quantidade: Number(quantidadeAdicionar),
         tipoMovimento: 'ENTRADA' // Caso seu backend exija saber o tipo

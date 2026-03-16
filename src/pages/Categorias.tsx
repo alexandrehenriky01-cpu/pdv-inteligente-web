@@ -18,7 +18,7 @@ export function Categorias() {
     try {
       const token = localStorage.getItem('@PDVToken'); // Pega o crachá
       
-      const response = await axios.get('http://localhost:3333/categorias', {
+      const response = await axios.get('https://pdv-inteligente-api.onrender.com/categorias', {
         headers: {
           Authorization: `Bearer ${token}` // Mostra o crachá na porta do backend
         }
@@ -40,7 +40,7 @@ export function Categorias() {
     try {
       const token = localStorage.getItem('@PDVToken');
       
-      await axios.post('http://localhost:3333/categorias', 
+      await axios.post('https://pdv-inteligente-api.onrender.com/categorias', 
         { nome: novaCategoria },
         {
           headers: {
