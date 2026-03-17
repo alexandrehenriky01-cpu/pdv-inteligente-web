@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { Categorias } from './pages/Categorias'; 
-import { Produtos } from './pages/Produtos'; 
+import { Produtos } from './pages/produtos'; 
 import { FrenteCaixa } from './pages/FrenteCaixa'; 
 import { Estoque } from './pages/Estoque';
 import { ConsultorIA } from './pages/ConsultorIA';
