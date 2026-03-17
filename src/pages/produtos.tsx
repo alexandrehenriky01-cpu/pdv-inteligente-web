@@ -12,9 +12,7 @@ interface Produto {
   nome: string;
   precoCusto: number;
   precoVenda: number;
-  categoria: {
-    nome: string;
-  };
+  categoria: { nome: string; };
   codigoBarras: string;
   ean: string;
 }
@@ -30,15 +28,23 @@ export function Produtos() {
   const [categoriaId, setCategoriaId] = useState('');
   const [codigoBarras, setCodigoBarras] = useState('');
   
-  // --- Estados: Dados Fiscais ---
+  // --- Estados: Dados Fiscais (Gerais) ---
   const [ean, setEan] = useState('');
   const [unidadeMedida, setUnidadeMedida] = useState('UN');
   const [ncm, setNcm] = useState('');
   const [cest, setCest] = useState('');
   const [cfopPadrao, setCfopPadrao] = useState('');
   const [origem, setOrigem] = useState('0');
+  
+  // --- Estados: Impostos (ICMS, PIS, COFINS, IPI) ---
   const [cstCsosn, setCstCsosn] = useState('');
   const [aliquotaIcms, setAliquotaIcms] = useState('');
+  const [cstPis, setCstPis] = useState('');
+  const [aliquotaPis, setAliquotaPis] = useState('');
+  const [cstCofins, setCstCofins] = useState('');
+  const [aliquotaCofins, setAliquotaCofins] = useState('');
+  const [cstIpi, setCstIpi] = useState('');
+  const [aliquotaIpi, setAliquotaIpi] = useState('');
 
   const [loading, setLoading] = useState(false);
 
@@ -74,7 +80,6 @@ export function Produtos() {
     try {
       const token = localStorage.getItem('@PDVToken');
       
-      // Enviando o pacote completo para a API
       await axios.post('https://pdv-inteligente-api.onrender.com/produtos', 
         { 
           nome, 
@@ -89,7 +94,13 @@ export function Produtos() {
           cfopPadrao,
           origem: parseInt(origem),
           cstCsosn,
-          aliquotaIcms: aliquotaIcms ? parseFloat(aliquotaIcms) : 0
+          aliquotaIcms: aliquotaIcms ? parseFloat(aliquotaIcms) : 0,
+          cstPis,
+          aliquotaPis: aliquotaPis ? parseFloat(aliquotaPis) : 0,
+          cstCofins,
+          aliquotaCofins: aliquotaCofins ? parseFloat(aliquotaCofins) : 0,
+          cstIpi,
+          aliquotaIpi: aliquotaIpi ? parseFloat(aliquotaIpi) : 0
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -98,6 +109,8 @@ export function Produtos() {
       setNome(''); setPrecoCusto(''); setPrecoVenda(''); setCategoriaId('');
       setCodigoBarras(''); setEan(''); setNcm(''); setCest(''); setCfopPadrao('');
       setCstCsosn(''); setAliquotaIcms(''); setUnidadeMedida('UN'); setOrigem('0');
+      setCstPis(''); setAliquotaPis(''); setCstCofins(''); setAliquotaCofins('');
+      setCstIpi(''); setAliquotaIpi('');
       
       carregarDados(); 
     } catch (error) {
@@ -225,18 +238,75 @@ export function Produtos() {
                       placeholder="Ex: 5102" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">CST / CSOSN</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">CST/CSOSN (ICMS)</label>
                     <input type="text" value={cstCsosn} onChange={(e) => setCstCsosn(e.target.value)}
                       className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none"
                       placeholder="Ex: 102" />
                   </div>
                 </div>
+
+                {/* SESSÃO 3: TRIBUTAÇÃO ESPECÍFICA (PIS, COFINS, IPI) - AQUI ESTÁ O QUE FALTAVA! */}
+                <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-4 mt-4">
+                  <h4 className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2">
+                    <span>📊 Tributação Específica</span>
+                  </h4>
+                  
+                  {/* ICMS Alíquota */}
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Alíquota ICMS (%)</label>
+                    <input type="number" step="0.01" value={aliquotaIcms} onChange={(e) => setAliquotaIcms(e.target.value)}
+                      className="w-full px-3 py-1.5 text-sm rounded border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="Ex: 18.00" />
+                  </div>
+
+                  {/* PIS */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">CST PIS</label>
+                      <input type="text" value={cstPis} onChange={(e) => setCstPis(e.target.value)}
+                        className="w-full px-3 py-1.5 text-sm rounded border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="Ex: 01" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Alíq. PIS (%)</label>
+                      <input type="number" step="0.01" value={aliquotaPis} onChange={(e) => setAliquotaPis(e.target.value)}
+                        className="w-full px-3 py-1.5 text-sm rounded border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="1.65" />
+                    </div>
+                  </div>
+
+                  {/* COFINS */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">CST COFINS</label>
+                      <input type="text" value={cstCofins} onChange={(e) => setCstCofins(e.target.value)}
+                        className="w-full px-3 py-1.5 text-sm rounded border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="Ex: 01" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Alíq. COFINS (%)</label>
+                      <input type="number" step="0.01" value={aliquotaCofins} onChange={(e) => setAliquotaCofins(e.target.value)}
+                        className="w-full px-3 py-1.5 text-sm rounded border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="7.60" />
+                    </div>
+                  </div>
+
+                  {/* IPI */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">CST IPI</label>
+                      <input type="text" value={cstIpi} onChange={(e) => setCstIpi(e.target.value)}
+                        className="w-full px-3 py-1.5 text-sm rounded border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="Ex: 50" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Alíq. IPI (%)</label>
+                      <input type="number" step="0.01" value={aliquotaIpi} onChange={(e) => setAliquotaIpi(e.target.value)}
+                        className="w-full px-3 py-1.5 text-sm rounded border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="5.00" />
+                    </div>
+                  </div>
+                </div>
+
               </div>
               
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-slate-800 hover:bg-slate-900 text-white font-semibold py-3 rounded-lg transition-colors disabled:bg-slate-400 mt-4"
+                className="w-full bg-slate-800 hover:bg-slate-900 text-white font-semibold py-3 rounded-lg transition-colors disabled:bg-slate-400 mt-6"
               >
                 {loading ? 'Salvando...' : 'Cadastrar Produto Completo'}
               </button>
