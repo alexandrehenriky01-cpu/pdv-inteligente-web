@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
+// ✅ 1. Importamos a nossa 'api' configurada em vez do axios puro
+import { api } from '../services/api'; 
 import { Layout } from '../components/Layout';
 
 interface Categoria {
@@ -28,7 +29,7 @@ export function Produtos() {
   const [categoriaId, setCategoriaId] = useState('');
   const [codigoBarras, setCodigoBarras] = useState('');
   
-  // --- Estados: Dados Fiscais (Gerais) ---
+  // --- Estados: Dados Fiscais ---
   const [ean, setEan] = useState('');
   const [unidadeMedida, setUnidadeMedida] = useState('UN');
   const [ncm, setNcm] = useState('');
@@ -36,7 +37,7 @@ export function Produtos() {
   const [cfopPadrao, setCfopPadrao] = useState('');
   const [origem, setOrigem] = useState('0');
   
-  // --- Estados: Impostos (ICMS, PIS, COFINS, IPI) ---
+  // Impostos
   const [cstCsosn, setCstCsosn] = useState('');
   const [aliquotaIcms, setAliquotaIcms] = useState('');
   const [cstPis, setCstPis] = useState('');
@@ -50,12 +51,10 @@ export function Produtos() {
 
   const carregarDados = async () => {
     try {
-      const token = localStorage.getItem('@PDVToken');
-      const headers = { Authorization: `Bearer ${token}` };
-
+      // ✅ 2. Olha como fica limpo! Sem precisar passar URL inteira nem headers
       const [resProdutos, resCategorias] = await Promise.all([
-        axios.get('https://pdv-inteligente-api.onrender.com/produtos', { headers }),
-        axios.get('https://pdv-inteligente-api.onrender.com/categorias', { headers })
+        api.get('/produtos'),
+        api.get('/categorias')
       ]);
       
       setProdutos(resProdutos.data);
@@ -78,32 +77,28 @@ export function Produtos() {
     
     setLoading(true);
     try {
-      const token = localStorage.getItem('@PDVToken');
-      
-      await axios.post('https://pdv-inteligente-api.onrender.com/produtos', 
-        { 
-          nome, 
-          precoCusto: parseFloat(precoCusto), 
-          precoVenda: parseFloat(precoVenda), 
-          categoriaId,
-          codigoBarras,
-          ean,
-          unidadeMedida,
-          ncm,
-          cest,
-          cfopPadrao,
-          origem: parseInt(origem),
-          cstCsosn,
-          aliquotaIcms: aliquotaIcms ? parseFloat(aliquotaIcms) : 0,
-          cstPis,
-          aliquotaPis: aliquotaPis ? parseFloat(aliquotaPis) : 0,
-          cstCofins,
-          aliquotaCofins: aliquotaCofins ? parseFloat(aliquotaCofins) : 0,
-          cstIpi,
-          aliquotaIpi: aliquotaIpi ? parseFloat(aliquotaIpi) : 0
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      // ✅ 3. Usamos o api.post apenas com o caminho relativo
+      await api.post('/produtos', { 
+        nome, 
+        precoCusto: parseFloat(precoCusto), 
+        precoVenda: parseFloat(precoVenda), 
+        categoriaId,
+        codigoBarras,
+        ean,
+        unidadeMedida,
+        ncm,
+        cest,
+        cfopPadrao,
+        origem: parseInt(origem),
+        cstCsosn,
+        aliquotaIcms: aliquotaIcms ? parseFloat(aliquotaIcms) : 0,
+        cstPis,
+        aliquotaPis: aliquotaPis ? parseFloat(aliquotaPis) : 0,
+        cstCofins,
+        aliquotaCofins: aliquotaCofins ? parseFloat(aliquotaCofins) : 0,
+        cstIpi,
+        aliquotaIpi: aliquotaIpi ? parseFloat(aliquotaIpi) : 0
+      });
       
       // Limpando o formulário
       setNome(''); setPrecoCusto(''); setPrecoVenda(''); setCategoriaId('');
@@ -121,6 +116,7 @@ export function Produtos() {
     }
   };
 
+ 
   return (
     <Layout>
       <div className="mb-8">

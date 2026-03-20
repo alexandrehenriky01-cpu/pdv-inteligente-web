@@ -25,7 +25,7 @@ export function CadastroPessoa() {
   });
 
   const handleConsultarCnpj = async () => {
-    if (formData.cnpjCpf.length < 14) return alert("Digite um CNPJ válido.");
+    if (formData.cnpjCpf.length &lt; 14) return alert("Digite um CNPJ válido.");
     
     setLoadingCnpj(true);
     try {
