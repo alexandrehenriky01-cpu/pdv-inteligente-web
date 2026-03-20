@@ -6,6 +6,7 @@ import { Produtos } from './pages/produtos';
 import { FrenteCaixa } from './pages/FrenteCaixa'; 
 import { Estoque } from './pages/Estoque';
 import { ConsultorIA } from './pages/ConsultorIA';
+import { CadastroPessoa } from './pages/CadastroPessoa';
 
 
 function App() {
@@ -22,6 +23,7 @@ function App() {
         <Route path="/frente-caixa" element={<FrenteCaixa />} />
         <Route path="/estoque" element={<Estoque />} />
         <Route path="/ConsultorIA" element={<ConsultorIA />} />
+        <Route path="/cadastro-pessoa" element={<CadastroPessoa />} />
       </Routes>
     </BrowserRouter>
   );
