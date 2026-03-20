@@ -8,17 +8,20 @@ export function ImportarNfe() {
   const [loading, setLoading] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [previewData, setPreviewData] = useState<any>(null);
+  
+  // ✅ NOVOS ESTADOS PARA AS CONFIGURAÇÕES DE ENTRADA
+  const [alimentarEstoque, setAlimentarEstoque] = useState(true);
+  const [cfopEntrada, setCfopEntrada] = useState('');
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
-  // Manipula o arquivo selecionado ou arrastado
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       setFile(e.target.files[0]);
     }
   };
 
-  // Envia o XML para o Backend processar (Apenas Leitura e Extração)
   const handleProcessarXml = async () => {
     if (!file) return alert("Por favor, selecione um arquivo XML.");
 
@@ -26,12 +29,8 @@ export function ImportarNfe() {
     formData.append('arquivo', file);
 
     setLoading(true);
-        try {
-      // ✅ CORREÇÃO: Pegando o token do LocalStorage (ajuste se você salva com outro nome, ex: '@pdv:token')
+    try {
       const token = localStorage.getItem('@PDVToken');
-
-     // ✅ ADICIONE ESTA LINHA AQUI PARA VERMOS O QUE ESTÁ INDO:
-      console.log("🚨 TOKEN QUE ESTÁ SENDO ENVIADO:", token);
 
       const response = await api.post('/api/nfe/importar', formData, {
         headers: { 
@@ -40,8 +39,6 @@ export function ImportarNfe() {
         }
       });
           
-
-
       setPreviewData(response.data);
     } catch (error: any) {
       console.error(error);
@@ -51,34 +48,36 @@ export function ImportarNfe() {
     }
   };
 
-  // Função para limpar a tela e importar outra nota
   const handleLimpar = () => {
     setFile(null);
     setPreviewData(null);
+    setCfopEntrada(''); // Limpa o CFOP
+    setAlimentarEstoque(true); // Reseta o estoque para true
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // ✅ AQUI ESTÁ A MÁGICA FINAL: Salva no Banco e Atualiza o Estoque
-    // ✅ AQUI ESTÁ A MÁGICA FINAL: Salva no Banco e Atualiza o Estoque
-    // ✅ AQUI ESTÁ A MÁGICA FINAL: Salva no Banco e Atualiza o Estoque
   const handleConfirmarEntrada = async () => {
     if (!previewData) return;
     
     setSalvando(true);
     try {
-      // 1. Pega o token certinho com a chave que descobrimos!
       const token = localStorage.getItem('@PDVToken'); 
 
-      // 2. Envia o JSON completo com o cabeçalho de Autorização
-      await api.post('/api/nfe/salvar', previewData, {
+      // ✅ ENVIANDO O PAYLOAD COMPLETO COM AS NOVAS OPÇÕES
+      const payload = {
+        ...previewData,
+        alimentarEstoque,
+        cfopEntrada
+      };
+
+      const response = await api.post('/api/nfe/salvar', payload, {
         headers: {
-          'Authorization': `Bearer ${token}` // 👈 O crachá de acesso para salvar!
+          'Authorization': `Bearer ${token}`
         }
       });
       
-      alert("✅ Nota Fiscal importada e Estoque atualizado com sucesso!");
+      alert(`✅ ${response.data.message}`);
       
-      // Limpa a tela para a próxima nota
       handleLimpar(); 
       
     } catch (error: any) {
@@ -148,6 +147,54 @@ export function ImportarNfe() {
         {previewData && (
           <div className="space-y-6 animate-fade-in">
             
+            {/* ✅ NOVO CARD: CONFIGURAÇÕES DE ENTRADA */}
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 border-l-4 border-l-purple-500">
+              <h3 className="text-sm font-bold text-purple-600 uppercase tracking-wider mb-4">⚙️ Configurações de Entrada</h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {/* Chave de Acesso */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-bold text-slate-700 mb-1">Chave de Acesso da NF-e</label>
+                  <input 
+                    type="text" 
+                    readOnly 
+                    value={previewData.documento.chaveAcesso} 
+                    className="w-full p-3 border border-slate-300 rounded-lg bg-slate-100 text-slate-600 text-sm font-mono outline-none"
+                  />
+                </div>
+
+                {/* CFOP de Entrada */}
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-1">CFOP de Entrada</label>
+                  <input 
+                    type="text" 
+                    placeholder="Ex: 1102, 1403..."
+                    value={cfopEntrada}
+                    onChange={(e) => setCfopEntrada(e.target.value)}
+                    className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-all"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">Deixe em branco para usar o do XML.</p>
+                </div>
+
+                {/* Alimentar Estoque Toggle */}
+                <div className="md:col-span-3 flex items-center gap-3 bg-slate-50 p-4 rounded-lg border border-slate-200">
+                  <input 
+                    type="checkbox" 
+                    id="alimentarEstoque"
+                    checked={alimentarEstoque}
+                    onChange={(e) => setAlimentarEstoque(e.target.checked)}
+                    className="w-5 h-5 text-purple-600 rounded focus:ring-purple-500 cursor-pointer"
+                  />
+                  <label htmlFor="alimentarEstoque" className="font-bold text-slate-700 cursor-pointer select-none">
+                    Alimentar quantidades no estoque
+                  </label>
+                  <span className="text-sm text-slate-500 ml-2">
+                    (Desmarque se quiser apenas registrar a nota sem somar os produtos físicos)
+                  </span>
+                </div>
+              </div>
+            </div>
+
             {/* CARD DO FORNECEDOR E NOTA */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 border-l-4 border-l-blue-500">
