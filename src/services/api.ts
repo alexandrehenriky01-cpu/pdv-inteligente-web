@@ -3,7 +3,7 @@ import axios from 'axios';
 
 export const api = axios.create({
   // Em produção, isso virá do arquivo .env (ex: import.meta.env.VITE_API_URL)
-  baseURL: 'http://localhost:3333', 
+   baseURL: 'https://pdv-inteligente-api.onrender.com', 
 });
 
 // Interceptor: Pega o Token salvo no LocalStorage e injeta em TODAS as requisições
