@@ -8,6 +8,7 @@ import { Estoque } from './pages/Estoque';
 import { ConsultorIA } from './pages/ConsultorIA';
 import { CadastroPessoa } from './pages/CadastroPessoa';
 import { ListaPessoas } from './pages/ListaPessoas';
+import { ImportarNfe } from './pages/ImportarNfe';
 
 
 
@@ -28,6 +29,7 @@ function App() {
         <Route path="/cadastro-pessoa" element={<CadastroPessoa />} />
         <Route path="/pessoas" element={<ListaPessoas />} />
         <Route path="/pessoas/novo" element={<CadastroPessoa />} />
+        <Route path="/estoque/entrada" element={<ImportarNfe />} />
 
       </Routes>
     </BrowserRouter>
