@@ -46,9 +46,7 @@ export function Layout({ children }: LayoutProps) {
           <Link to="/ConsultorIA " className="block p-3 rounded-lg hover:bg-slate-800 text-slate-300 transition">
             🧠 Consultor IA
           </Link>
-          <Link to="/cadastro-pessoa" className="block p-3 rounded-lg hover:bg-slate-800 text-slate-300 transition">
-            📄 Cadastro de Pessoa
-          </Link>
+          
             <Link to="/pessoas" className="flex items-center gap-2 p-2 hover:bg-slate-100 rounded">
               👥 Parceiros
             </Link>
