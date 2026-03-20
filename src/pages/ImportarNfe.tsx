@@ -26,11 +26,16 @@ export function ImportarNfe() {
     formData.append('arquivo', file);
 
     setLoading(true);
-    try {
+        try {
+      // ✅ CORREÇÃO: Pegando o token do LocalStorage (ajuste se você salva com outro nome, ex: '@pdv:token')
+      const token = localStorage.getItem('token') || localStorage.getItem('@pdv:token'); 
+
       const response = await api.post('/api/nfe/importar', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers: { 
+          'Content-Type': 'multipart/form-data',
+          'Authorization': `Bearer ${token}` // 👈 Forçando o envio do crachá!
+        }
       });
-      
       setPreviewData(response.data);
     } catch (error: any) {
       console.error(error);
@@ -48,13 +53,21 @@ export function ImportarNfe() {
   };
 
   // ✅ AQUI ESTÁ A MÁGICA FINAL: Salva no Banco e Atualiza o Estoque
+    // ✅ AQUI ESTÁ A MÁGICA FINAL: Salva no Banco e Atualiza o Estoque
   const handleConfirmarEntrada = async () => {
     if (!previewData) return;
     
     setSalvando(true);
     try {
-      // Envia o JSON completo (Fornecedor, Documento, Itens) para a rota de salvamento
-      await api.post('/api/nfe/salvar', previewData);
+      // 1. Pega o token de novo aqui!
+      const token = localStorage.getItem('token') || localStorage.getItem('@pdv:token'); 
+
+      // 2. Envia o JSON completo com o cabeçalho de Autorização
+      await api.post('/api/nfe/salvar', previewData, {
+        headers: {
+          'Authorization': `Bearer ${token}` // 👈 Faltava isso aqui!
+        }
+      });
       
       alert("✅ Nota Fiscal importada e Estoque atualizado com sucesso!");
       
@@ -64,7 +77,7 @@ export function ImportarNfe() {
       
     } catch (error: any) {
       console.error(error);
-      alert("Erro ao salvar a Nota Fiscal: " + (error.response?.data?.error || error.message));
+      alert("Erro ao salvar a Nota Fiscal : " + (error.response?.data?.error || error.message));
     } finally {
       setSalvando(false);
     }
