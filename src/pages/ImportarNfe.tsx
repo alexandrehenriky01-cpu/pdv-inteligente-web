@@ -60,30 +60,30 @@ export function ImportarNfe() {
 
   // ✅ AQUI ESTÁ A MÁGICA FINAL: Salva no Banco e Atualiza o Estoque
     // ✅ AQUI ESTÁ A MÁGICA FINAL: Salva no Banco e Atualiza o Estoque
+    // ✅ AQUI ESTÁ A MÁGICA FINAL: Salva no Banco e Atualiza o Estoque
   const handleConfirmarEntrada = async () => {
     if (!previewData) return;
     
     setSalvando(true);
     try {
-      // 1. Pega o token de novo aqui!
-      const token = localStorage.getItem('token') || localStorage.getItem('@pdv:token'); 
+      // 1. Pega o token certinho com a chave que descobrimos!
+      const token = localStorage.getItem('@PDVToken'); 
 
       // 2. Envia o JSON completo com o cabeçalho de Autorização
       await api.post('/api/nfe/salvar', previewData, {
         headers: {
-          'Authorization': `Bearer ${token}` // 👈 Faltava isso aqui!
+          'Authorization': `Bearer ${token}` // 👈 O crachá de acesso para salvar!
         }
       });
       
       alert("✅ Nota Fiscal importada e Estoque atualizado com sucesso!");
       
-      // Opcional: Redirecionar para a lista de produtos ou dashboard
-      // navigate('/produtos'); 
-      handleLimpar(); // Limpa a tela para a próxima nota
+      // Limpa a tela para a próxima nota
+      handleLimpar(); 
       
     } catch (error: any) {
       console.error(error);
-      alert("Erro ao salvar a Nota Fiscal : " + (error.response?.data?.error || error.message));
+      alert("Erro ao salvar a Nota Fiscal: " + (error.response?.data?.error || error.message));
     } finally {
       setSalvando(false);
     }
