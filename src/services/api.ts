@@ -8,7 +8,8 @@ export const api = axios.create({
 
 // Interceptor: Pega o Token salvo no LocalStorage e injeta em TODAS as requisições
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('@SeuApp:token'); // Ajuste para a chave que você usa
+  // ✅ CORREÇÃO: Chave exata que está no seu Local Storage
+  const token = localStorage.getItem('@PDVToken'); 
   
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
