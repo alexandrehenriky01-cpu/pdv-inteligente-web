@@ -11,6 +11,7 @@ import { ListaPessoas } from './pages/ListaPessoas';
 import { ImportarNfe } from './pages/ImportarNfe';
 import { ListarNfe } from './pages/ListarNfe';
 import { CadastroCfop } from './pages/CadastroCfop';
+import { RegrasFiscais } from './pages/RegrasFiscais';
 
 // ✅ O Guarda de Segurança: Verifica se o usuário tem o token antes de deixar entrar na tela
 const PrivateRoute = ({ children }: { children: JSX.Element }) => {

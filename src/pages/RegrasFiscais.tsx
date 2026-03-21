@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { Layout } from '../components/Layout';
 
@@ -21,7 +21,9 @@ export function RegrasFiscais() {
   const [regras, setRegras] = useState<RegraFiscal[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalAberto, setModalAberto] = useState(false);
-  const [abaAtiva, setAbaAtiva] = useState&lt;'SAIDA' | 'ENTRADA'>('SAIDA');
+  
+  // ✅ CORRIGIDO AQUI: Trocado &lt; por <
+  const [abaAtiva, setAbaAtiva] = useState<'SAIDA' | 'ENTRADA'>('SAIDA');
   
   const [regraAtual, setRegraAtual] = useState<RegraFiscal>({
     nome: '', tipoOperacao: 'SAIDA', ncmAlvo: '', cfop: '', cstCsosn: '',
