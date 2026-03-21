@@ -10,6 +10,7 @@ import { CadastroPessoa } from './pages/CadastroPessoa';
 import { ListaPessoas } from './pages/ListaPessoas';
 import { ImportarNfe } from './pages/ImportarNfe';
 import { ListarNfe } from './pages/ListarNfe';
+import { CadastroCfop } from './pages/CadastroCfop';
 
 // ✅ O Guarda de Segurança: Verifica se o usuário tem o token antes de deixar entrar na tela
 const PrivateRoute = ({ children }: { children: JSX.Element }) => {
@@ -35,6 +36,7 @@ function App() {
         <Route path="/pessoas" element={<ListaPessoas />} />
         <Route path="/pessoas/novo" element={<CadastroPessoa />} />
         <Route path="/estoque/entrada" element={<ImportarNfe />} />
+        <Route path="/cadastrocfop" element={<CadastroCfop />} />
         
         {/* ✅ Rota de Notas Fiscais protegida pelo PrivateRoute */}
         <Route path="/notas-fiscais" element={<PrivateRoute><ListarNfe /></PrivateRoute>} />

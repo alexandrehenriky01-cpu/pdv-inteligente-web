@@ -35,7 +35,7 @@ export function Layout({ children }: LayoutProps) {
             🏷️ Categorias
           </Link>
 
-          <Link to="/cfop" className="block p-3 rounded-lg hover:bg-slate-800 text-slate-300 transition">
+          <Link to="/cadastrocfop" className="block p-3 rounded-lg hover:bg-slate-800 text-slate-300 transition">
             🏷️ CFOP
           </Link>
 
