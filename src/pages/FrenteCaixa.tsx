@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import axios from 'axios';
+import { useState, useRef, useEffect } from 'react';
+import { api } from '../services/api'; // ✅ Usando nossa API configurada
 import { Layout } from '../components/Layout';
 
 interface Produto {
@@ -7,6 +7,7 @@ interface Produto {
   nome: string;
   precoVenda: number;
   codigoBarras: string;
+  ean: string;
 }
 
 interface ItemCarrinho extends Produto {
@@ -17,6 +18,7 @@ export function FrenteCaixa() {
   const [codigoBarras, setCodigoBarras] = useState('');
   const [carrinho, setCarrinho] = useState<ItemCarrinho[]>([]);
   const [loading, setLoading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
   
   // Estados para o Cupom
   const [cupomVisivel, setCupomVisivel] = useState(false);
@@ -24,24 +26,35 @@ export function FrenteCaixa() {
 
   const total = carrinho.reduce((acc, item) => acc + (item.precoVenda * item.quantidade), 0);
 
+  // Foca no input automaticamente ao abrir a tela ou fechar o cupom
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, [cupomVisivel]);
+
   const buscarProduto = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && codigoBarras.trim() !== '') {
       try {
-        const token = localStorage.getItem('@PDVToken');
-        const response = await axios.get('https://pdv-inteligente-api.onrender.com/produtos', {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        setLoading(true);
+        // ✅ Otimização: Busca no backend SÓ os produtos que batem com o código (usando a rota que já criamos)
+        const response = await api.get(`/api/produtos?busca=${encodeURIComponent(codigoBarras)}`);
         
-        const produto = response.data.find((p: Produto) => p.codigoBarras === codigoBarras);
+        // Garante que pegou o produto com o código exato (EAN ou Cód Interno)
+        const produtoExato = response.data.find((p: Produto) => 
+          p.codigoBarras === codigoBarras || p.ean === codigoBarras
+        );
         
-        if (produto) {
-          adicionarAoCarrinho(produto);
+        if (produtoExato) {
+          adicionarAoCarrinho(produtoExato);
           setCodigoBarras('');
         } else {
           alert('Produto não encontrado!');
         }
       } catch (error) {
         console.error("Erro ao buscar produto:", error);
+        alert('Erro ao comunicar com o servidor.');
+      } finally {
+        setLoading(false);
+        inputRef.current?.focus(); // Mantém o foco para o próximo bip
       }
     }
   };
@@ -54,12 +67,24 @@ export function FrenteCaixa() {
           item.id === produto.id ? { ...item, quantidade: item.quantidade + 1 } : item
         );
       }
-      return [...prev, { ...produto, quantidade: 1 }];
+      return [{ ...produto, quantidade: 1 }, ...prev]; // Adiciona no topo da lista
     });
+  };
+
+  const alterarQuantidade = (id: string, delta: number) => {
+    setCarrinho(prev => prev.map(item => {
+      if (item.id === id) {
+        const novaQtd = item.quantidade + delta;
+        return novaQtd > 0 ? { ...item, quantidade: novaQtd } : item;
+      }
+      return item;
+    }));
+    inputRef.current?.focus();
   };
 
   const removerDoCarrinho = (id: string) => {
     setCarrinho(prev => prev.filter(item => item.id !== id));
+    inputRef.current?.focus();
   };
 
   const finalizarVenda = async () => {
@@ -67,136 +92,137 @@ export function FrenteCaixa() {
     
     setLoading(true);
     try {
-      const token = localStorage.getItem('@PDVToken');
       const itensVenda = carrinho.map(item => ({
         produtoId: item.id,
         quantidade: item.quantidade,
         precoUnitario: item.precoVenda
       }));
 
-      await axios.post('https://pdv-inteligente-api.onrender.com/vendas', {
+      // ✅ Usando a API configurada (já manda o token sozinho)
+      await api.post('/vendas', {
         itens: itensVenda,
         formaPagamento: 'DINHEIRO'
-      }, {
-        headers: { Authorization: `Bearer ${token}` }
       });
 
-      // Venda Sucesso! Prepara os dados para o Cupom
       setDadosCupom({
         itens: [...carrinho],
         total: total,
         data: new Date()
       });
       
-      setCupomVisivel(true); // Abre o modal do cupom
+      setCupomVisivel(true);
       
     } catch (error) {
       console.error("Erro ao finalizar venda:", error);
-      alert("Erro ao finalizar a venda.");
+      alert("Erro ao finalizar a venda. Verifique a conexão.");
     } finally {
       setLoading(false);
     }
   };
 
-  const imprimirCupom = () => {
-    window.print();
-  };
+  const imprimirCupom = () => window.print();
 
   const fecharCupom = () => {
     setCupomVisivel(false);
     setDadosCupom(null);
-    setCarrinho([]); // 👈 Limpa o carrinho
-    setCodigoBarras(''); // 👈 Limpa o input para o próximo cliente
+    setCarrinho([]);
+    setCodigoBarras('');
   };
 
   return (
     <>
       <Layout>
-        <div className="print:hidden">
+        <div className="print:hidden h-full flex flex-col">
           <div className="mb-6 flex justify-between items-center">
             <div>
-              <h1 className="text-3xl font-bold text-slate-800">Frente de Caixa (PDV)</h1>
+              <h1 className="text-3xl font-extrabold text-slate-800">Frente de Caixa (PDV)</h1>
               <p className="text-slate-500">Passe o leitor de código de barras ou digite o código.</p>
             </div>
-            <div className="text-4xl font-bold text-emerald-600 bg-emerald-50 px-6 py-2 rounded-xl border border-emerald-200">
+            <div className="text-4xl font-bold text-emerald-600 bg-emerald-50 px-6 py-3 rounded-xl border border-emerald-200 shadow-sm">
               R$ {total.toFixed(2).replace('.', ',')}
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
+            
             {/* Coluna Esquerda: Leitor e Lista */}
-            <div className="lg:col-span-2 flex flex-col gap-6">
-              <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                <label className="block text-sm font-medium text-slate-700 mb-2">Código de Barras</label>
+            <div className="lg:col-span-2 flex flex-col gap-4">
+              <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
                 <input
                   type="text"
-                  autoFocus
+                  ref={inputRef}
                   value={codigoBarras}
                   onChange={(e) => setCodigoBarras(e.target.value)}
                   onKeyDown={buscarProduto}
-                  placeholder="Bipe o produto e aperte Enter..."
-                  className="w-full px-4 py-4 text-xl rounded-lg border-2 border-blue-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 outline-none transition-all"
+                  disabled={loading}
+                  placeholder="Bipe o código de barras e aperte Enter..."
+                  className="w-full px-4 py-4 text-2xl font-mono rounded-lg border-2 border-blue-300 focus:border-blue-600 focus:ring-4 focus:ring-blue-600/20 outline-none transition-all"
                 />
               </div>
 
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex-1 min-h-[400px]">
-                <table className="w-full text-left">
-                  <thead className="bg-slate-50 border-b border-slate-200">
-                    <tr>
-                      <th className="p-4 text-slate-600 font-semibold">Produto</th>
-                      <th className="p-4 text-slate-600 font-semibold text-center">Qtd</th>
-                      <th className="p-4 text-slate-600 font-semibold text-right">Unitário</th>
-                      <th className="p-4 text-slate-600 font-semibold text-right">Subtotal</th>
-                      <th className="p-4 text-slate-600 font-semibold text-center">Ação</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {carrinho.length === 0 ? (
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col h-[500px]">
+                <div className="overflow-y-auto custom-scrollbar flex-1">
+                  <table className="w-full text-left relative">
+                    <thead className="bg-slate-100 border-b border-slate-200 sticky top-0 z-10">
                       <tr>
-                        <td colSpan={5} className="p-8 text-center text-slate-400">
-                          O carrinho está vazio. Bipe um produto para começar.
-                        </td>
+                        <th className="p-4 text-xs uppercase tracking-wider text-slate-600 font-bold">Produto</th>
+                        <th className="p-4 text-xs uppercase tracking-wider text-slate-600 font-bold text-center">Qtd</th>
+                        <th className="p-4 text-xs uppercase tracking-wider text-slate-600 font-bold text-right">Unitário</th>
+                        <th className="p-4 text-xs uppercase tracking-wider text-slate-600 font-bold text-right">Subtotal</th>
+                        <th className="p-4 text-xs uppercase tracking-wider text-slate-600 font-bold text-center">Ação</th>
                       </tr>
-                    ) : (
-                      carrinho.map((item) => (
-                        <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50">
-                          <td className="p-4 font-medium text-slate-800">{item.nome}</td>
-                          <td className="p-4 text-center">{item.quantidade}</td>
-                          <td className="p-4 text-right">R$ {Number(item.precoVenda).toFixed(2)}</td>
-                          <td className="p-4 text-right font-bold text-slate-700">
-                            R$ {(item.quantidade * item.precoVenda).toFixed(2)}
-                          </td>
-                          <td className="p-4 text-center">
-                            <button 
-                              onClick={() => removerDoCarrinho(item.id)}
-                              className="text-red-500 hover:text-red-700 font-bold p-2"
-                            >
-                              &times;
-                            </button>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {carrinho.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="p-12 text-center text-slate-400 font-medium">
+                            🛒 O carrinho está vazio. Bipe um produto para começar.
                           </td>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                      ) : (
+                        carrinho.map((item) => (
+                          <tr key={item.id} className="hover:bg-blue-50 transition-colors">
+                            <td className="p-4 font-bold text-slate-800">{item.nome}</td>
+                            <td className="p-4 text-center">
+                              <div className="flex items-center justify-center gap-2">
+                                <button onClick={() => alterarQuantidade(item.id, -1)} className="w-8 h-8 rounded bg-slate-200 hover:bg-slate-300 font-bold text-slate-700">-</button>
+                                <span className="font-bold w-8 text-center">{item.quantidade}</span>
+                                <button onClick={() => alterarQuantidade(item.id, 1)} className="w-8 h-8 rounded bg-slate-200 hover:bg-slate-300 font-bold text-slate-700">+</button>
+                              </div>
+                            </td>
+                            <td className="p-4 text-right text-slate-600">R$ {Number(item.precoVenda).toFixed(2)}</td>
+                            <td className="p-4 text-right font-bold text-emerald-600 text-lg">
+                              R$ {(item.quantidade * item.precoVenda).toFixed(2)}
+                            </td>
+                            <td className="p-4 text-center">
+                              <button onClick={() => removerDoCarrinho(item.id)} className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors">
+                                🗑️
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
 
             {/* Coluna Direita: Resumo e Pagamento */}
-            <div className="bg-slate-800 text-white p-6 rounded-xl shadow-lg flex flex-col">
-              <h2 className="text-xl font-bold mb-6 text-slate-200 border-b border-slate-700 pb-4">Resumo da Venda</h2>
+            <div className="bg-slate-900 text-white p-8 rounded-xl shadow-xl flex flex-col">
+              <h2 className="text-2xl font-bold mb-6 text-slate-100 border-b border-slate-700 pb-4">Resumo da Venda</h2>
               
-              <div className="flex-1 space-y-4">
+              <div className="flex-1 space-y-4 text-lg">
                 <div className="flex justify-between text-slate-300">
-                  <span>Total de Itens:</span>
-                  <span className="font-bold">{carrinho.reduce((acc, item) => acc + item.quantidade, 0)}</span>
+                  <span>Qtd de Itens:</span>
+                  <span className="font-bold text-white">{carrinho.reduce((acc, item) => acc + item.quantidade, 0)}</span>
                 </div>
               </div>
 
               <div className="mt-auto pt-6 border-t border-slate-700">
-                <div className="flex justify-between items-end mb-6">
-                  <span className="text-xl text-slate-300">Total a Pagar</span>
-                  <span className="text-4xl font-bold text-emerald-400">
+                <div className="flex flex-col mb-8">
+                  <span className="text-lg text-slate-400 mb-1">Total a Pagar</span>
+                  <span className="text-5xl font-extrabold text-emerald-400">
                     R$ {total.toFixed(2).replace('.', ',')}
                   </span>
                 </div>
@@ -204,9 +230,9 @@ export function FrenteCaixa() {
                 <button
                   onClick={finalizarVenda}
                   disabled={carrinho.length === 0 || loading}
-                  className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-600 text-white py-4 rounded-xl font-bold text-xl transition-colors shadow-lg"
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-700 disabled:text-slate-500 text-white py-5 rounded-xl font-extrabold text-2xl transition-colors shadow-lg shadow-emerald-500/30 active:scale-95"
                 >
-                  {loading ? 'Processando...' : 'FINALIZAR VENDA'}
+                  {loading ? 'PROCESSANDO...' : 'FINALIZAR VENDA (F4)'}
                 </button>
               </div>
             </div>
@@ -214,33 +240,17 @@ export function FrenteCaixa() {
         </div>
       </Layout>
 
-      {/* 
-          MODAL DO CUPOM 
-      */}
+      {/* MODAL DO CUPOM (Mantido igual, com melhorias de UI) */}
       {cupomVisivel && dadosCupom && (
-        <div 
-          className="print:bg-white print:static print:inset-auto"
-          style={{ 
-            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, 
-            backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 999999, 
-            display: 'flex', alignItems: 'center', justifyContent: 'center' 
-          }}
-        >
+        <div className="print:bg-white print:static print:inset-auto" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 999999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div className="bg-white p-6 rounded-xl shadow-2xl w-full max-w-sm print:w-full print:max-w-none print:p-0 print:shadow-none print:rounded-none">
-            
             <div className="font-mono text-sm text-black mx-auto" style={{ maxWidth: '300px' }}>
               <div className="text-center mb-4">
                 <h2 className="font-bold text-xl uppercase">MINHA LOJA INTELIGENTE</h2>
                 <p className="text-xs">CNPJ: 00.000.000/0001-00</p>
-                <p className="text-xs">Rua do Comércio, 123 - Centro</p>
-                <p className="mt-2 font-bold border-y border-dashed border-black py-1">
-                  CUPOM NÃO FISCAL
-                </p>
-                <p className="text-xs mt-1">
-                  {dadosCupom.data.toLocaleDateString('pt-BR')} às {dadosCupom.data.toLocaleTimeString('pt-BR')}
-                </p>
+                <p className="mt-2 font-bold border-y border-dashed border-black py-1">CUPOM NÃO FISCAL</p>
+                <p className="text-xs mt-1">{dadosCupom.data.toLocaleDateString('pt-BR')} às {dadosCupom.data.toLocaleTimeString('pt-BR')}</p>
               </div>
-
               <table className="w-full text-left text-xs mb-4">
                 <thead className="border-b border-dashed border-black">
                   <tr>
@@ -259,36 +269,21 @@ export function FrenteCaixa() {
                   ))}
                 </tbody>
               </table>
-
               <div className="border-t border-dashed border-black pt-2 mb-6">
                 <div className="flex justify-between font-bold text-base">
                   <span>TOTAL R$</span>
                   <span>{dadosCupom.total.toFixed(2).replace('.', ',')}</span>
                 </div>
               </div>
-
               <div className="text-center text-xs mt-8 mb-4">
                 <p>Obrigado pela preferência!</p>
-                <p>Volte Sempre</p>
                 <p className="mt-4 text-[10px] text-gray-500">Gerado por PDV Inteligente</p>
               </div>
             </div>
-
             <div className="mt-6 flex gap-3 print:hidden border-t border-slate-200 pt-4">
-              <button
-                onClick={fecharCupom}
-                className="flex-1 py-3 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 font-bold transition-colors"
-              >
-                Nova Venda
-              </button>
-              <button
-                onClick={imprimirCupom}
-                className="flex-1 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold transition-colors shadow-md flex items-center justify-center gap-2"
-              >
-                <span>🖨️</span> Imprimir
-              </button>
+              <button onClick={fecharCupom} className="flex-1 py-3 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 font-bold transition-colors">Nova Venda</button>
+              <button onClick={imprimirCupom} className="flex-1 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold transition-colors shadow-md flex items-center justify-center gap-2"><span>🖨️</span> Imprimir</button>
             </div>
-
           </div>
         </div>
       )}
