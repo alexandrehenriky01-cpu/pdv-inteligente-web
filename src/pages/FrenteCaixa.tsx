@@ -33,13 +33,16 @@ export function FrenteCaixa() {
   const [produtosConsulta, setProdutosConsulta] = useState<Produto[]>([]);
   const [buscandoConsulta, setBuscandoConsulta] = useState(false);
 
-  // ✅ ESTADOS DO MODAL DE PAGAMENTO
+  // Estados do Modal de Pagamento
   const [modalPagamentoAberto, setModalPagamentoAberto] = useState(false);
   const [pagamentos, setPagamentos] = useState<Pagamento[]>([]);
   const [tipoPagamentoAtual, setTipoPagamentoAtual] = useState<Pagamento['tipo']>('DINHEIRO');
   const [valorPagamentoAtual, setValorPagamentoAtual] = useState('');
   
-  // Dados Fiscais do Cliente (Opcional)
+  // ✅ NOVIDADE: Estado para escolher o Modelo Fiscal (65 ou 55)
+  const [modeloFiscal, setModeloFiscal] = useState<'65' | '55'>('65');
+  
+  // Dados Fiscais do Cliente
   const [cpfCnpjCliente, setCpfCnpjCliente] = useState('');
   const [nomeCliente, setNomeCliente] = useState('');
 
@@ -52,14 +55,12 @@ export function FrenteCaixa() {
   const faltaPagar = Math.max(0, totalVenda - totalPago);
   const trocoTotal = pagamentos.reduce((acc, p) => acc + p.troco, 0);
 
-  // Foca no input automaticamente
   useEffect(() => {
     if (!modalConsultaAberto && !cupomVisivel && !modalPagamentoAberto) {
       inputRef.current?.focus();
     }
   }, [cupomVisivel, modalConsultaAberto, modalPagamentoAberto]);
 
-  // Monitor de Teclas (F3 Consulta, F4 Pagamento)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'F3') { e.preventDefault(); abrirConsulta(); }
@@ -117,37 +118,31 @@ export function FrenteCaixa() {
     inputRef.current?.focus();
   };
 
-  // ✅ FUNÇÕES DE PAGAMENTO
   const abrirModalPagamento = () => {
     setModalPagamentoAberto(true);
     setPagamentos([]);
     setValorPagamentoAtual(totalVenda.toFixed(2));
+    setModeloFiscal('65'); // Reseta para Cupom por padrão
   };
 
-   const adicionarPagamento = () => {
-    // Substitui vírgula por ponto para garantir o parse correto
+  const adicionarPagamento = () => {
     const valorDigitado = parseFloat(String(valorPagamentoAtual).replace(',', '.'));
     if (isNaN(valorDigitado) || valorDigitado <= 0) return;
 
-    // ✅ CORREÇÃO: Arredonda o valor exato para 2 casas decimais para evitar o bug do JavaScript
     const faltaPagarArredondado = Number(faltaPagar.toFixed(2));
-    
     let troco = 0;
     let valorConsiderado = valorDigitado;
 
-    // Se for dinheiro e pagou a mais, calcula o troco
     if (tipoPagamentoAtual === 'DINHEIRO' && valorDigitado > faltaPagarArredondado) {
       troco = valorDigitado - faltaPagarArredondado;
-      valorConsiderado = faltaPagarArredondado; // Para o banco, o valor pago na venda é apenas o que faltava
+      valorConsiderado = faltaPagarArredondado;
     } else if (valorDigitado > faltaPagarArredondado) {
-      // ✅ Mensagem melhorada para mostrar exatamente quanto falta
       alert(`Cartão e PIX não podem ter valor maior que o restante da venda. Faltam R$ ${faltaPagarArredondado.toFixed(2)}`);
       return;
     }
 
     setPagamentos([...pagamentos, { tipo: tipoPagamentoAtual, valor: valorConsiderado, troco: troco }]);
     
-    // Atualiza o valor restante para o próximo pagamento (se houver)
     const novoFaltaPagar = Number((faltaPagarArredondado - valorConsiderado).toFixed(2));
     setValorPagamentoAtual(novoFaltaPagar > 0 ? novoFaltaPagar.toFixed(2) : '');
   };
@@ -159,8 +154,14 @@ export function FrenteCaixa() {
   };
 
   const confirmarVenda = async () => {
-    if (faltaPagar > 0.01) { // Tolerância de centavos
+    if (faltaPagar > 0.01) {
       alert("Ainda falta receber uma parte do valor!");
+      return;
+    }
+
+    // ✅ TRAVA DE SEGURANÇA: Exige CPF/CNPJ se for NF-e (Modelo 55)
+    if (modeloFiscal === '55' && (!cpfCnpjCliente || cpfCnpjCliente.trim().length < 11)) {
+      alert("Para emitir NF-e (Nota Grande), é OBRIGATÓRIO informar o CPF/CNPJ do cliente!");
       return;
     }
 
@@ -174,7 +175,8 @@ export function FrenteCaixa() {
         itens: itensVenda,
         pagamentos: pagamentos,
         cpfCnpjCliente: cpfCnpjCliente || null,
-        nomeCliente: nomeCliente || null
+        nomeCliente: nomeCliente || null,
+        modeloFiscal: modeloFiscal // ✅ ENVIANDO O MODELO PARA A API
       });
 
       setDadosCupom({ itens: [...carrinho], pagamentos: [...pagamentos], total: totalVenda, data: new Date() });
@@ -199,7 +201,6 @@ export function FrenteCaixa() {
     setCodigoBarras('');
   };
 
-  // Funções de Consulta
   const abrirConsulta = () => { setModalConsultaAberto(true); setTermoConsulta(''); setProdutosConsulta([]); };
   const realizarConsulta = async (termo: string) => {
     setTermoConsulta(termo);
@@ -215,7 +216,6 @@ export function FrenteCaixa() {
     <>
       <Layout>
         <div className="print:hidden h-full flex flex-col">
-          {/* Cabeçalho */}
           <div className="mb-6 flex justify-between items-center">
             <div>
               <h1 className="text-3xl font-extrabold text-slate-800">Frente de Caixa (PDV)</h1>
@@ -232,7 +232,6 @@ export function FrenteCaixa() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
-            {/* Coluna Esquerda: Leitor e Lista */}
             <div className="lg:col-span-2 flex flex-col gap-4">
               <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
                 <input type="text" ref={inputRef} value={codigoBarras} onChange={(e) => setCodigoBarras(e.target.value)} onKeyDown={buscarProduto} disabled={loading} placeholder="Bipe o código de barras e aperte Enter..." className="w-full px-4 py-4 text-2xl font-mono rounded-lg border-2 border-blue-300 focus:border-blue-600 focus:ring-4 focus:ring-blue-600/20 outline-none transition-all" />
@@ -272,7 +271,6 @@ export function FrenteCaixa() {
               </div>
             </div>
 
-            {/* Coluna Direita: Resumo */}
             <div className="bg-slate-900 text-white p-8 rounded-xl shadow-xl flex flex-col">
               <h2 className="text-2xl font-bold mb-6 text-slate-100 border-b border-slate-700 pb-4">Resumo da Venda</h2>
               <div className="flex-1 space-y-4 text-lg">
@@ -294,18 +292,17 @@ export function FrenteCaixa() {
         </div>
       </Layout>
 
-      {/* ✅ MODAL DE PAGAMENTO (NOVO) */}
+      {/* Modal Pagamento */}
       {modalPagamentoAberto && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 print:hidden">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex overflow-hidden">
             
-            {/* Lado Esquerdo do Pagamento (Formulário) */}
-            <div className="w-1/2 p-8 bg-slate-50 border-r border-slate-200">
-              <h2 className="text-2xl font-bold text-slate-800 mb-6">Formas de Pagamento</h2>
+            <div className="w-1/2 p-8 bg-slate-50 border-r border-slate-200 flex flex-col">
+              <h2 className="text-2xl font-bold text-slate-800 mb-6">Pagamento e Emissão</h2>
               
               <div className="space-y-4 mb-6">
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">Selecione o Tipo</label>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Forma de Pagamento</label>
                   <div className="grid grid-cols-2 gap-2">
                     {['DINHEIRO', 'CARTAO_CREDITO', 'CARTAO_DEBITO', 'PIX'].map(tipo => (
                       <button 
@@ -336,15 +333,28 @@ export function FrenteCaixa() {
                 </div>
               </div>
 
-              {/* Informações Fiscais Opcionais */}
-              <div className="pt-6 border-t border-slate-200">
-                <h3 className="text-sm font-bold text-slate-500 uppercase mb-3">Dados para Nota (Opcional)</h3>
-                <input type="text" placeholder="CPF / CNPJ" value={cpfCnpjCliente} onChange={e => setCpfCnpjCliente(e.target.value)} className="w-full p-3 mb-2 border rounded-lg outline-none focus:border-blue-500" />
-                <input type="text" placeholder="Nome do Cliente" value={nomeCliente} onChange={e => setNomeCliente(e.target.value)} className="w-full p-3 border rounded-lg outline-none focus:border-blue-500" />
+              {/* ✅ NOVIDADE: Seleção do Tipo de Nota Fiscal */}
+              <div className="pt-4 border-t border-slate-200 mt-auto">
+                <label className="block text-sm font-bold text-slate-700 mb-3">Tipo de Documento Fiscal</label>
+                <div className="flex gap-3 mb-4">
+                  <label className={`flex-1 flex items-center justify-center gap-2 p-3 rounded-lg border-2 cursor-pointer transition-all ${modeloFiscal === '65' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'}`}>
+                    <input type="radio" name="modeloFiscal" value="65" checked={modeloFiscal === '65'} onChange={() => setModeloFiscal('65')} className="hidden" />
+                    <span className="font-bold">NFC-e (Cupom)</span>
+                  </label>
+                  <label className={`flex-1 flex items-center justify-center gap-2 p-3 rounded-lg border-2 cursor-pointer transition-all ${modeloFiscal === '55' ? 'border-purple-500 bg-purple-50 text-purple-700' : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'}`}>
+                    <input type="radio" name="modeloFiscal" value="55" checked={modeloFiscal === '55'} onChange={() => setModeloFiscal('55')} className="hidden" />
+                    <span className="font-bold">NF-e (Nota Grande)</span>
+                  </label>
+                </div>
+
+                <h3 className="text-sm font-bold text-slate-500 uppercase mb-2">
+                  Dados do Cliente {modeloFiscal === '55' && <span className="text-red-500">* Obrigatório</span>}
+                </h3>
+                <input type="text" placeholder="CPF / CNPJ" value={cpfCnpjCliente} onChange={e => setCpfCnpjCliente(e.target.value)} className={`w-full p-3 mb-2 border-2 rounded-lg outline-none focus:border-blue-500 ${modeloFiscal === '55' && !cpfCnpjCliente ? 'border-red-300 bg-red-50' : 'border-slate-200'}`} />
+                <input type="text" placeholder="Nome do Cliente (Opcional)" value={nomeCliente} onChange={e => setNomeCliente(e.target.value)} className="w-full p-3 border-2 border-slate-200 rounded-lg outline-none focus:border-blue-500" />
               </div>
             </div>
 
-            {/* Lado Direito do Pagamento (Resumo) */}
             <div className="w-1/2 p-8 flex flex-col">
               <div className="flex justify-between items-center mb-6">
                 <span className="text-lg text-slate-500 font-bold">Total da Venda</span>
@@ -407,7 +417,7 @@ export function FrenteCaixa() {
         </div>
       )}
 
-      {/* Modal Consulta F3 (Mantido igual) */}
+      {/* Modal Consulta F3 */}
       {modalConsultaAberto && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4 print:hidden">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
@@ -439,7 +449,7 @@ export function FrenteCaixa() {
         </div>
       )}
 
-      {/* Modal Cupom (Mantido igual) */}
+      {/* Modal Cupom */}
       {cupomVisivel && dadosCupom && (
         <div className="print:bg-white print:static print:inset-auto" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 999999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div className="bg-white p-6 rounded-xl shadow-2xl w-full max-w-sm print:w-full print:max-w-none print:p-0 print:shadow-none print:rounded-none">
