@@ -35,6 +35,10 @@ export function Layout({ children }: LayoutProps) {
             🏷️ Categorias
           </Link>
 
+          <Link to="/cfop" className="block p-3 rounded-lg hover:bg-slate-800 text-slate-300 transition">
+            🏷️ CFOP
+          </Link>
+
           <Link to="/estoque/entrada" className="flex items-center gap-2 p-2 hover:bg-slate-100 rounded">
             📥 Entrada de NF-e
           </Link>

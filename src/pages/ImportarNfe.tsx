@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { api } from '../services/api';
 import { Layout } from '../components/Layout';
 import { useNavigate } from 'react-router-dom';
@@ -9,12 +9,30 @@ export function ImportarNfe() {
   const [salvando, setSalvando] = useState(false);
   const [previewData, setPreviewData] = useState<any>(null);
   
-  // ✅ NOVOS ESTADOS PARA AS CONFIGURAÇÕES DE ENTRADA
-  const [alimentarEstoque, setAlimentarEstoque] = useState(true);
-  const [cfopEntrada, setCfopEntrada] = useState('');
+  // ✅ ESTADOS PARA A NOVA LÓGICA DE CFOP
+  const [cfopsDisponiveis, setCfopsDisponiveis] = useState<any[]>([]);
+  const [selectedCfopId, setSelectedCfopId] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  // Carrega os CFOPs assim que a tela abre
+  useEffect(() => {
+    const carregarCfops = async () => {
+      try {
+        const token = localStorage.getItem('@PDVToken');
+        const response = await api.get('/api/cfop', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        // Filtra apenas operações de ENTRADA
+        const cfopsEntrada = response.data.filter((c: any) => c.tipoOperacao === 'ENTRADA');
+        setCfopsDisponiveis(cfopsEntrada);
+      } catch (error) {
+        console.error("Erro ao carregar CFOPs", error);
+      }
+    };
+    carregarCfops();
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -31,7 +49,6 @@ export function ImportarNfe() {
     setLoading(true);
     try {
       const token = localStorage.getItem('@PDVToken');
-
       const response = await api.post('/api/nfe/importar', formData, {
         headers: { 
           'Content-Type': 'multipart/form-data',
@@ -51,23 +68,25 @@ export function ImportarNfe() {
   const handleLimpar = () => {
     setFile(null);
     setPreviewData(null);
-    setCfopEntrada(''); // Limpa o CFOP
-    setAlimentarEstoque(true); // Reseta o estoque para true
+    setSelectedCfopId(''); // Limpa o CFOP selecionado
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const handleConfirmarEntrada = async () => {
     if (!previewData) return;
+    if (!selectedCfopId) {
+      alert("⚠️ Você precisa selecionar uma Operação Fiscal (CFOP) antes de confirmar a entrada.");
+      return;
+    }
     
     setSalvando(true);
     try {
       const token = localStorage.getItem('@PDVToken'); 
 
-      // ✅ ENVIANDO O PAYLOAD COMPLETO COM AS NOVAS OPÇÕES
+      // ✅ ENVIANDO APENAS O ID DO CFOP. O BACKEND FAZ O RESTO!
       const payload = {
         ...previewData,
-        alimentarEstoque,
-        cfopEntrada
+        cfopId: selectedCfopId
       };
 
       const response = await api.post('/api/nfe/salvar', payload, {
@@ -77,7 +96,6 @@ export function ImportarNfe() {
       });
       
       alert(`✅ ${response.data.message}`);
-      
       handleLimpar(); 
       
     } catch (error: any) {
@@ -88,13 +106,16 @@ export function ImportarNfe() {
     }
   };
 
+  // Encontra o objeto do CFOP selecionado para mostrar as "tags" visuais
+  const cfopSelecionado = cfopsDisponiveis.find(c => c.id === selectedCfopId);
+
   return (
     <Layout>
       <div className="max-w-6xl mx-auto p-6">
         
         <div className="mb-8">
           <h1 className="text-3xl font-extrabold text-slate-800">Entrada de Documento Fiscal</h1>
-          <p className="text-slate-500 mt-1">Importe o XML da Nota Fiscal para dar entrada no estoque automaticamente.</p>
+          <p className="text-slate-500 mt-1">Importe o XML da Nota Fiscal e aplique as regras fiscais automaticamente.</p>
         </div>
 
         {/* ÁREA DE UPLOAD */}
@@ -147,50 +168,53 @@ export function ImportarNfe() {
         {previewData && (
           <div className="space-y-6 animate-fade-in">
             
-            {/* ✅ NOVO CARD: CONFIGURAÇÕES DE ENTRADA */}
+            {/* ✅ NOVO CARD: SELEÇÃO INTELIGENTE DE CFOP */}
             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 border-l-4 border-l-purple-500">
-              <h3 className="text-sm font-bold text-purple-600 uppercase tracking-wider mb-4">⚙️ Configurações de Entrada</h3>
+              <h3 className="text-sm font-bold text-purple-600 uppercase tracking-wider mb-4">⚙️ Parametrização da Entrada</h3>
               
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 {/* Chave de Acesso */}
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-bold text-slate-700 mb-1">Chave de Acesso da NF-e</label>
+                <div className="md:col-span-1">
+                  <label className="block text-sm font-bold text-slate-700 mb-1">Chave de Acesso</label>
                   <input 
                     type="text" 
                     readOnly 
-                    value={previewData.documento.chaveAcesso} 
-                    className="w-full p-3 border border-slate-300 rounded-lg bg-slate-100 text-slate-600 text-sm font-mono outline-none"
+                    value={previewData.documento.chaveAcesso.substring(0, 15) + '...'} 
+                    title={previewData.documento.chaveAcesso}
+                    className="w-full p-3 border border-slate-300 rounded-lg bg-slate-100 text-slate-500 text-sm font-mono outline-none"
                   />
                 </div>
 
-                {/* CFOP de Entrada */}
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1">CFOP de Entrada</label>
-                  <input 
-                    type="text" 
-                    placeholder="Ex: 1102, 1403..."
-                    value={cfopEntrada}
-                    onChange={(e) => setCfopEntrada(e.target.value)}
-                    className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-all"
-                  />
-                  <p className="text-xs text-slate-500 mt-1">Deixe em branco para usar o do XML.</p>
-                </div>
-
-                {/* Alimentar Estoque Toggle */}
-                <div className="md:col-span-3 flex items-center gap-3 bg-slate-50 p-4 rounded-lg border border-slate-200">
-                  <input 
-                    type="checkbox" 
-                    id="alimentarEstoque"
-                    checked={alimentarEstoque}
-                    onChange={(e) => setAlimentarEstoque(e.target.checked)}
-                    className="w-5 h-5 text-purple-600 rounded focus:ring-purple-500 cursor-pointer"
-                  />
-                  <label htmlFor="alimentarEstoque" className="font-bold text-slate-700 cursor-pointer select-none">
-                    Alimentar quantidades no estoque
-                  </label>
-                  <span className="text-sm text-slate-500 ml-2">
-                    (Desmarque se quiser apenas registrar a nota sem somar os produtos físicos)
-                  </span>
+                {/* Seleção do CFOP */}
+                <div className="md:col-span-3">
+                  <label className="block text-sm font-bold text-slate-700 mb-1">Selecione a Operação (CFOP) *</label>
+                  <select 
+                    value={selectedCfopId}
+                    onChange={(e) => setSelectedCfopId(e.target.value)}
+                    className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-all cursor-pointer font-medium text-slate-700"
+                  >
+                    <option value="">-- Clique aqui para escolher como processar esta nota --</option>
+                    {cfopsDisponiveis.map(cfop => (
+                      <option key={cfop.id} value={cfop.id}>
+                        {cfop.codigo} - {cfop.descricao} ({cfop.aplicacao?.replace('_', ' ')})
+                      </option>
+                    ))}
+                  </select>
+                  
+                  {/* Feedback Visual das Regras (Mágica do UX) */}
+                  {cfopSelecionado && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span className={`text-xs px-3 py-1.5 rounded-full font-bold border ${cfopSelecionado.movimentaEstoque ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-400 border-slate-200 line-through'}`}>
+                        📦 {cfopSelecionado.movimentaEstoque ? 'Soma no Estoque' : 'Não soma no Estoque'}
+                      </span>
+                      <span className={`text-xs px-3 py-1.5 rounded-full font-bold border ${cfopSelecionado.geraFinanceiro ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-400 border-slate-200 line-through'}`}>
+                        💰 {cfopSelecionado.geraFinanceiro ? 'Gera Contas a Pagar' : 'Não gera Financeiro'}
+                      </span>
+                      <span className={`text-xs px-3 py-1.5 rounded-full font-bold border ${cfopSelecionado.calculaTributos ? 'bg-red-50 text-red-700 border-red-200' : 'bg-slate-50 text-slate-400 border-slate-200 line-through'}`}>
+                        ⚖️ {cfopSelecionado.calculaTributos ? 'Calcula Tributos' : 'Sem Tributos'}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -202,9 +226,6 @@ export function ImportarNfe() {
                 <p className="font-bold text-lg text-slate-800">{previewData.fornecedor.razaoSocial}</p>
                 <p className="text-slate-600">CNPJ: {previewData.fornecedor.cnpjCpf}</p>
                 <p className="text-slate-600">IE: {previewData.fornecedor.inscricaoEstadual}</p>
-                <p className="text-sm text-slate-500 mt-2">
-                  {previewData.fornecedor.endereco.logradouro}, {previewData.fornecedor.endereco.numero} - {previewData.fornecedor.endereco.cidade}/{previewData.fornecedor.endereco.uf}
-                </p>
               </div>
 
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 border-l-4 border-l-emerald-500">
@@ -278,10 +299,14 @@ export function ImportarNfe() {
               </button>
               <button 
                 onClick={handleConfirmarEntrada}
-                disabled={salvando}
-                className="bg-emerald-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-emerald-700 transition-colors shadow-md text-lg disabled:opacity-50 flex items-center gap-2"
+                disabled={salvando || !selectedCfopId}
+                className={`px-8 py-3 rounded-lg font-bold transition-colors shadow-md text-lg flex items-center gap-2 ${
+                  !selectedCfopId 
+                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed' 
+                    : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                }`}
               >
-                {salvando ? '⏳ Salvando no Banco...' : '💾 Confirmar Entrada no Estoque'}
+                {salvando ? '⏳ Processando Regras...' : '💾 Confirmar Entrada'}
               </button>
             </div>
 
