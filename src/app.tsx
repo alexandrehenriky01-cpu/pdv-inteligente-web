@@ -39,6 +39,9 @@ function App() {
         <Route path="/estoque/entrada" element={<ImportarNfe />} />
         <Route path="/cadastrocfop" element={<CadastroCfop />} />
         
+        {/* 👇 AQUI ESTÁ A ROTA DO MOTOR TRIBUTÁRIO QUE FALTAVA 👇 */}
+        <Route path="/regras-fiscais" element={<RegrasFiscais />} />
+        
         {/* ✅ Rota de Notas Fiscais protegida pelo PrivateRoute */}
         <Route path="/notas-fiscais" element={<PrivateRoute><ListarNfe /></PrivateRoute>} />
 
