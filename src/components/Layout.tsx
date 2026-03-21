@@ -39,6 +39,11 @@ export function Layout({ children }: LayoutProps) {
             ⚙️ Regras CFOP
           </Link>
 
+          <Link to="/regras-fiscais" className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-800">
+            <span>⚖️</span> Motor Tributário
+          </Link>
+
+
           {/* ✅ CORRIGIDO: Agora aponta para a Listagem de Notas e padronizado o CSS */}
           <Link to="/notas-fiscais" className="block p-3 rounded-lg hover:bg-slate-800 text-slate-300 transition">
             📄 Notas Fiscais
