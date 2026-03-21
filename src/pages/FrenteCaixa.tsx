@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { api } from '../services/api'; // ✅ Usando nossa API configurada
+import { api } from '../services/api'; 
 import { Layout } from '../components/Layout';
 
 interface Produto {
@@ -8,6 +8,7 @@ interface Produto {
   precoVenda: number;
   codigoBarras: string;
   ean: string;
+  estoque?: { quantidadeAtual: number }; // Adicionado para ler o estoque do backend
 }
 
 interface ItemCarrinho extends Produto {
@@ -20,25 +21,43 @@ export function FrenteCaixa() {
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   
+  // ✅ ESTADOS PARA O MODAL DE CONSULTA (F3)
+  const [modalConsultaAberto, setModalConsultaAberto] = useState(false);
+  const [termoConsulta, setTermoConsulta] = useState('');
+  const [produtosConsulta, setProdutosConsulta] = useState<Produto[]>([]);
+  const [buscandoConsulta, setBuscandoConsulta] = useState(false);
+
   // Estados para o Cupom
   const [cupomVisivel, setCupomVisivel] = useState(false);
   const [dadosCupom, setDadosCupom] = useState<{itens: ItemCarrinho[], total: number, data: Date} | null>(null);
 
   const total = carrinho.reduce((acc, item) => acc + (item.precoVenda * item.quantidade), 0);
 
-  // Foca no input automaticamente ao abrir a tela ou fechar o cupom
+  // Foca no input automaticamente ao abrir a tela ou fechar modais
   useEffect(() => {
-    inputRef.current?.focus();
-  }, [cupomVisivel]);
+    if (!modalConsultaAberto && !cupomVisivel) {
+      inputRef.current?.focus();
+    }
+  }, [cupomVisivel, modalConsultaAberto]);
+
+  // ✅ MONITOR DE TECLAS DE ATALHO (F3 para Consulta)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F3') {
+        e.preventDefault();
+        abrirConsulta();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const buscarProduto = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && codigoBarras.trim() !== '') {
       try {
         setLoading(true);
-        // ✅ Otimização: Busca no backend SÓ os produtos que batem com o código (usando a rota que já criamos)
         const response = await api.get(`/api/produtos?busca=${encodeURIComponent(codigoBarras)}`);
         
-        // Garante que pegou o produto com o código exato (EAN ou Cód Interno)
         const produtoExato = response.data.find((p: Produto) => 
           p.codigoBarras === codigoBarras || p.ean === codigoBarras
         );
@@ -54,7 +73,7 @@ export function FrenteCaixa() {
         alert('Erro ao comunicar com o servidor.');
       } finally {
         setLoading(false);
-        inputRef.current?.focus(); // Mantém o foco para o próximo bip
+        inputRef.current?.focus();
       }
     }
   };
@@ -67,7 +86,7 @@ export function FrenteCaixa() {
           item.id === produto.id ? { ...item, quantidade: item.quantidade + 1 } : item
         );
       }
-      return [{ ...produto, quantidade: 1 }, ...prev]; // Adiciona no topo da lista
+      return [{ ...produto, quantidade: 1 }, ...prev];
     });
   };
 
@@ -98,7 +117,6 @@ export function FrenteCaixa() {
         precoUnitario: item.precoVenda
       }));
 
-      // ✅ Usando a API configurada (já manda o token sozinho)
       await api.post('/vendas', {
         itens: itensVenda,
         formaPagamento: 'DINHEIRO'
@@ -129,6 +147,40 @@ export function FrenteCaixa() {
     setCodigoBarras('');
   };
 
+  // ✅ FUNÇÕES DA TELA DE CONSULTA
+  const abrirConsulta = () => {
+    setModalConsultaAberto(true);
+    setTermoConsulta('');
+    setProdutosConsulta([]);
+  };
+
+  const fecharConsulta = () => {
+    setModalConsultaAberto(false);
+  };
+
+  const realizarConsulta = async (termo: string) => {
+    setTermoConsulta(termo);
+    if (!termo || termo.length < 2) {
+      setProdutosConsulta([]);
+      return;
+    }
+
+    setBuscandoConsulta(true);
+    try {
+      const response = await api.get(`/api/produtos?busca=${encodeURIComponent(termo)}`);
+      setProdutosConsulta(response.data);
+    } catch (error) {
+      console.error("Erro na consulta", error);
+    } finally {
+      setBuscandoConsulta(false);
+    }
+  };
+
+  const selecionarDaConsulta = (produto: Produto) => {
+    adicionarAoCarrinho(produto);
+    fecharConsulta();
+  };
+
   return (
     <>
       <Layout>
@@ -138,8 +190,19 @@ export function FrenteCaixa() {
               <h1 className="text-3xl font-extrabold text-slate-800">Frente de Caixa (PDV)</h1>
               <p className="text-slate-500">Passe o leitor de código de barras ou digite o código.</p>
             </div>
-            <div className="text-4xl font-bold text-emerald-600 bg-emerald-50 px-6 py-3 rounded-xl border border-emerald-200 shadow-sm">
-              R$ {total.toFixed(2).replace('.', ',')}
+            
+            <div className="flex items-center gap-4">
+              {/* ✅ BOTÃO DE CONSULTA */}
+              <button 
+                onClick={abrirConsulta}
+                className="bg-blue-100 text-blue-700 hover:bg-blue-200 px-4 py-3 rounded-xl font-bold flex items-center gap-2 transition-colors shadow-sm"
+              >
+                <span>🔍</span> Consultar Produto (F3)
+              </button>
+
+              <div className="text-4xl font-bold text-emerald-600 bg-emerald-50 px-6 py-3 rounded-xl border border-emerald-200 shadow-sm">
+                R$ {total.toFixed(2).replace('.', ',')}
+              </div>
             </div>
           </div>
 
@@ -240,7 +303,89 @@ export function FrenteCaixa() {
         </div>
       </Layout>
 
-      {/* MODAL DO CUPOM (Mantido igual, com melhorias de UI) */}
+      {/* ✅ MODAL DE CONSULTA DE PRODUTOS E ESTOQUE */}
+      {modalConsultaAberto && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 print:hidden">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div className="p-6 border-b border-slate-200 flex justify-between items-center bg-slate-50 rounded-t-xl">
+              <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                <span>🔍</span> Consulta de Produtos e Estoque
+              </h2>
+              <button onClick={fecharConsulta} className="text-slate-400 hover:text-red-500 font-bold text-2xl">&times;</button>
+            </div>
+
+            <div className="p-6 flex-1 flex flex-col overflow-hidden gap-4">
+              <div className="relative">
+                <input 
+                  type="text" 
+                  autoFocus
+                  placeholder="Digite o nome ou código de barras..." 
+                  value={termoConsulta}
+                  onChange={(e) => realizarConsulta(e.target.value)}
+                  className="w-full p-4 pl-12 border-2 border-blue-200 rounded-lg focus:border-blue-500 outline-none text-lg"
+                />
+                <span className="absolute left-4 top-4 text-xl">🔍</span>
+                {buscandoConsulta && <span className="absolute right-4 top-4 text-slate-400 animate-pulse">Buscando...</span>}
+              </div>
+
+              <div className="flex-1 overflow-y-auto border rounded-lg">
+                {produtosConsulta.length === 0 ? (
+                  <div className="p-8 text-center text-slate-500">
+                    {termoConsulta.length > 1 ? 'Nenhum produto encontrado.' : 'Digite pelo menos 2 letras para buscar.'}
+                  </div>
+                ) : (
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-100 sticky top-0">
+                      <tr>
+                        <th className="p-3 text-xs font-bold text-slate-600 uppercase">Produto</th>
+                        <th className="p-3 text-xs font-bold text-slate-600 uppercase">Cód. Barras</th>
+                        <th className="p-3 text-xs font-bold text-slate-600 uppercase text-right">Preço</th>
+                        <th className="p-3 text-xs font-bold text-slate-600 uppercase text-center">Estoque</th>
+                        <th className="p-3 text-xs font-bold text-slate-600 uppercase text-center">Ação</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {produtosConsulta.map(p => {
+                        const qtdEstoque = p.estoque?.quantidadeAtual || 0;
+                        const estoqueBaixo = qtdEstoque <= 0;
+                        
+                        return (
+                          <tr key={p.id} className="hover:bg-blue-50 transition-colors">
+                            <td className="p-3 font-bold text-slate-800">{p.nome}</td>
+                            <td className="p-3 text-sm text-slate-500">{p.ean || p.codigoBarras || '-'}</td>
+                            <td className="p-3 text-sm font-bold text-emerald-600 text-right">
+                              R$ {Number(p.precoVenda).toFixed(2)}
+                            </td>
+                            <td className="p-3 text-center">
+                              <span className={`px-2 py-1 rounded text-xs font-bold ${estoqueBaixo ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                {qtdEstoque} un
+                              </span>
+                            </td>
+                            <td className="p-3 text-center">
+                              <button 
+                                onClick={() => selecionarDaConsulta(p)}
+                                className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded font-bold text-xs transition-colors"
+                              >
+                                + Adicionar
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+            
+            <div className="p-4 border-t border-slate-200 bg-slate-50 rounded-b-xl text-center text-sm text-slate-500">
+              Pressione <kbd className="bg-white border border-slate-300 px-2 py-1 rounded font-mono text-xs">ESC</kbd> para fechar
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DO CUPOM */}
       {cupomVisivel && dadosCupom && (
         <div className="print:bg-white print:static print:inset-auto" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 999999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div className="bg-white p-6 rounded-xl shadow-2xl w-full max-w-sm print:w-full print:max-w-none print:p-0 print:shadow-none print:rounded-none">
@@ -277,6 +422,7 @@ export function FrenteCaixa() {
               </div>
               <div className="text-center text-xs mt-8 mb-4">
                 <p>Obrigado pela preferência!</p>
+                <p>Volte Sempre</p>
                 <p className="mt-4 text-[10px] text-gray-500">Gerado por PDV Inteligente</p>
               </div>
             </div>
