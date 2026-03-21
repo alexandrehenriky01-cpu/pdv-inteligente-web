@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { Layout } from '../components/Layout';
+import { useNavigate } from 'react-router-dom';
 
 export function ListarNfe() {
+  const navigate = useNavigate();
   const [notas, setNotas] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   
@@ -62,10 +64,10 @@ export function ListarNfe() {
             <p className="text-slate-500 mt-1">Consulte e audite todas as notas de entrada importadas no sistema.</p>
           </div>
           <button 
-            onClick={() => window.location.href = '/importar-nfe'}
-            className="bg-emerald-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-emerald-700 transition-colors shadow-sm"
+            onClick={() => navigate('/estoque/entrada')}
+            className="bg-emerald-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-emerald-700 transition-colors shadow-sm flex items-center gap-2"
           >
-            + Importar Nova NF-e
+            <span className="text-xl">+</span> Nova Entrada (XML)
           </button>
         </div>
 
