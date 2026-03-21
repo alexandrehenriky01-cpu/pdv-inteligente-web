@@ -124,26 +124,31 @@ export function FrenteCaixa() {
     setValorPagamentoAtual(totalVenda.toFixed(2));
   };
 
-  const adicionarPagamento = () => {
-    const valorDigitado = parseFloat(valorPagamentoAtual.replace(',', '.'));
+   const adicionarPagamento = () => {
+    // Substitui vírgula por ponto para garantir o parse correto
+    const valorDigitado = parseFloat(String(valorPagamentoAtual).replace(',', '.'));
     if (isNaN(valorDigitado) || valorDigitado <= 0) return;
 
+    // ✅ CORREÇÃO: Arredonda o valor exato para 2 casas decimais para evitar o bug do JavaScript
+    const faltaPagarArredondado = Number(faltaPagar.toFixed(2));
+    
     let troco = 0;
     let valorConsiderado = valorDigitado;
 
     // Se for dinheiro e pagou a mais, calcula o troco
-    if (tipoPagamentoAtual === 'DINHEIRO' && valorDigitado > faltaPagar) {
-      troco = valorDigitado - faltaPagar;
-      valorConsiderado = faltaPagar; // Para o banco, o valor pago na venda é apenas o que faltava
-    } else if (valorDigitado > faltaPagar) {
-      alert("Cartão e PIX não podem ter valor maior que o restante da venda.");
+    if (tipoPagamentoAtual === 'DINHEIRO' && valorDigitado > faltaPagarArredondado) {
+      troco = valorDigitado - faltaPagarArredondado;
+      valorConsiderado = faltaPagarArredondado; // Para o banco, o valor pago na venda é apenas o que faltava
+    } else if (valorDigitado > faltaPagarArredondado) {
+      // ✅ Mensagem melhorada para mostrar exatamente quanto falta
+      alert(`Cartão e PIX não podem ter valor maior que o restante da venda. Faltam R$ ${faltaPagarArredondado.toFixed(2)}`);
       return;
     }
 
     setPagamentos([...pagamentos, { tipo: tipoPagamentoAtual, valor: valorConsiderado, troco: troco }]);
     
     // Atualiza o valor restante para o próximo pagamento (se houver)
-    const novoFaltaPagar = faltaPagar - valorConsiderado;
+    const novoFaltaPagar = Number((faltaPagarArredondado - valorConsiderado).toFixed(2));
     setValorPagamentoAtual(novoFaltaPagar > 0 ? novoFaltaPagar.toFixed(2) : '');
   };
 
