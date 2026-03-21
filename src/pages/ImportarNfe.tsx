@@ -13,28 +13,25 @@ export function ImportarNfe() {
   const [selectedCfopId, setSelectedCfopId] = useState('');
 
   // ESTADOS PARA O MODAL DE PESQUISA (F2)
-  const [todosProdutos, setTodosProdutos] = useState<any[]>([]);
   const [produtosPesquisa, setProdutosPesquisa] = useState<any[]>([]);
   const [termoPesquisa, setTermoPesquisa] = useState('');
+  const [buscandoProdutos, setBuscandoProdutos] = useState(false);
   const [modalPesquisa, setModalPesquisa] = useState<{isOpen: boolean, itemIndex: number | null}>({ isOpen: false, itemIndex: null });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
-  // Carrega CFOPs e Produtos
+  // Carrega apenas os CFOPs ao abrir a tela
   useEffect(() => {
     const carregarDadosIniciais = async () => {
       try {
         const token = localStorage.getItem('@PDVToken');
-        const headers = { 'Authorization': `Bearer ${token}` };
-        
-        const resCfop = await api.get('/api/cfop', { headers });
+        const resCfop = await api.get('/api/cfop', { 
+          headers: { 'Authorization': `Bearer ${token}` } 
+        });
         setCfopsDisponiveis(resCfop.data.filter((c: any) => c.tipoOperacao === 'ENTRADA'));
-
-        const resProd = await api.get('/api/produtos', { headers });
-        setTodosProdutos(resProd.data);
       } catch (error) {
-        console.error("Erro ao carregar dados", error);
+        console.error("Erro ao carregar CFOPs", error);
       }
     };
     carregarDadosIniciais();
@@ -44,7 +41,7 @@ export function ImportarNfe() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'F2' && previewData && !modalPesquisa.isOpen) {
-        alert("Clique em uma linha amarela da tabela e pressione F2 (ou clique no botão 🔍) para buscar um produto.");
+        alert("Clique no botão 🔍 'Buscar (F2)' na linha do produto que deseja vincular.");
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -87,7 +84,7 @@ export function ImportarNfe() {
       });
       
       alert(`✅ ${response.data.message}`);
-      navigate('/notas-fiscais'); // ✅ VOLTA PRA TELA DE LISTAGEM
+      navigate('/notas-fiscais');
       
     } catch (error: any) {
       alert("Erro ao salvar: " + (error.response?.data?.error || error.message));
@@ -96,26 +93,36 @@ export function ImportarNfe() {
     }
   };
 
-  // FUNÇÕES DO MODAL
+  // ✅ FUNÇÕES DO MODAL COM BUSCA DIRETO NO BANCO DE DADOS (LIKE)
   const abrirModalPesquisa = (index: number) => {
     setModalPesquisa({ isOpen: true, itemIndex: index });
     const nomeOriginal = previewData.itens[index].descricaoOriginal;
-    // Pega as duas primeiras palavras para pesquisa inicial
+    // Pega as primeiras palavras para sugerir uma busca
     const termoInicial = nomeOriginal.split(' ').slice(0, 2).join(' ');
+    setTermoPesquisa(termoInicial);
     buscarProdutos(termoInicial);
   };
 
-  const buscarProdutos = (termo: string) => {
+  const buscarProdutos = async (termo: string) => {
     setTermoPesquisa(termo);
-    if (!termo) {
-      setProdutosPesquisa(todosProdutos.slice(0, 10));
+    if (!termo || termo.length < 2) {
+      setProdutosPesquisa([]);
       return;
     }
-    const filtrados = todosProdutos.filter(p => 
-      p.nome.toLowerCase().includes(termo.toLowerCase()) || 
-      (p.ean && p.ean.includes(termo))
-    );
-    setProdutosPesquisa(filtrados.slice(0, 10));
+
+    setBuscandoProdutos(true);
+    try {
+      const token = localStorage.getItem('@PDVToken');
+      // Passa o termo de busca na URL para o Backend fazer o LIKE
+      const response = await api.get(`/api/produtos?busca=${encodeURIComponent(termo)}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      setProdutosPesquisa(response.data);
+    } catch (error) {
+      console.error("Erro ao buscar produtos", error);
+    } finally {
+      setBuscandoProdutos(false);
+    }
   };
 
   const selecionarProduto = (produto: any | null) => {
@@ -128,6 +135,7 @@ export function ImportarNfe() {
     setPreviewData({ ...previewData, itens: novosItens });
     setModalPesquisa({ isOpen: false, itemIndex: null });
     setTermoPesquisa('');
+    setProdutosPesquisa([]);
   };
 
   const cfopSelecionado = cfopsDisponiveis.find(c => c.id === selectedCfopId);
@@ -242,7 +250,7 @@ export function ImportarNfe() {
           </div>
         )}
 
-        {/* MODAL DE PESQUISA (F2) */}
+        {/* MODAL DE PESQUISA DIRETO NO BANCO */}
         {modalPesquisa.isOpen && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-6">
@@ -251,17 +259,22 @@ export function ImportarNfe() {
                 <button onClick={() => setModalPesquisa({isOpen: false, itemIndex: null})} className="text-slate-400 hover:text-red-500 font-bold text-xl">X</button>
               </div>
               
-              <input 
-                type="text" 
-                autoFocus
-                placeholder="Digite o nome ou código de barras..." 
-                value={termoPesquisa}
-                onChange={(e) => buscarProdutos(e.target.value)}
-                className="w-full p-4 border-2 border-blue-200 rounded-lg focus:border-blue-500 outline-none text-lg mb-4"
-              />
+              <div className="relative">
+                <input 
+                  type="text" 
+                  autoFocus
+                  placeholder="Digite o nome ou código de barras..." 
+                  value={termoPesquisa}
+                  onChange={(e) => buscarProdutos(e.target.value)}
+                  className="w-full p-4 border-2 border-blue-200 rounded-lg focus:border-blue-500 outline-none text-lg mb-4"
+                />
+                {buscandoProdutos && (
+                  <span className="absolute right-4 top-4 text-slate-400 text-sm animate-pulse">Buscando...</span>
+                )}
+              </div>
 
               <div className="max-h-64 overflow-y-auto border rounded-lg">
-                {produtosPesquisa.length === 0 ? (
+                {produtosPesquisa.length === 0 && termoPesquisa.length > 1 && !buscandoProdutos ? (
                   <div className="p-4 text-center text-slate-500">Nenhum produto encontrado.</div>
                 ) : (
                   <table className="w-full text-left">
@@ -271,7 +284,7 @@ export function ImportarNfe() {
                           <td className="p-3 text-sm font-bold text-slate-700">{p.nome}</td>
                           <td className="p-3 text-xs text-slate-500">{p.ean || 'S/ Código'}</td>
                           <td className="p-3 text-right">
-                            <button className="text-blue-600 font-bold text-xs">Vincular</button>
+                            <button className="text-blue-600 font-bold text-xs bg-blue-100 px-2 py-1 rounded">Vincular</button>
                           </td>
                         </tr>
                       ))}

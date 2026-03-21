@@ -36,29 +36,30 @@ export function Layout({ children }: LayoutProps) {
           </Link>
 
           <Link to="/cadastrocfop" className="block p-3 rounded-lg hover:bg-slate-800 text-slate-300 transition">
-            🏷️ CFOP
+            ⚙️ Regras CFOP
           </Link>
 
-          <Link to="/estoque/entrada" className="flex items-center gap-2 p-2 hover:bg-slate-100 rounded">
-            📥 Entrada de NF-e
+          {/* ✅ CORRIGIDO: Agora aponta para a Listagem de Notas e padronizado o CSS */}
+          <Link to="/notas-fiscais" className="block p-3 rounded-lg hover:bg-slate-800 text-slate-300 transition">
+            📄 Notas Fiscais
           </Link>
 
-           <Link to="/frente-caixa" className="block p-3 rounded-lg hover:bg-slate-800 text-slate-300 transition">
-            🛒 Frente de Caixa (FrenteCaixa)
+          <Link to="/frente-caixa" className="block p-3 rounded-lg hover:bg-slate-800 text-slate-300 transition">
+            🛒 Frente de Caixa
           </Link>
 
           <Link to="/estoque" className="block p-3 rounded-lg hover:bg-slate-800 text-slate-300 transition">
             📋 Gestão de Estoque
           </Link>
 
-          <Link to="/ConsultorIA " className="block p-3 rounded-lg hover:bg-slate-800 text-slate-300 transition">
+          <Link to="/ConsultorIA" className="block p-3 rounded-lg hover:bg-slate-800 text-slate-300 transition">
             🧠 Consultor IA
           </Link>
           
-            <Link to="/pessoas" className="flex items-center gap-2 p-2 hover:bg-slate-100 rounded">
-              👥 Parceiros
-            </Link>
-
+          {/* ✅ CORRIGIDO: CSS padronizado com os outros itens do menu */}
+          <Link to="/pessoas" className="block p-3 rounded-lg hover:bg-slate-800 text-slate-300 transition">
+            👥 Parceiros
+          </Link>
 
         </nav>
 
