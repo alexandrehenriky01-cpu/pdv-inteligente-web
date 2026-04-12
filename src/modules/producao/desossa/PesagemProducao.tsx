@@ -576,7 +576,7 @@ export function PesagemProducao() {
               Esta máquina não está vinculada a nenhuma Estação de Trabalho. Para realizar pesagens e impressões, você precisa configurar este terminal.
             </p>
             <button 
-              onClick={() => window.location.href = '/estacoes-trabalho'} 
+              onClick={() => { window.location.hash = '#/estacoes-trabalho'; }} 
               className="bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold py-3 px-6 rounded-xl transition-colors shadow-lg"
             >
               Configurar Estação de Trabalho

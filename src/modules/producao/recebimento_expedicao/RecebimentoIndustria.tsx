@@ -251,7 +251,7 @@ export function RecebimentoIndustria() {
             <p className="text-slate-400 mb-6">
               Esta máquina não está vinculada a nenhuma Estação de Trabalho. Configure o terminal para receber mercadorias.
             </p>
-            <button onClick={() => window.location.href = '/estacoes-trabalho'} className="bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold py-3 px-6 rounded-xl transition-colors">
+            <button onClick={() => { window.location.hash = '#/estacoes-trabalho'; }} className="bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold py-3 px-6 rounded-xl transition-colors">
               Configurar Estação
             </button>
           </div>

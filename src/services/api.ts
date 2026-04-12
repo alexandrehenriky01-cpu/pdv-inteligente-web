@@ -54,9 +54,9 @@ api.interceptors.response.use(
       clearStoredAuth();
       delete api.defaults.headers.common.Authorization;
 
-      const path = window.location.pathname;
-      if (path !== '/' && path !== '/login') {
-        window.location.href = '/';
+      const hashRoute = window.location.hash.replace(/^#/, '') || '/';
+      if (hashRoute !== '/' && hashRoute !== '/login') {
+        window.location.hash = '#/login';
       }
     }
 
