@@ -11,7 +11,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron:dev": "concurrently -k \"npm run dev\" \"wait-on tcp:5173 && electron .\"",
-    "electron:build": "cross-env NODE_ENV=production npm run build && electron-builder"
+    "electron:build": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false NODE_ENV=production npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
@@ -53,6 +53,8 @@
       "package.json"
     ],
     "win": {
+      "signAndEditExecutable": false,
+      "signDlls": false,
       "target": [
         {
           "target": "nsis",
