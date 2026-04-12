@@ -7,10 +7,12 @@ import {
   AlertTriangle, Inbox, FileText, BrainCircuit, Receipt, FileUp,
   Wallet, TrendingUp, CheckSquare, Landmark, CreditCard, BookOpen,
   ScanSearch, Smartphone, LogOut, Sparkles, ShieldCheck, Building2, UtensilsCrossed,
-  ListOrdered, Network, Factory, Printer, ArrowRightLeft, Map, Layers, Truck
+  ListOrdered, Network, Factory, Printer, ArrowRightLeft, Map, Layers, Truck, Box, Radar, PackageCheck
 } from 'lucide-react'; // ✅ NOVO: Adicionado ícone Truck
 
 import { IUsuario } from '../types/auth';
+import { AUTH_USER_KEY } from '../services/authStorage';
+import { clearAuthSessionAndAxios } from '../services/authSession';
 import { useAuryaTheme } from '../theme/ThemeContext';
 import { ThemeToggle } from '../theme/ThemeToggle';
 
@@ -138,7 +140,7 @@ export function Layout({ children }: LayoutProps) {
 
   let usuario: Partial<IUsuarioLayout> = {};
   try {
-    const userStr = localStorage.getItem('@PDVUsuario');
+    const userStr = localStorage.getItem(AUTH_USER_KEY);
     if (userStr) {
       usuario = JSON.parse(userStr) as IUsuarioLayout;
     }
@@ -147,7 +149,7 @@ export function Layout({ children }: LayoutProps) {
   }
 
   const temPermissao = (modulo: string) => {
-    if (usuario?.role === 'SUPER_ADMIN') return true;
+    if (usuario?.role === 'SUPER_ADMIN' || usuario?.role === 'SUPORTE_MASTER') return true;
 
     const modulosLoja = (usuario?.loja?.modulosAtivos as string[]) || [];
     const permissoesUser = usuario?.permissoes || [];
@@ -164,7 +166,10 @@ export function Layout({ children }: LayoutProps) {
   const role = usuario?.role ? String(usuario.role).toUpperCase() : '';
   
   const isGestor = 
-    role === 'SUPER_ADMIN' || role === 'ADMIN' || role ==='ADMIN_LOJA' ||
+    role === 'SUPER_ADMIN' ||
+    role === 'SUPORTE_MASTER' ||
+    role === 'ADMIN' ||
+    role === 'ADMIN_LOJA' ||
     role === 'GERENTE' || role === 'DIRETOR' || role === 'DONO' ||
     role === 'PROPRIETARIO' || role === 'USER' || role === '' || !usuario?.role;
 
@@ -189,7 +194,7 @@ export function Layout({ children }: LayoutProps) {
     setMenusAbertos(prev => ({
       ...prev,
       centralAurya: prev.centralAurya || path.includes('/aurya'),
-      estruturaNegocio: prev.estruturaNegocio || path.includes('/produtos') || path.includes('/categorias') || path.includes('/pessoas') || path.includes('/equipe') || path.includes('/permissoes') || path.includes('/configuracoes-loja') || path.includes('/layout-etiquetas') || path.includes('/estacoes-trabalho') || path.includes('/balancas'),
+      estruturaNegocio: prev.estruturaNegocio || path.includes('/produtos') || path.includes('/categorias') || path.includes('/embalagens') || path.includes('/pessoas') || path.includes('/equipe') || path.includes('/permissoes') || path.includes('/configuracoes-loja') || path.includes('/layout-etiquetas') || path.includes('/estacoes-trabalho') || path.includes('/balancas'),
       operacaoVendas: prev.operacaoVendas || path.includes('/frente-caixa') || path.includes('/pdv-food'),
       comprasSuprimentos: prev.comprasSuprimentos || path.includes('/compras') || path.includes('/entrada-notas') || path.includes('/ListarNfe'),
       fiscalInteligente: prev.fiscalInteligente || path.includes('/notas') || path.includes('/notas-fiscais') || path.includes('/regras-fiscais') || path.includes('/cadastrocfop'),
@@ -207,12 +212,14 @@ export function Layout({ children }: LayoutProps) {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('@PDVToken');
-    localStorage.removeItem('@PDVUsuario');
+    clearAuthSessionAndAxios();
     navigate('/');
   };
 
-  const showAdministrativo = temPermissao('estrutura') || usuario?.role === 'SUPER_ADMIN';
+  const showAdministrativo =
+    temPermissao('estrutura') ||
+    usuario?.role === 'SUPER_ADMIN' ||
+    usuario?.role === 'SUPORTE_MASTER';
   const showComercial = temPermissao('pdv');
   const showLogistica = temPermissao('compras') || temPermissao('estoque');
   const showProducao = temPermissao('producao');
@@ -286,6 +293,7 @@ export function Layout({ children }: LayoutProps) {
                 <div className={`space-y-1 mt-1 mb-2 ${sidebarCollapsed ? 'p-1' : 'pl-1'} animate-in slide-in-from-top-2 fade-in duration-200`}>
                   <MenuItem to="/produtos" icon={Package} label="Produtos" isActive={location.pathname.includes('/produtos')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
                   <MenuItem to="/categorias" icon={Tags} label="Categorias" isActive={location.pathname.includes('/categorias')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
+                  <MenuItem to="/embalagens" icon={Box} label="Embalagens (BOM)" isActive={location.pathname.includes('/embalagens')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
                   <MenuItem to="/pessoas" icon={Users} label="Pessoas" isActive={location.pathname.includes('/pessoas')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
                   {isGestor && (
                     <>
@@ -302,7 +310,7 @@ export function Layout({ children }: LayoutProps) {
             </>
           )}
 
-          {usuario?.role === 'SUPER_ADMIN' && (
+          {(usuario?.role === 'SUPER_ADMIN' || usuario?.role === 'SUPORTE_MASTER') && (
             <>
               <SectionHeader id="adminSaaS" mode={mode} theme={theme} title="Admin SaaS" icon={ShieldCheck} isOpen={menusAbertos.adminSaaS} collapsed={sidebarCollapsed} onToggle={toggleMenu} />
               {menusAbertos.adminSaaS && (
@@ -344,9 +352,11 @@ export function Layout({ children }: LayoutProps) {
                   
                   {/* ✅ BOTÃO ANTIGO DE PEDIDOS (Ajustado para não conflitar com o de Recebimento) */}
                   <MenuItem to="/compras/pedidos" icon={ShoppingCart} label="Pedidos" isActive={location.pathname === '/compras/pedidos'} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
+                  <MenuItem to="/compras/acompanhamento" icon={Radar} label="Acompanhamento P2P" isActive={location.pathname.includes('/compras/acompanhamento')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
                   
                   {/* ✅ NOVO: BOTÃO DE PEDIDOS DE RECEBIMENTO (INBOUND/DOCA) */}
                   <MenuItem to="/compras/pedidos-recebimento" icon={Truck} label="Pedidos de Recebimento" isActive={location.pathname.includes('/compras/pedidos-recebimento')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
+                  <MenuItem to="/compras/recebimento-mercadorias" icon={PackageCheck} label="Recebimento mercadorias" isActive={location.pathname.includes('/compras/recebimento-mercadorias')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
 
                   <MenuItem to="/compras/divergencias" icon={AlertTriangle} label="Divergências" isActive={location.pathname.includes('/compras/divergencias')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
                   <MenuItem to="/entrada-notas" icon={Inbox} label="XML" isActive={location.pathname.includes('/entrada-notas')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />

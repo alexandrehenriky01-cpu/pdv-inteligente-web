@@ -41,7 +41,7 @@ export const FormContato: React.FC<IFormPessoaProps> = ({
 
             <input
               type="text"
-              value={formData.telefone}
+              value={formData.telefone ?? ''}
               onChange={handleTelefoneChange}
               className="w-full bg-[#0b1324] border border-white/10 rounded-xl px-4 py-3.5 text-white placeholder:text-slate-500 focus:outline-none focus:border-violet-500/40 focus:ring-2 focus:ring-violet-500/20 transition-all shadow-inner"
               placeholder="(00) 00000-0000"
@@ -57,7 +57,7 @@ export const FormContato: React.FC<IFormPessoaProps> = ({
 
             <input
               type="email"
-              value={formData.email}
+              value={formData.email ?? ''}
               onChange={(e) =>
                 setFormData({ ...formData, email: e.target.value })
               }
@@ -75,7 +75,7 @@ export const FormContato: React.FC<IFormPessoaProps> = ({
 
             <input
               type="text"
-              value={formData.contatoPrincipal}
+              value={formData.contatoPrincipal ?? ''}
               onChange={(e) =>
                 setFormData({
                   ...formData,
@@ -95,7 +95,7 @@ export const FormContato: React.FC<IFormPessoaProps> = ({
             </label>
 
             <textarea
-              value={formData.observacoes}
+              value={formData.observacoes ?? ''}
               onChange={(e) =>
                 setFormData({
                   ...formData,

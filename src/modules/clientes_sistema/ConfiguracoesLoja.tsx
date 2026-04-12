@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, Save, Building2, Phone, MapPin, UserSquare2, FileText, CheckCircle2, ShieldCheck, Key, Hash } from 'lucide-react';
+import { Upload, Save, Building2, Phone, MapPin, UserSquare2, FileText, ShieldCheck, Key, Hash, CloudCog, Scale, Trash2, RefreshCw } from 'lucide-react';
 // 🚀 1. IMPORTAMOS O HOOK DE NAVEGAÇÃO
 import { useNavigate } from 'react-router-dom'; 
 import { api } from '../../services/api'; 
@@ -11,8 +11,13 @@ interface CompanySettings {
   inscricaoEstadual: string;
   inscricaoMunicipal: string;
   regimeTributario: string;
+  cnaePrincipal: string;
+  tipoLoja: 'MATRIZ' | 'FILIAL';
+  matrizId: string;
   pessoaFisica: boolean;
   logo: File | null;
+  /** URL absoluta ou data URL persistida no servidor */
+  logoUrl: string;
   email: string;
   telefone: string;
   cep: string;
@@ -26,6 +31,10 @@ interface CompanySettings {
   cpfResponsavel: string;
   
   certificado: File | null;
+  /** Metadados do A1 já salvos (GET não retorna o binário) */
+  possuiCertificado: boolean;
+  certificadoNome: string;
+  certificadoValidade: string;
   senhaCertificado: string;
   cscId: string;
   cscHash: string;
@@ -56,6 +65,18 @@ interface CompanySettings {
   mdfeProducaoSerie: string;
   mdfeProducaoNumero: string;
   mdfeToggle: boolean;
+
+  /** HOMOLOGACAO | PRODUCAO — mensageria fiscal por loja */
+  ambienteFiscal: string;
+  focusTokenHomologacao: string;
+  focusTokenProducao: string;
+}
+
+function formatarDataBr(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
 export const ConfiguracoesLoja: React.FC = () => {
@@ -63,18 +84,55 @@ export const ConfiguracoesLoja: React.FC = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<string>('identificacao');
   
+  const [lojasMatriz, setLojasMatriz] = useState<
+    { id: string; nome: string; nomeFantasia?: string | null; cnpj?: string | null }[]
+  >([]);
+
+  const [removerLogo, setRemoverLogo] = useState(false);
+  const [removerCertificado, setRemoverCertificado] = useState(false);
+  const [logoPreviewLocal, setLogoPreviewLocal] = useState<string | null>(null);
+
   const [settings, setSettings] = useState<CompanySettings>({
     nomeFantasia: '', razaoSocial: '', cnpj: '', inscricaoEstadual: '', inscricaoMunicipal: '',
-    regimeTributario: '', pessoaFisica: false, logo: null, email: '', telefone: '',
+    regimeTributario: '', cnaePrincipal: '', tipoLoja: 'MATRIZ', matrizId: '', pessoaFisica: false, logo: null, logoUrl: '', email: '', telefone: '',
     cep: '', logradouro: '', numero: '', complemento: '', bairro: '', municipio: '', uf: '',
     nomeResponsavel: '', cpfResponsavel: '', 
-    certificado: null, senhaCertificado: '', cscId: '', cscHash: '', rntrc: '',
+    certificado: null,
+    possuiCertificado: false,
+    certificadoNome: '',
+    certificadoValidade: '',
+    senhaCertificado: '', cscId: '', cscHash: '', rntrc: '',
     nfeHomologacaoSerie: '', nfeHomologacaoNumero: '', nfeProducaoSerie: '', nfeProducaoNumero: '', nfeToggle: false,
     nfceHomologacaoSerie: '', nfceHomologacaoNumero: '', nfceProducaoSerie: '', nfceProducaoNumero: '', nfceToggle: false,
     nfseHomologacaoSerie: '', nfseHomologacaoNumero: '', nfseProducaoSerie: '', nfseProducaoNumero: '', nfseToggle: false,
     cteHomologacaoSerie: '', cteHomologacaoNumero: '', cteProducaoSerie: '', cteProducaoNumero: '', cteToggle: false,
     mdfeHomologacaoSerie: '', mdfeHomologacaoNumero: '', mdfeProducaoSerie: '', mdfeProducaoNumero: '', mdfeToggle: false,
+    ambienteFiscal: 'HOMOLOGACAO',
+    focusTokenHomologacao: '',
+    focusTokenProducao: '',
   });
+
+  useEffect(() => {
+    const carregarMatrizes = async () => {
+      try {
+        const r = await api.get('/api/lojas/estabelecimentos-matriz');
+        setLojasMatriz(Array.isArray(r.data) ? r.data : []);
+      } catch {
+        setLojasMatriz([]);
+      }
+    };
+    void carregarMatrizes();
+  }, []);
+
+  useEffect(() => {
+    if (!settings.logo) {
+      setLogoPreviewLocal(null);
+      return;
+    }
+    const u = URL.createObjectURL(settings.logo);
+    setLogoPreviewLocal(u);
+    return () => URL.revokeObjectURL(u);
+  }, [settings.logo]);
 
   useEffect(() => {
     const carregarDadosDaLoja = async () => {
@@ -88,8 +146,8 @@ export const ConfiguracoesLoja: React.FC = () => {
                 razaoSocial: usuario.loja.nome || prev.razaoSocial,
                 nomeFantasia: usuario.loja.nomeFantasia || usuario.loja.nome || prev.nomeFantasia,
                 cnpj: usuario.loja.cnpj || prev.cnpj,
-                email: usuario.loja.email || prev.email,
-                telefone: usuario.loja.telefone || prev.telefone,
+                email: usuario.loja.emailContato ?? usuario.loja.email ?? prev.email,
+                telefone: usuario.loja.telefoneContato ?? usuario.loja.telefone ?? prev.telefone,
              }));
           }
         }
@@ -100,22 +158,68 @@ export const ConfiguracoesLoja: React.FC = () => {
         if (lojaDB) {
           setSettings(prev => ({
             ...prev,
-            razaoSocial: lojaDB.nome || prev.razaoSocial,
-            nomeFantasia: lojaDB.nomeFantasia || lojaDB.nome || prev.nomeFantasia,
-            cnpj: lojaDB.cnpj || prev.cnpj,
-            email: lojaDB.email || prev.email,
-            telefone: lojaDB.telefone || prev.telefone,
-            cep: lojaDB.cep || prev.cep,
-            logradouro: lojaDB.logradouro || prev.logradouro,
-            numero: lojaDB.numero || prev.numero,
-            complemento: lojaDB.complemento || prev.complemento,
-            bairro: lojaDB.bairro || prev.bairro,
-            municipio: lojaDB.cidade || prev.municipio, // Ajustado para pegar 'cidade' do banco
-            uf: lojaDB.uf || prev.uf,
-            nomeResponsavel: lojaDB.nomeResponsavel || prev.nomeResponsavel,
-            cpfResponsavel: lojaDB.cpfResponsavel || prev.cpfResponsavel,
-            regimeTributario: lojaDB.regimeTributario || prev.regimeTributario,
+            razaoSocial: lojaDB.razaoSocial ?? lojaDB.nome ?? prev.razaoSocial,
+            nomeFantasia: lojaDB.nomeFantasia ?? lojaDB.nome ?? prev.nomeFantasia,
+            cnpj: lojaDB.cnpj ?? prev.cnpj,
+            inscricaoEstadual: lojaDB.inscricaoEstadual ?? prev.inscricaoEstadual,
+            inscricaoMunicipal: lojaDB.inscricaoMunicipal ?? prev.inscricaoMunicipal,
+            cnaePrincipal: lojaDB.cnaePrincipal ?? prev.cnaePrincipal,
+            regimeTributario: lojaDB.regimeTributario ?? prev.regimeTributario,
+            tipoLoja: lojaDB.tipoLoja === 'FILIAL' ? 'FILIAL' : 'MATRIZ',
+            matrizId: lojaDB.matrizId ?? prev.matrizId,
+            email: lojaDB.emailContato ?? lojaDB.email ?? prev.email,
+            telefone: lojaDB.telefoneContato ?? lojaDB.telefone ?? prev.telefone,
+            cep: lojaDB.cep ?? prev.cep,
+            logradouro: lojaDB.logradouro ?? prev.logradouro,
+            numero: lojaDB.numero ?? prev.numero,
+            complemento: lojaDB.complemento ?? prev.complemento,
+            bairro: lojaDB.bairro ?? prev.bairro,
+            municipio: lojaDB.cidade ?? prev.municipio,
+            uf: lojaDB.uf ?? prev.uf,
+            nomeResponsavel: lojaDB.nomeResponsavel ?? prev.nomeResponsavel,
+            cpfResponsavel: lojaDB.cpfResponsavel ?? prev.cpfResponsavel,
+            pessoaFisica: Boolean(lojaDB.isPessoaFisica),
+            ambienteFiscal: (lojaDB.ambienteFiscal || lojaDB.ambienteSefaz || 'HOMOLOGACAO').toString().toUpperCase(),
+            focusTokenHomologacao: lojaDB.focusTokenHomologacao ?? prev.focusTokenHomologacao,
+            focusTokenProducao: lojaDB.focusTokenProducao ?? prev.focusTokenProducao,
+            senhaCertificado: lojaDB.senhaCertificado ?? prev.senhaCertificado,
+            cscId: lojaDB.cscId ?? prev.cscId,
+            cscHash: lojaDB.cscSecret ?? prev.cscHash,
+            rntrc: lojaDB.rntrc ?? prev.rntrc,
+            nfeToggle: Boolean(lojaDB.nfeAtivo),
+            nfeHomologacaoSerie: lojaDB.nfeSerieHomologacao != null ? String(lojaDB.nfeSerieHomologacao) : prev.nfeHomologacaoSerie,
+            nfeHomologacaoNumero: lojaDB.nfeNumeroHomologacao != null ? String(lojaDB.nfeNumeroHomologacao) : prev.nfeHomologacaoNumero,
+            nfeProducaoSerie: lojaDB.nfeSerieProducao != null ? String(lojaDB.nfeSerieProducao) : prev.nfeProducaoSerie,
+            nfeProducaoNumero: lojaDB.nfeNumeroProducao != null ? String(lojaDB.nfeNumeroProducao) : prev.nfeProducaoNumero,
+            nfceToggle: Boolean(lojaDB.nfceAtivo),
+            nfceHomologacaoSerie: lojaDB.nfceSerieHomologacao != null ? String(lojaDB.nfceSerieHomologacao) : prev.nfceHomologacaoSerie,
+            nfceHomologacaoNumero: lojaDB.nfceNumeroHomologacao != null ? String(lojaDB.nfceNumeroHomologacao) : prev.nfceHomologacaoNumero,
+            nfceProducaoSerie: lojaDB.nfceSerieProducao != null ? String(lojaDB.nfceSerieProducao) : prev.nfceProducaoSerie,
+            nfceProducaoNumero: lojaDB.nfceNumeroProducao != null ? String(lojaDB.nfceNumeroProducao) : prev.nfceProducaoNumero,
+            nfseToggle: Boolean(lojaDB.nfseAtivo),
+            nfseHomologacaoSerie: lojaDB.nfseSerieHomologacao ?? prev.nfseHomologacaoSerie,
+            nfseHomologacaoNumero: lojaDB.nfseNumeroHomologacao != null ? String(lojaDB.nfseNumeroHomologacao) : prev.nfseHomologacaoNumero,
+            nfseProducaoSerie: lojaDB.nfseSerieProducao ?? prev.nfseProducaoSerie,
+            nfseProducaoNumero: lojaDB.nfseNumeroProducao != null ? String(lojaDB.nfseNumeroProducao) : prev.nfseProducaoNumero,
+            cteToggle: Boolean(lojaDB.cteAtivo),
+            cteHomologacaoSerie: lojaDB.cteSerieHomologacao != null ? String(lojaDB.cteSerieHomologacao) : prev.cteHomologacaoSerie,
+            cteHomologacaoNumero: lojaDB.cteNumeroHomologacao != null ? String(lojaDB.cteNumeroHomologacao) : prev.cteHomologacaoNumero,
+            cteProducaoSerie: lojaDB.cteSerieProducao != null ? String(lojaDB.cteSerieProducao) : prev.cteProducaoSerie,
+            cteProducaoNumero: lojaDB.cteNumeroProducao != null ? String(lojaDB.cteNumeroProducao) : prev.cteProducaoNumero,
+            mdfeToggle: Boolean(lojaDB.mdfeAtivo),
+            mdfeHomologacaoSerie: lojaDB.mdfeSerieHomologacao != null ? String(lojaDB.mdfeSerieHomologacao) : prev.mdfeHomologacaoSerie,
+            mdfeHomologacaoNumero: lojaDB.mdfeNumeroHomologacao != null ? String(lojaDB.mdfeNumeroHomologacao) : prev.mdfeHomologacaoNumero,
+            mdfeProducaoSerie: lojaDB.mdfeSerieProducao != null ? String(lojaDB.mdfeSerieProducao) : prev.mdfeProducaoSerie,
+            mdfeProducaoNumero: lojaDB.mdfeNumeroProducao != null ? String(lojaDB.mdfeNumeroProducao) : prev.mdfeProducaoNumero,
+            logoUrl: lojaDB.logoUrl ?? prev.logoUrl,
+            possuiCertificado: Boolean(lojaDB.possuiCertificado),
+            certificadoNome: lojaDB.certificadoNome ?? prev.certificadoNome,
+            certificadoValidade: lojaDB.certificadoValidade ?? prev.certificadoValidade,
+            logo: null,
+            certificado: null,
           }));
+          setRemoverLogo(false);
+          setRemoverCertificado(false);
         }
       } catch (error) {
         console.error('Erro ao buscar dados completos da loja na API:', error);
@@ -127,12 +231,46 @@ export const ConfiguracoesLoja: React.FC = () => {
 
   const handleSave = async () => {
     try {
-      console.log('Enviando dados para a API...', settings);
+      const { logo, certificado, logoUrl: _omitLogoUrl, ...restSemArquivos } = settings;
+      const payload = {
+        ...restSemArquivos,
+        removerLogo,
+        removerCertificado,
+      };
 
-      const response = await api.put('/api/lojas/minha-loja', settings);
+      const precisaMultipart = logo != null || certificado != null;
+
+      const response = precisaMultipart
+        ? await (() => {
+            const fd = new FormData();
+            fd.append('payload', JSON.stringify(payload));
+            if (logo) fd.append('logo', logo);
+            if (certificado) fd.append('certificado', certificado);
+            return api.put('/api/lojas/minha-loja', fd);
+          })()
+        : await api.put('/api/lojas/minha-loja', payload);
+
+      const loja = response.data.loja as {
+        logoUrl?: string | null;
+        possuiCertificado?: boolean;
+        certificadoNome?: string | null;
+        certificadoValidade?: string | null;
+      };
+
+      setSettings((prev) => ({
+        ...prev,
+        logo: null,
+        certificado: null,
+        logoUrl: loja.logoUrl ?? (removerLogo ? '' : prev.logoUrl),
+        possuiCertificado: Boolean(loja.possuiCertificado),
+        certificadoNome: loja.certificadoNome ?? '',
+        certificadoValidade: loja.certificadoValidade ?? '',
+      }));
+      setRemoverLogo(false);
+      setRemoverCertificado(false);
 
       alert('✅ Configurações salvas com sucesso!');
-      
+
       const userStr = localStorage.getItem('@PDVUsuario');
       if (userStr) {
         const usuario = JSON.parse(userStr);
@@ -141,10 +279,7 @@ export const ConfiguracoesLoja: React.FC = () => {
         window.dispatchEvent(new Event('lojaAtualizada'));
       }
 
-      // 🚀 3. VOLTA PARA O MENU INICIAL APÓS SALVAR
-      // Se a sua rota principal for "/dashboard", troque a linha abaixo para navigate('/dashboard')
-      navigate('/'); 
-
+      navigate('/');
     } catch (error) {
       console.error('Erro ao salvar:', error);
       alert('❌ Erro ao salvar configurações. Tente novamente.');
@@ -153,6 +288,14 @@ export const ConfiguracoesLoja: React.FC = () => {
 
   const updateSetting = (key: keyof CompanySettings, value: string | boolean | File | null) => {
     setSettings(prev => ({ ...prev, [key]: value }));
+  };
+
+  const updateTipoLoja = (v: 'MATRIZ' | 'FILIAL') => {
+    setSettings(prev => ({
+      ...prev,
+      tipoLoja: v,
+      matrizId: v === 'MATRIZ' ? '' : prev.matrizId,
+    }));
   };
 
   const inputClass = "flex h-11 w-full rounded-xl border border-white/10 bg-[#050913]/50 px-4 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500/50 transition-all backdrop-blur-sm";
@@ -183,10 +326,11 @@ export const ConfiguracoesLoja: React.FC = () => {
         <div className="flex space-x-1 bg-black/20 p-1.5 rounded-xl mb-6 overflow-x-auto border border-white/5 custom-scrollbar">
           {[
             { id: 'identificacao', label: 'Identificação', icon: Building2 },
+            { id: 'fiscal', label: 'Dados Fiscais', icon: Scale },
             { id: 'contato', label: 'Contato', icon: Phone },
             { id: 'endereco', label: 'Endereço', icon: MapPin },
             { id: 'responsavel', label: 'Responsável', icon: UserSquare2 },
-            { id: 'documentos', label: 'Documentos Fiscais', icon: FileText }
+            { id: 'documentos', label: 'Documentos Fiscais', icon: FileText },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -228,21 +372,65 @@ export const ConfiguracoesLoja: React.FC = () => {
                   </label>
                 </div>
                 
-                <div className="flex items-center space-x-3">
+                <div className="flex flex-col items-end gap-3 sm:flex-row sm:items-center">
                   <input
                     type="file"
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateSetting('logo', e.target.files?.[0] || null)}
-                    className="hidden"
                     id="logo-upload"
+                    className="hidden"
                     accept="image/*"
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                      setRemoverLogo(false);
+                      updateSetting('logo', e.target.files?.[0] || null);
+                    }}
                   />
-                  <button 
-                    onClick={() => document.getElementById('logo-upload')?.click()}
-                    className="flex items-center text-sm font-semibold bg-white/5 border border-white/10 hover:bg-white/10 text-white px-4 py-2.5 rounded-xl transition-colors"
-                  >
-                    <Upload className="w-4 h-4 mr-2 text-violet-400" /> 
-                    {settings.logo ? settings.logo.name : 'Anexar Logo'}
-                  </button>
+                  {logoPreviewLocal || (settings.logoUrl && !removerLogo) ? (
+                    <div className="flex items-center gap-4">
+                      <div className="relative h-[100px] w-[100px] shrink-0 overflow-hidden rounded-2xl border border-white/15 bg-white/[0.04] shadow-inner">
+                        <img
+                          src={logoPreviewLocal ?? settings.logoUrl}
+                          alt="Logo da empresa"
+                          className="h-full w-full object-contain p-1"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <button
+                          type="button"
+                          onClick={() => document.getElementById('logo-upload')?.click()}
+                          className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10"
+                        >
+                          <RefreshCw className="h-3.5 w-3.5 text-violet-400" />
+                          Trocar logo
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRemoverLogo(true);
+                            updateSetting('logo', null);
+                          }}
+                          className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200 hover:bg-red-500/20"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Remover logo
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-end gap-2">
+                      {removerLogo && (
+                        <span className="text-[11px] font-medium text-amber-400/90">
+                          Logo será removida ao salvar. Escolha um arquivo para desfazer.
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => document.getElementById('logo-upload')?.click()}
+                        className="flex items-center text-sm font-semibold bg-white/5 border border-white/10 hover:bg-white/10 text-white px-4 py-2.5 rounded-xl transition-colors"
+                      >
+                        <Upload className="w-4 h-4 mr-2 text-violet-400" />
+                        Anexar logo
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -261,22 +449,143 @@ export const ConfiguracoesLoja: React.FC = () => {
                     <input type="text" className={inputClass} placeholder={settings.pessoaFisica ? '000.000.000-00' : '00.000.000/0000-00'} value={settings.cnpj} onChange={(e) => updateSetting('cnpj', e.target.value)} />
                   </div>
                   <div>
-                    <label className={labelClass}>Inscrição Estadual</label>
-                    <input type="text" className={inputClass} placeholder="Inscrição Estadual" value={settings.inscricaoEstadual} onChange={(e) => updateSetting('inscricaoEstadual', e.target.value)} />
-                  </div>
-                  <div>
-                    <label className={labelClass}>Inscrição Municipal</label>
-                    <input type="text" className={inputClass} placeholder="Inscrição Municipal" value={settings.inscricaoMunicipal} onChange={(e) => updateSetting('inscricaoMunicipal', e.target.value)} />
-                  </div>
-                  <div>
-                    <label className={labelClass}>Regime Tributário</label>
-                    <select className={`${inputClass} appearance-none`} value={settings.regimeTributario} onChange={(e) => updateSetting('regimeTributario', e.target.value)}>
-                      <option value="" className="bg-[#0b1020]">Selecione...</option>
-                      <option value="SIMPLES_NACIONAL" className="bg-[#0b1020]">Simples Nacional</option>
-                      <option value="LUCRO_PRESUMIDO" className="bg-[#0b1020]">Lucro Presumido</option>
-                      <option value="LUCRO_REAL" className="bg-[#0b1020]">Lucro Real</option>
+                    <label className={labelClass}>Tipo de Estabelecimento</label>
+                    <select
+                      className={`${inputClass} appearance-none`}
+                      value={settings.tipoLoja}
+                      onChange={(e) => updateTipoLoja(e.target.value === 'FILIAL' ? 'FILIAL' : 'MATRIZ')}
+                    >
+                      <option value="MATRIZ" className="bg-[#0b1020]">
+                        Matriz
+                      </option>
+                      <option value="FILIAL" className="bg-[#0b1020]">
+                        Filial
+                      </option>
                     </select>
                   </div>
+                  {settings.tipoLoja === 'FILIAL' && (
+                    <div className="md:col-span-2">
+                      <label className={labelClass}>Loja Matriz</label>
+                      <select
+                        className={`${inputClass} appearance-none`}
+                        value={settings.matrizId}
+                        onChange={(e) => updateSetting('matrizId', e.target.value)}
+                      >
+                        <option value="" className="bg-[#0b1020]">
+                          Selecione a matriz…
+                        </option>
+                        {lojasMatriz.map((m) => (
+                          <option key={m.id} value={m.id} className="bg-[#0b1020]">
+                            {(m.nomeFantasia || m.nome).trim()}
+                            {m.cnpj ? ` — ${m.cnpj}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      {lojasMatriz.length === 0 && (
+                        <p className="mt-2 text-xs text-amber-400/90">
+                          Não há outras lojas matriz no mesmo cliente. Cadastre vínculos de tenant ou defina esta loja
+                          como matriz.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ABA: DADOS FISCAIS */}
+          {activeTab === 'fiscal' && (
+            <div className={`animate-in fade-in duration-300 ${cardClass}`}>
+              <div className="mb-5 border-b border-white/5 pb-4">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-300">Checklist fiscal</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  Dados usados na emissão e conformidade de documentos fiscais eletrônicos.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                <div>
+                  <label className={labelClass}>Regime Tributário</label>
+                  <select
+                    className={`${inputClass} appearance-none`}
+                    value={settings.regimeTributario}
+                    onChange={(e) => updateSetting('regimeTributario', e.target.value)}
+                  >
+                    <option value="" className="bg-[#0b1020]">
+                      Selecione…
+                    </option>
+                    <option value="SIMPLES_NACIONAL" className="bg-[#0b1020]">
+                      Simples Nacional
+                    </option>
+                    <option value="LUCRO_PRESUMIDO" className="bg-[#0b1020]">
+                      Lucro Presumido
+                    </option>
+                    <option value="LUCRO_REAL" className="bg-[#0b1020]">
+                      Lucro Real
+                    </option>
+                  </select>
+                </div>
+                <div>
+                  <label className={labelClass}>CNAE Principal</label>
+                  <input
+                    type="text"
+                    className={`${inputClass} font-mono text-xs`}
+                    placeholder="0000000"
+                    value={settings.cnaePrincipal}
+                    onChange={(e) => updateSetting('cnaePrincipal', e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Inscrição Estadual</label>
+                  <input
+                    type="text"
+                    className={inputClass}
+                    placeholder="IE ou &quot;ISENTO&quot; quando aplicável"
+                    value={settings.inscricaoEstadual}
+                    onChange={(e) => updateSetting('inscricaoEstadual', e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Inscrição Municipal</label>
+                  <input
+                    type="text"
+                    className={inputClass}
+                    placeholder="Inscrição municipal (IM)"
+                    value={settings.inscricaoMunicipal}
+                    onChange={(e) => updateSetting('inscricaoMunicipal', e.target.value)}
+                  />
+                </div>
+                <div className="md:col-span-2 mt-1 rounded-xl border border-white/10 bg-[#050913]/35 px-4 py-3">
+                  <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    Certificado digital (resumo)
+                  </p>
+                  {removerCertificado ? (
+                    <span className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-200">
+                      Certificado será removido ao salvar
+                    </span>
+                  ) : settings.possuiCertificado || settings.certificadoNome ? (
+                    <div className="space-y-1">
+                      <span className="inline-flex items-center rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-200">
+                        ✅ Certificado Digital Instalado
+                      </span>
+                      {formatarDataBr(settings.certificadoValidade) ? (
+                        <p className="text-xs text-emerald-300/90">
+                          Vence em: {formatarDataBr(settings.certificadoValidade)}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <span className="inline-flex items-center rounded-full border border-slate-600/50 bg-slate-800/50 px-3 py-1 text-xs font-semibold text-slate-400">
+                      ❌ Nenhum certificado configurado
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('documentos')}
+                    className="mt-3 text-left text-xs font-semibold text-violet-400 hover:text-violet-300"
+                  >
+                    Gerenciar certificado e upload → aba Documentos fiscais
+                  </button>
                 </div>
               </div>
             </div>
@@ -365,23 +674,76 @@ export const ConfiguracoesLoja: React.FC = () => {
                   {/* Bloco Certificado A1 */}
                   <div className="space-y-4 bg-white/[0.01] p-4 rounded-xl border border-white/5">
                     <h4 className="font-bold text-sm text-slate-300 mb-3">Certificado A1 (.pfx ou .p12)</h4>
+                    <div className="mb-4 rounded-xl border border-white/10 bg-[#050913]/40 px-4 py-3">
+                      <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                        Status do certificado
+                      </p>
+                      {removerCertificado ? (
+                        <span className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-200">
+                          Certificado será removido ao salvar
+                        </span>
+                      ) : settings.possuiCertificado || settings.certificadoNome ? (
+                        <div className="space-y-1.5">
+                          <span className="inline-flex items-center rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-200">
+                            ✅ Certificado Digital Instalado
+                          </span>
+                          {settings.certificadoNome ? (
+                            <p className="text-xs text-slate-400">{settings.certificadoNome}</p>
+                          ) : null}
+                          {formatarDataBr(settings.certificadoValidade) ? (
+                            <p className="text-xs font-medium text-emerald-300/90">
+                              Vence em: {formatarDataBr(settings.certificadoValidade)}
+                            </p>
+                          ) : (
+                            <p className="text-[11px] text-slate-500">
+                              Informe a senha ao enviar o arquivo para gravarmos a data de validade.
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full border border-red-500/35 bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-200/95">
+                          ❌ Nenhum certificado configurado
+                        </span>
+                      )}
+                    </div>
                     <div>
                       <label className={labelClass}>Arquivo do Certificado</label>
-                      <div className="flex items-center space-x-3">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:space-x-3">
                         <input
                           type="file"
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateSetting('certificado', e.target.files?.[0] || null)}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                            setRemoverCertificado(false);
+                            updateSetting('certificado', e.target.files?.[0] || null);
+                          }}
                           className="hidden"
                           id="certificado-upload"
                           accept=".pfx,.p12"
                         />
-                        <button 
+                        <button
+                          type="button"
                           onClick={() => document.getElementById('certificado-upload')?.click()}
-                          className="flex w-full items-center justify-center text-sm font-semibold bg-white/5 border border-white/10 hover:bg-white/10 text-white px-4 py-2.5 rounded-xl transition-colors"
+                          className="flex w-full items-center justify-center text-sm font-semibold bg-white/5 border border-white/10 hover:bg-white/10 text-white px-4 py-2.5 rounded-xl transition-colors sm:flex-1"
                         >
-                          <Upload className="w-4 h-4 mr-2 text-violet-400" /> 
-                          {settings.certificado ? settings.certificado.name : 'Selecionar Arquivo'}
+                          <Upload className="w-4 h-4 mr-2 text-violet-400" />
+                          {settings.certificado
+                            ? settings.certificado.name
+                            : settings.possuiCertificado || settings.certificadoNome
+                              ? 'Substituir certificado'
+                              : 'Fazer upload do certificado'}
                         </button>
+                        {(settings.possuiCertificado || settings.certificadoNome) && !settings.certificado ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRemoverCertificado(true);
+                              updateSetting('certificado', null);
+                            }}
+                            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-xs font-semibold text-red-200 hover:bg-red-500/20 sm:w-auto"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Remover certificado
+                          </button>
+                        ) : null}
                       </div>
                     </div>
                     <div>
@@ -430,12 +792,69 @@ export const ConfiguracoesLoja: React.FC = () => {
                     </div>
                   </div>
                 </div>
-              </div>
+                  </div>
 
-              {/* SEÇÃO RNTRC */}
-              <div className={cardClass}>
-                <div className="w-full md:w-1/3">
-                  <label className={labelClass}>RNTRC (Para Transporte/CTe)</label>
+                  <div className={cardClass}>
+                    <div className="mb-4 flex items-center gap-3 border-b border-white/5 pb-4">
+                      <CloudCog className="h-6 w-6 text-cyan-400" />
+                      <div>
+                        <h3 className="text-lg font-bold text-white">MENSAGERIA FISCAL</h3>
+                        <p className="text-xs font-medium text-slate-500">
+                          Ambiente por loja; credenciais opcionais (própria) ou integração padrão no servidor.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                      <div className="md:col-span-2">
+                        <label className={labelClass}>Ambiente da mensageria fiscal</label>
+                        <select
+                          className={inputClass}
+                          value={settings.ambienteFiscal === 'PRODUCAO' ? 'PRODUCAO' : 'HOMOLOGACAO'}
+                          onChange={(e) => updateSetting('ambienteFiscal', e.target.value)}
+                        >
+                          <option value="HOMOLOGACAO">HOMOLOGAÇÃO</option>
+                          <option value="PRODUCAO">PRODUÇÃO</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className={labelClass}>Credencial (homologação)</label>
+                        <input
+                          type="password"
+                          autoComplete="off"
+                          className={`${inputClass} font-mono text-xs`}
+                          placeholder="Opcional — deixe em branco para integração padrão"
+                          value={settings.focusTokenHomologacao}
+                          onChange={(e) => updateSetting('focusTokenHomologacao', e.target.value)}
+                        />
+                        <p className="mt-1.5 text-xs text-slate-500">
+                          Deixe em branco para utilizar a integração padrão do Aurya ERP.
+                        </p>
+                      </div>
+                      <div>
+                        <label className={labelClass}>Credencial (produção)</label>
+                        <input
+                          type="password"
+                          autoComplete="off"
+                          className={`${inputClass} font-mono text-xs`}
+                          placeholder="Opcional — deixe em branco para integração padrão"
+                          value={settings.focusTokenProducao}
+                          onChange={(e) => updateSetting('focusTokenProducao', e.target.value)}
+                        />
+                        <p className="mt-1.5 text-xs text-slate-500">
+                          Deixe em branco para utilizar a integração padrão do Aurya ERP.
+                        </p>
+                      </div>
+                    </div>
+                    <p className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-amber-400/90">
+                      Credenciais por ambiente na loja; se vazias, o servidor aplica a integração padrão (emissão e
+                      consulta de documentos fiscais).
+                    </p>
+                  </div>
+
+                  {/* SEÇÃO RNTRC */}
+                  <div className={cardClass}>
+                    <div className="w-full md:w-1/3">
+                      <label className={labelClass}>RNTRC (Para Transporte/CTe)</label>
                   <input type="text" className={inputClass} placeholder="Registro Nacional" value={settings.rntrc} onChange={(e) => updateSetting('rntrc', e.target.value)} />
                 </div>
               </div>

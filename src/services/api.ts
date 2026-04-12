@@ -1,51 +1,65 @@
 /// <reference types="vite/client" />
 import axios, { InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
+import { AUTH_TOKEN_KEY, clearStoredAuth } from './authStorage';
+
+function resolveApiBaseUrl(): string {
+  const fallback = 'https://pdv-inteligente-api.onrender.com';
+  const raw = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+  let base = raw && raw.length > 0 ? raw : fallback;
+  base = base.replace(/\/+$/, '');
+  /* Evita /api/api/... quando VITE_API_URL já inclui o sufixo /api */
+  if (base.endsWith('/api')) {
+    base = base.slice(0, -4);
+  }
+  return base;
+}
 
 export const api = axios.create({
-  // 🚀 Com a referência na linha 1, o TypeScript agora reconhece o import.meta.env nativamente!
-  baseURL: import.meta.env.VITE_API_URL || 'https://pdv-inteligente-api.onrender.com/api', 
+  baseURL: resolveApiBaseUrl(),
 });
 
-// 🚀 INTERCEPTOR DE REQUISIÇÃO (Request)
-// Injeta o Token salvo no LocalStorage em TODAS as chamadas automaticamente
+function isLoginPostRequest(config: InternalAxiosRequestConfig | undefined): boolean {
+  if (!config) return false;
+  const method = (config.method || 'get').toLowerCase();
+  if (method !== 'post') return false;
+  const url = String(config.url || '');
+  return url === '/api/login' || url.endsWith('/api/login');
+}
+
+// Injeta o Token salvo no LocalStorage em todas as chamadas
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    const token = localStorage.getItem('@PDVToken'); 
-    
+    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-    
+
     return config;
   },
-  (error: AxiosError) => {
-    return Promise.reject(error);
-  }
+  (error: AxiosError) => Promise.reject(error)
 );
 
-// 🛡️ INTERCEPTOR DE RESPOSTA (Response) - UPGRADE ENTERPRISE
-// Proteção global contra Tokens expirados ou inválidos (Logout Automático)
 api.interceptors.response.use(
-  (response: AxiosResponse) => {
-    // Se a requisição deu certo, apenas repassa a resposta para o componente
-    return response; 
-  },
+  (response: AxiosResponse) => response,
   (error: AxiosError) => {
-    // Se o backend responder com 401 (Unauthorized), significa que o Token morreu
-    if (error.response && error.response.status === 401) {
-      console.warn('⚠️ Sessão expirada ou Token inválido. Executando logout de segurança...');
-      
-      // 1. Limpa os vestígios da sessão morta
-      localStorage.removeItem('@PDVToken');
-      localStorage.removeItem('@PDVUsuario');
-      
-      // 2. Redireciona para a tela de Login
-      if (window.location.pathname !== '/') {
+    if (error.response?.status === 401) {
+      // Credenciais inválidas no POST /api/login — não limpar sessão anterior nem forçar redirect
+      if (isLoginPostRequest(error.config)) {
+        return Promise.reject(error);
+      }
+
+      console.warn('⚠️ Sessão expirada ou token inválido. Executando logout de segurança...');
+
+      clearStoredAuth();
+      delete api.defaults.headers.common.Authorization;
+
+      const path = window.location.pathname;
+      if (path !== '/' && path !== '/login') {
         window.location.href = '/';
       }
     }
-    
-    // Repassa o erro para o bloco catch() do componente que fez a chamada
+
     return Promise.reject(error);
   }
 );

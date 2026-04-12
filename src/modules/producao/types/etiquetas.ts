@@ -6,12 +6,15 @@ export type EtiquetaElementType =
   | 'barcode'
   | 'qrcode'
   | 'line'
-  | 'rectangle';
+  | 'rectangle'
+  | 'image';
 
-export type BarcodeType = 'CODE128' | 'EAN13' | 'EAN14' | 'CODE39';
+/** Simbologia linear (ZPL). QR Code usa elemento `type: 'qrcode'`. */
+export type BarcodeType = 'CODE128' | 'EAN13' | 'EAN8' | 'EAN14' | 'ITF14' | 'CODE39';
 export type ValueMode = 'fixed' | 'dynamic';
 export type TextAlign = 'left' | 'center' | 'right';
 export type FontWeightType = 'normal' | 'bold';
+export type FontStyleType = 'normal' | 'italic';
 export type CanvasUnit = 'px' | 'mm'; // EVOLUÇÃO: Suporte a mm
 export type RotationType = 0 | 90 | 180 | 270;
 
@@ -23,6 +26,8 @@ export interface LayoutElementoBase {
   width: number;
   height: number;
   rotation?: RotationType;
+  /** Fundo preto / primeiro plano claro (texto e áreas de destaque). */
+  inverted?: boolean;
   visible?: boolean; // EVOLUÇÃO: Opcional
   locked?: boolean;
   zIndex?: number;   // EVOLUÇÃO: Opcional
@@ -36,26 +41,32 @@ export type LayoutTextElement = LayoutElementoBase & {
   fontSize: number;
   fontFamily?: string;
   fontWeight?: FontWeightType;
+  fontStyle?: FontStyleType;
   textAlign?: TextAlign;
 } & (
-  | { type: 'text'; text: string; placeholder?: never }
-  | { type: 'dynamic_text'; text?: never; placeholder: string }
+  | { type: 'text'; text: string; placeholder?: never; variavel?: never }
+  | { type: 'dynamic_text'; text?: never; placeholder: string; variavel?: string }
 );
 
 export type LayoutBarcodeElement = LayoutElementoBase & {
   type: 'barcode';
   barcodeType: BarcodeType;
+  /** @deprecated Preferir showText; mantido para layouts antigos e ZPL. */
   showHumanReadable?: boolean;
+  /** Exibir texto legível sob o código (padrão implícito: true). */
+  showText?: boolean;
 } & (
-  | { valueMode: 'fixed'; text: string; placeholder?: never }
-  | { valueMode: 'dynamic'; text?: never; placeholder: string }
+  | { valueMode: 'fixed'; text: string; placeholder?: never; variavel?: never }
+  | { valueMode: 'dynamic'; text?: never; placeholder: string; variavel?: string }
 );
 
 export type LayoutQrCodeElement = LayoutElementoBase & {
   type: 'qrcode';
+  /** Exibir legenda legível sob o QR no canvas (padrão implícito: true). */
+  showText?: boolean;
 } & (
-  | { valueMode: 'fixed'; text: string; placeholder?: never }
-  | { valueMode: 'dynamic'; text?: never; placeholder: string }
+  | { valueMode: 'fixed'; text: string; placeholder?: never; variavel?: never }
+  | { valueMode: 'dynamic'; text?: never; placeholder: string; variavel?: string }
 );
 
 // ============================================================================
@@ -70,12 +81,22 @@ export interface LayoutRectangleElement extends LayoutElementoBase {
   borderThickness: number;
 }
 
+export interface LayoutImageElement extends LayoutElementoBase {
+  type: 'image';
+  /** Data URL (base64) ou URL https — selo SIM / logomarca. */
+  src: string;
+  objectFit?: 'contain' | 'cover' | 'fill';
+  /** Raio em px (ex.: 9999 para círculo aproximado no quadrado). */
+  borderRadius?: number;
+}
+
 export type LayoutElemento =
   | LayoutTextElement
   | LayoutBarcodeElement
   | LayoutQrCodeElement
   | LayoutLineElement
-  | LayoutRectangleElement;
+  | LayoutRectangleElement
+  | LayoutImageElement;
 
 export interface LayoutEtiquetaJson {
   version: string;
@@ -151,6 +172,7 @@ export const createDefaultElement = (
         fontSize: 24,
         fontFamily: 'Arial',
         fontWeight: 'normal',
+        fontStyle: 'normal',
         textAlign: 'left',
       };
 
@@ -162,6 +184,7 @@ export const createDefaultElement = (
         fontSize: 24,
         fontFamily: 'Arial',
         fontWeight: 'normal',
+        fontStyle: 'normal',
         textAlign: 'left',
       };
 
@@ -172,6 +195,7 @@ export const createDefaultElement = (
         barcodeType: 'CODE128',
         valueMode: 'dynamic',
         placeholder: '{{codigoBarras}}', // Removido o text: '' inválido
+        showText: true,
         showHumanReadable: true,
         width: 220,
         height: 80,
@@ -183,6 +207,7 @@ export const createDefaultElement = (
         type: 'qrcode',
         valueMode: 'dynamic',
         placeholder: '{{codigoBarras}}', // Removido o text: '' inválido
+        showText: true,
         width: 100,
         height: 100,
       };
@@ -205,6 +230,17 @@ export const createDefaultElement = (
         borderThickness: 2,
       };
 
+    case 'image':
+      return {
+        ...base,
+        type: 'image',
+        width: 120,
+        height: 120,
+        src: '',
+        objectFit: 'contain',
+        borderRadius: 0,
+      };
+
     default:
       return {
         ...base,
@@ -213,6 +249,7 @@ export const createDefaultElement = (
         fontSize: 24,
         fontFamily: 'Arial',
         fontWeight: 'normal',
+        fontStyle: 'normal',
         textAlign: 'left',
       };
   }
@@ -231,6 +268,21 @@ export const isBarcodeElement = (
   return element.type === 'barcode';
 };
 
+/**
+ * Texto legível sob o código de barras (canvas + ZPL).
+ * `showText` tem precedência; layouts antigos usam só `showHumanReadable`.
+ */
+export function barcodeExibirNumeracao(el: LayoutBarcodeElement): boolean {
+  if (el.showText === false) return false;
+  if (el.showText === true) return true;
+  return el.showHumanReadable !== false;
+}
+
+/** Texto legível sob o QR no canvas (alinhado ao comportamento do código de barras). */
+export function qrcodeExibirLegenda(el: LayoutQrCodeElement): boolean {
+  return el.showText !== false;
+}
+
 export const isQrCodeElement = (
   element: LayoutElemento,
 ): element is LayoutQrCodeElement => {
@@ -247,4 +299,10 @@ export const isRectangleElement = (
   element: LayoutElemento,
 ): element is LayoutRectangleElement => {
   return element.type === 'rectangle';
+};
+
+export const isImageElement = (
+  element: LayoutElemento,
+): element is LayoutImageElement => {
+  return element.type === 'image';
 };

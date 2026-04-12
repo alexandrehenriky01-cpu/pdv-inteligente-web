@@ -14,29 +14,33 @@ export interface EstacaoTrabalho {
   descricao?: string | null;
   balancaId?: string | null;
   layoutEtiquetaId?: string | null;
-  
-  // Hardware/Rede
+  layoutPesagemId?: string | null;
+  layoutInternaId?: string | null;
+  layoutRecebimentoId?: string | null;
+  layoutExpedicaoId?: string | null;
+
   macAddress?: string | null;
   ip?: string | null;
+  nomeMaquina?: string | null;
   hostname?: string | null;
   sistemaOperacional?: string | null;
-  
-  // Monitoramento
+
   lastSeenAt?: string | null;
   status: string;
-  
-  // Impressão
+
   usarImpressoraPadrao: boolean;
   nomeImpressora?: string | null;
-  
+
   modoOperacao: ModoOperacaoEstacao;
   ativo: boolean;
   observacao?: string | null;
-  
+
   createdAt: string;
   updatedAt: string;
 
-  // Relacionamentos (Opcionais na listagem)
   balanca?: { id: string; nome: string } | null;
-  layoutEtiqueta?: { id: string; nome: string } | null;
+  layoutPesagem?: { id: string; nome: string } | null;
+  layoutInterna?: { id: string; nome: string } | null;
+  layoutRecebimento?: { id: string; nome: string } | null;
+  layoutExpedicao?: { id: string; nome: string } | null;
 }

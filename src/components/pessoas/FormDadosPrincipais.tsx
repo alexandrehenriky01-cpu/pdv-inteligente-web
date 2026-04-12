@@ -79,7 +79,7 @@ export const FormDadosPrincipais: React.FC<IProps> = ({
 
               <input
                 type="text"
-                value={formData.cpfCnpj}
+                value={formData.cpfCnpj ?? ''}
                 onChange={e =>
                   setFormData({
                     ...formData,
@@ -96,7 +96,7 @@ export const FormDadosPrincipais: React.FC<IProps> = ({
                 onClick={preencherComAurya}
                 disabled={
                   iaLoading ||
-                  formData.cpfCnpj.replace(/\D/g, '').length < 14
+                  (formData.cpfCnpj ?? '').replace(/\D/g, '').length < 14
                 }
                 className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white px-5 py-3 rounded-xl font-black flex items-center gap-2 transition-all shadow-[0_0_25px_rgba(139,92,246,0.35)] hover:scale-[1.02] hover:shadow-[0_0_35px_rgba(139,92,246,0.6)] disabled:opacity-50"
               >
@@ -116,7 +116,7 @@ export const FormDadosPrincipais: React.FC<IProps> = ({
           <label className={labelClass}>CPF *</label>
           <input
             type="text"
-            value={formData.cpfCnpj}
+            value={formData.cpfCnpj ?? ''}
             onChange={e =>
               setFormData({
                 ...formData,
@@ -209,12 +209,18 @@ export const FormDadosPrincipais: React.FC<IProps> = ({
           <label className={labelClass}>Papel Comercial</label>
           <select
             value={formData.tipo}
-            onChange={e =>
+            onChange={e => {
+              const novoTipo = e.target.value as TipoPessoa;
+              const papelComCliente =
+                novoTipo === 'CLIENTE' ||
+                novoTipo === 'AMBOS' ||
+                novoTipo === 'FUNCIONARIO';
               setFormData({
                 ...formData,
-                tipo: e.target.value as TipoPessoa
-              })
-            }
+                tipo: novoTipo,
+                ...(!papelComCliente ? { consumidorFinal: false } : {}),
+              });
+            }}
             className={inputClass}
           >
             <option value="CLIENTE">Cliente</option>
@@ -224,11 +230,41 @@ export const FormDadosPrincipais: React.FC<IProps> = ({
           </select>
         </div>
 
+        {(formData.tipo === 'CLIENTE' ||
+          formData.tipo === 'AMBOS' ||
+          formData.tipo === 'FUNCIONARIO') && (
+          <div className="md:col-span-2">
+            <label
+              className={`${labelClass} flex items-center gap-3 cursor-pointer select-none rounded-xl border border-white/10 bg-[#0b1324] px-4 py-3.5 hover:border-violet-500/30 transition-colors`}
+            >
+              <input
+                type="checkbox"
+                checked={formData.consumidorFinal === true}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setFormData({
+                    ...formData,
+                    consumidorFinal: checked,
+                    ...(checked ? { contaClienteId: '' } : {}),
+                  });
+                }}
+                className="h-4 w-4 rounded border-white/20 bg-[#0b1324] text-violet-600 focus:ring-violet-500/40"
+              />
+              <span className="text-sm font-bold text-slate-200 normal-case tracking-normal">
+                É consumidor final?
+                <span className="block text-xs font-medium text-slate-500 mt-1">
+                  Vendas B2C: usa a conta analítica genérica CONSUMIDOR FINAL em vez de criar conta com o nome desta pessoa.
+                </span>
+              </span>
+            </label>
+          </div>
+        )}
+
         <div className="md:col-span-2">
           <label className={labelClass}>Razão Social *</label>
           <input
             type="text"
-            value={formData.razaoSocial}
+            value={formData.razaoSocial ?? ''}
             onChange={e =>
               setFormData({
                 ...formData,
@@ -244,7 +280,7 @@ export const FormDadosPrincipais: React.FC<IProps> = ({
             <label className={labelClass}>Nome Fantasia</label>
             <input
               type="text"
-              value={formData.nomeFantasia}
+              value={formData.nomeFantasia ?? ''}
               onChange={e =>
                 setFormData({
                   ...formData,
@@ -265,7 +301,11 @@ const CardInfo = ({
   label,
   value,
   highlight
-}: any) => (
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+}) => (
   <div className="bg-[#0b1324] border border-white/10 p-3 rounded-xl">
     <p className="text-xs text-slate-500 font-bold">{label}</p>
     <p className={`font-black text-sm truncate ${

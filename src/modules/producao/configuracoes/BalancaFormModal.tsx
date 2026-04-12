@@ -1,5 +1,5 @@
-import React, { useState, useEffect, ChangeEvent, FormEvent } from 'react';
-import { X, Scale, Settings2, Network, Usb, Keyboard, ChevronDown, ChevronUp } from 'lucide-react';
+import React, { useState, useEffect, ChangeEvent, FormEvent, useCallback } from 'react';
+import { X, Scale, Settings2, Network, Usb, Keyboard, ChevronDown, ChevronUp, Radio } from 'lucide-react';
 import { AxiosError } from 'axios';
 import { api } from '../../../services/api';
 import { Balanca, TipoConexaoBalanca } from '../types/balanca';
@@ -30,6 +30,7 @@ const initialState: Partial<Balanca> = {
   portaTcp: undefined,
   protocolo: 'TOLEDO',
   unidadePeso: 'KG',
+  casasDecimais: 3,
   timeoutLeitura: 2000,
   tolerancia: 0,
   ativo: true,
@@ -41,13 +42,17 @@ export default function BalancaFormModal({ balanca, onClose, onSuccess }: Props)
   const [erro, setErro] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [mostrarAvancado, setMostrarAvancado] = useState<boolean>(false);
+  const [pesoVisor, setPesoVisor] = useState<string>('—.———');
+  const [testandoPeso, setTestandoPeso] = useState<boolean>(false);
 
   useEffect(() => {
     if (balanca) {
-      setFormData({ ...initialState, ...balanca });
+      setFormData({ ...initialState, ...balanca, casasDecimais: balanca.casasDecimais ?? 3 });
     } else {
       setFormData(initialState);
     }
+    setPesoVisor('—.———');
+    setTestandoPeso(false);
   }, [balanca]);
 
   const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -68,6 +73,11 @@ export default function BalancaFormModal({ balanca, onClose, onSuccess }: Props)
   const validar = (): string => {
     if (!formData.nome) return 'Nome é obrigatório';
 
+    const casas = Number(formData.casasDecimais ?? 3);
+    if (!Number.isInteger(casas) || casas < 0 || casas > 4) {
+      return 'Casas decimais deve ser um inteiro entre 0 e 4.';
+    }
+
     if (formData.tipoConexao === 'SERIAL' || formData.tipoConexao === 'USB') {
       if (!formData.portaCom) return 'Porta COM é obrigatória (Ex: COM3)';
       if (!formData.baudRate) return 'Baud Rate é obrigatório para conexões seriais.';
@@ -81,6 +91,17 @@ export default function BalancaFormModal({ balanca, onClose, onSuccess }: Props)
     return '';
   };
 
+  const handleTestarPeso = useCallback(() => {
+    setTestandoPeso(true);
+    const casas = Math.min(4, Math.max(0, Math.round(Number(formData.casasDecimais ?? 3))));
+    window.setTimeout(() => {
+      const valor = (Math.random() * 5).toFixed(casas);
+      const unidade = formData.unidadePeso === 'G' ? ' G' : ' KG';
+      setPesoVisor(`${valor}${unidade}`);
+      setTestandoPeso(false);
+    }, 1000);
+  }, [formData.casasDecimais, formData.unidadePeso]);
+
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const erroValidacao = validar();
@@ -92,11 +113,44 @@ export default function BalancaFormModal({ balanca, onClose, onSuccess }: Props)
     setErro('');
     setLoading(true);
 
+    const casasDecimais = Math.min(4, Math.max(0, Math.round(Number(formData.casasDecimais ?? 3))));
+
+    const payload: Partial<Balanca> = {
+      ...formData,
+      casasDecimais,
+      nome: String(formData.nome ?? '').trim().toUpperCase(),
+      descricao: formData.descricao != null && String(formData.descricao).trim() !== ''
+        ? String(formData.descricao).trim().toUpperCase()
+        : formData.descricao === ''
+          ? ''
+          : formData.descricao,
+      fabricante:
+        formData.fabricante != null && String(formData.fabricante).trim() !== ''
+          ? String(formData.fabricante).trim().toUpperCase()
+          : formData.fabricante,
+      modelo:
+        formData.modelo != null && String(formData.modelo).trim() !== ''
+          ? String(formData.modelo).trim().toUpperCase()
+          : formData.modelo,
+      numeroSerie:
+        formData.numeroSerie != null && String(formData.numeroSerie).trim() !== ''
+          ? String(formData.numeroSerie).trim().toUpperCase()
+          : formData.numeroSerie,
+      observacao:
+        formData.observacao != null && String(formData.observacao).trim() !== ''
+          ? String(formData.observacao).trim().toUpperCase()
+          : formData.observacao,
+    };
+
+    if (payload.portaCom != null && String(payload.portaCom).trim() !== '') {
+      payload.portaCom = String(payload.portaCom).trim().toUpperCase();
+    }
+
     try {
       if (balanca?.id) {
-        await api.put(`/api/balancas/${balanca.id}`, formData);
+        await api.put(`/api/balancas/${balanca.id}`, payload);
       } else {
-        await api.post('/api/balancas', formData);
+        await api.post('/api/balancas', payload);
       }
       onSuccess();
     } catch (err: unknown) {
@@ -169,7 +223,9 @@ export default function BalancaFormModal({ balanca, onClose, onSuccess }: Props)
                     <option value="TOLEDO">Toledo (Prix)</option>
                     <option value="FILIZOLA">Filizola</option>
                     <option value="URANO">Urano</option>
-                    <option value="GENERICO">Genérico</option>
+                    <option value="GERTEC">Gertec</option>
+                    <option value="ELGIN">Elgin</option>
+                    <option value="CUSTOM">Custom</option>
                   </select>
                 </div>
                 <div>
@@ -189,8 +245,21 @@ export default function BalancaFormModal({ balanca, onClose, onSuccess }: Props)
                   <select name="unidadePeso" value={formData.unidadePeso || 'KG'} onChange={handleChange} className={inputClass}>
                     <option value="KG">Quilogramas (KG)</option>
                     <option value="G">Gramas (G)</option>
-                    <option value="TON">Toneladas (TON)</option>
                   </select>
+                </div>
+                <div>
+                  <label className={labelClass}>Casas decimais (peso)</label>
+                  <input
+                    type="number"
+                    name="casasDecimais"
+                    min={0}
+                    max={4}
+                    step={1}
+                    value={formData.casasDecimais ?? 3}
+                    onChange={handleChange}
+                    className={inputClass}
+                  />
+                  <p className="mt-1 text-[10px] text-gray-500">Precisão para exibição e cálculo (0 a 4). Padrão: 3.</p>
                 </div>
                 <div className="md:col-span-2">
                   <label className={labelClass}>Descrição / Localização</label>
@@ -255,6 +324,37 @@ export default function BalancaFormModal({ balanca, onClose, onSuccess }: Props)
                     </div>
                   </>
                 )}
+
+                <div className="md:col-span-2 rounded-2xl border border-emerald-500/25 bg-gradient-to-b from-[#030806] via-black to-[#0a1210] p-5 shadow-[inset_0_0_48px_rgba(16,185,129,0.06)]">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-400/90">
+                        Visor de teste de peso
+                      </p>
+                      <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-gray-500">
+                        Simula leitura após IP/porta (ou outros meios). A comunicação real via TCP/socket será integrada no backend; esta UI já exibe o formato com as casas decimais configuradas.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleTestarPeso}
+                      disabled={testandoPeso}
+                      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-emerald-300 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Radio className="h-4 w-4" />
+                      {testandoPeso ? 'Conectando…' : 'Testar conexão / Ler peso'}
+                    </button>
+                  </div>
+                  <div
+                    className={`mt-4 flex min-h-[5.5rem] items-center justify-center rounded-xl border px-3 py-4 text-center font-mono text-2xl tracking-[0.15em] sm:text-3xl ${
+                      testandoPeso
+                        ? 'border-amber-500/40 bg-black/80 text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.35)]'
+                        : 'border-emerald-800/60 bg-black text-emerald-400 drop-shadow-[0_0_14px_rgba(52,211,153,0.45)]'
+                    }`}
+                  >
+                    {testandoPeso ? 'CONECTANDO...' : pesoVisor}
+                  </div>
+                </div>
               </div>
             </div>
 

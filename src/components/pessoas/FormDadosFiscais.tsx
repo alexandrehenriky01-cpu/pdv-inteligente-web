@@ -5,7 +5,8 @@ import {
   Scale,
   Briefcase,
   FileSignature,
-  Sparkles
+  Sparkles,
+  Microscope
 } from 'lucide-react';
 
 import {
@@ -45,7 +46,7 @@ export const FormDadosFiscais: React.FC<IFormPessoaProps> = ({
   // 💡 indicador inteligente
   const handleIndicadorIEChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value as IndicadorIE;
-    let ieValue = formData.inscricaoEstadual;
+    let ieValue = formData.inscricaoEstadual ?? '';
 
     if (val === 'ISENTO') {
       ieValue = 'ISENTO';
@@ -56,7 +57,7 @@ export const FormDadosFiscais: React.FC<IFormPessoaProps> = ({
     setFormData({
       ...formData,
       indicadorIE: val,
-      inscricaoEstadual: ieValue
+      inscricaoEstadual: ieValue,
     });
   };
 
@@ -102,7 +103,7 @@ export const FormDadosFiscais: React.FC<IFormPessoaProps> = ({
             </label>
 
             <select
-              value={formData.indicadorIE}
+              value={formData.indicadorIE ?? 'NAO_CONTRIBUINTE'}
               onChange={handleIndicadorIEChange}
               className="w-full bg-[#0b1324] border border-white/10 rounded-xl px-4 py-3.5 text-white focus:outline-none focus:border-violet-500/40 focus:ring-2 focus:ring-violet-500/20 transition-all"
             >
@@ -121,7 +122,7 @@ export const FormDadosFiscais: React.FC<IFormPessoaProps> = ({
 
             <input
               type="text"
-              value={formData.inscricaoEstadual}
+              value={formData.inscricaoEstadual ?? ''}
               onChange={handleIeChange}
               disabled={formData.indicadorIE === 'ISENTO'}
               className="w-full bg-[#0b1324] border border-white/10 rounded-xl px-4 py-3.5 text-white font-mono placeholder:text-slate-500 focus:outline-none focus:border-violet-500/40 focus:ring-2 focus:ring-violet-500/20 transition-all"
@@ -138,7 +139,7 @@ export const FormDadosFiscais: React.FC<IFormPessoaProps> = ({
 
             <input
               type="text"
-              value={formData.inscricaoMunicipal}
+              value={formData.inscricaoMunicipal ?? ''}
               onChange={e =>
                 setFormData({
                   ...formData,
@@ -158,7 +159,7 @@ export const FormDadosFiscais: React.FC<IFormPessoaProps> = ({
             </label>
 
             <select
-              value={formData.regimeTributario}
+              value={formData.regimeTributario ?? ''}
               onChange={e =>
                 setFormData({
                   ...formData,
@@ -183,7 +184,7 @@ export const FormDadosFiscais: React.FC<IFormPessoaProps> = ({
 
             <input
               type="text"
-              value={formData.cnae}
+              value={formData.cnae ?? ''}
               onChange={handleCnaeChange}
               className="w-full max-w-sm bg-[#0b1324] border border-white/10 rounded-xl px-4 py-3.5 text-white font-mono placeholder:text-slate-500 focus:outline-none focus:border-violet-500/40 focus:ring-2 focus:ring-violet-500/20 transition-all"
               placeholder="00000-00"
@@ -192,6 +193,59 @@ export const FormDadosFiscais: React.FC<IFormPessoaProps> = ({
 
         </div>
       </div>
+
+      {(formData.tipo === 'FORNECEDOR' || formData.tipo === 'AMBOS') && (
+        <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-3xl backdrop-blur-xl shadow-[0_25px_60px_rgba(0,0,0,0.35)] p-6 mt-6">
+          <div className="flex items-center gap-3 mb-5">
+            <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 p-2.5">
+              <Microscope className="w-5 h-5 text-emerald-400" />
+            </div>
+            <div>
+              <h3 className="text-white font-black text-sm uppercase tracking-widest">
+                Sanidade e inspeção
+              </h3>
+              <p className="text-slate-400 text-xs mt-0.5">
+                Dados para rastreabilidade com fornecedores do setor alimentício
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className={`${labelClass} flex items-center gap-2`}>
+                <Microscope className="w-4 h-4 text-emerald-400" />
+                Registro sanitário (SIF / SISP / SIE / SIM)
+              </label>
+              <input
+                type="text"
+                value={formData.registroSanitario ?? ''}
+                onChange={(e) =>
+                  setFormData({ ...formData, registroSanitario: e.target.value })
+                }
+                className={inputClass}
+                placeholder="Ex: SIF 1234, SIM 567"
+              />
+            </div>
+            <div>
+              <label className={`${labelClass} flex items-center gap-2`}>
+                <Scale className="w-4 h-4 text-emerald-400" />
+                Esfera da inspeção
+              </label>
+              <select
+                value={formData.tipoInspecao ?? ''}
+                onChange={(e) =>
+                  setFormData({ ...formData, tipoInspecao: e.target.value })
+                }
+                className={inputClass}
+              >
+                <option value="">Selecione...</option>
+                <option value="Federal">Federal</option>
+                <option value="Estadual">Estadual</option>
+                <option value="Municipal">Municipal</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

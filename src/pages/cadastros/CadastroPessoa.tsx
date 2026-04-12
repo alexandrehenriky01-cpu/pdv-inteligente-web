@@ -7,9 +7,109 @@ import {
   Building2, MapPin, Phone, Receipt, Wallet, Loader2, X, Edit2, Trash2, Hash
 } from 'lucide-react';
 
-import { 
-  IPessoa, IIASugestoes, ICnpjResponse, IApiError, RegimeTributario 
+import {
+  IPessoa,
+  IIASugestoes,
+  ICnpjResponse,
+  IApiError,
+  RegimeTributario,
+  TipoPessoa,
+  IndicadorIE,
 } from '../../types/pessoa';
+import { transformarParaMaiusculas } from '../../utils/formatters';
+
+interface IContaPlanoResumo {
+  id: string;
+  codigoEstrutural: string;
+  nomeConta: string;
+  tipoConta?: string;
+}
+
+function papeisDoTipo(tipo: TipoPessoa): string[] {
+  if (tipo === 'AMBOS') return ['CLIENTE', 'FORNECEDOR'];
+  if (tipo === 'CLIENTE' || tipo === 'FORNECEDOR' || tipo === 'FUNCIONARIO') return [tipo];
+  return ['CLIENTE'];
+}
+
+/** Converte `""` em `null` para o backend (UUIDs e opcionais). Objetos simples aninhados. */
+function stringsVaziasParaNull(obj: Record<string, unknown>): void {
+  for (const key of Object.keys(obj)) {
+    const v = obj[key];
+    if (v === '') {
+      obj[key] = null;
+    } else if (
+      v !== null &&
+      typeof v === 'object' &&
+      !Array.isArray(v) &&
+      Object.getPrototypeOf(v) === Object.prototype
+    ) {
+      stringsVaziasParaNull(v as Record<string, unknown>);
+    }
+  }
+}
+
+/** Alinha com o backend: CPF até 11 dígitos; CNPJ 12–13 com pad à esquerda; >14 trunca. */
+function normalizarDigitosCpfCnpjBr(raw: string): string {
+  const d = String(raw ?? '').replace(/\D/g, '');
+  if (!d) return '';
+  if (d.length <= 11) return d;
+  let x = d;
+  if (x.length > 14) x = x.slice(0, 14);
+  if (x.length > 11 && x.length < 14) x = x.padStart(14, '0');
+  return x;
+}
+
+function textoSeguro(v: unknown): string {
+  if (v === null || v === undefined) return '';
+  return String(v);
+}
+
+function indicadorIESeguro(v: unknown): IndicadorIE {
+  if (v === 'CONTRIBUINTE' || v === 'NAO_CONTRIBUINTE' || v === 'ISENTO') return v;
+  return 'NAO_CONTRIBUINTE';
+}
+
+/** Evita `null` em controlled inputs (dados vindos de XML / Prisma). */
+function higienizarPessoaParaForm(pessoa: IPessoa): IPessoa {
+  const docBruto = textoSeguro(pessoa.cpfCnpj || pessoa.cnpjCpf);
+  return {
+    id: textoSeguro(pessoa.id),
+    codigo: textoSeguro(pessoa.codigo),
+    tipo: (pessoa.tipo as TipoPessoa) || 'CLIENTE',
+    cpfCnpj: normalizarDigitosCpfCnpjBr(docBruto),
+    razaoSocial: textoSeguro(pessoa.razaoSocial),
+    nomeFantasia: textoSeguro(pessoa.nomeFantasia),
+    indicadorIE: indicadorIESeguro(pessoa.indicadorIE),
+    inscricaoEstadual: textoSeguro(pessoa.inscricaoEstadual),
+    inscricaoMunicipal: textoSeguro(pessoa.inscricaoMunicipal),
+    regimeTributario: (textoSeguro(pessoa.regimeTributario) || '') as RegimeTributario,
+    cnae: textoSeguro(pessoa.cnae),
+    cep: textoSeguro(pessoa.cep),
+    logradouro: textoSeguro(pessoa.logradouro),
+    numero: textoSeguro(pessoa.numero),
+    complemento: textoSeguro(pessoa.complemento),
+    bairro: textoSeguro(pessoa.bairro),
+    cidade: textoSeguro(pessoa.cidade),
+    estado: textoSeguro(pessoa.estado),
+    telefone: textoSeguro(pessoa.telefone),
+    email: textoSeguro(pessoa.email),
+    contatoPrincipal: textoSeguro(pessoa.contatoPrincipal),
+    limiteCredito:
+      pessoa.limiteCredito !== null && pessoa.limiteCredito !== undefined && pessoa.limiteCredito !== ''
+        ? String(pessoa.limiteCredito)
+        : '',
+    prazoPadrao:
+      pessoa.prazoPadrao !== null && pessoa.prazoPadrao !== undefined && pessoa.prazoPadrao !== ''
+        ? String(pessoa.prazoPadrao)
+        : '',
+    observacoes: textoSeguro(pessoa.obsGerais ?? pessoa.observacoes),
+    registroSanitario: textoSeguro(pessoa.registroSanitario),
+    tipoInspecao: textoSeguro(pessoa.tipoInspecao),
+    contaClienteId: textoSeguro(pessoa.contaClienteId ?? pessoa.contaCliente?.id),
+    contaFornecedorId: textoSeguro(pessoa.contaFornecedorId ?? pessoa.contaFornecedor?.id),
+    consumidorFinal: pessoa.consumidorFinal === true,
+  };
+}
 
 // Importação dos Componentes
 import { FormDadosPrincipais } from '../../components/pessoas/FormDadosPrincipais';
@@ -33,7 +133,7 @@ export function CadastroPessoa() {
   const estadoInicial: IPessoa = { 
     id: '', 
     codigo: '', 
-    tipo: 'JURIDICA', 
+    tipo: 'CLIENTE', 
     cpfCnpj: '', 
     razaoSocial: '', 
     nomeFantasia: '', 
@@ -54,10 +154,16 @@ export function CadastroPessoa() {
     contatoPrincipal: '', 
     limiteCredito: '', 
     prazoPadrao: '', 
-    observacoes: '' 
+    observacoes: '',
+    registroSanitario: '',
+    tipoInspecao: '',
+    contaClienteId: '',
+    contaFornecedorId: '',
+    consumidorFinal: false,
   };
 
   const [formData, setFormData] = useState<IPessoa>(estadoInicial);
+  const [contasAnaliticas, setContasAnaliticas] = useState<IContaPlanoResumo[]>([]);
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
@@ -65,6 +171,30 @@ export function CadastroPessoa() {
     }, 500);
     return () => clearTimeout(delayDebounceFn);
   }, [termoBusca, tipoFiltro]);
+
+  useEffect(() => {
+    if (!modalAberto) return;
+    let cancelado = false;
+    (async () => {
+      try {
+        const res = await api.get<IContaPlanoResumo[]>('/api/contas-contabeis', {
+          params: { tipoConta: 'ANALITICA', limit: 2000 },
+        });
+        if (!cancelado) setContasAnaliticas(Array.isArray(res.data) ? res.data : []);
+      } catch (e) {
+        const ax = e as AxiosError<{ erro?: string; error?: string }>;
+        console.error('Erro ao carregar plano de contas (analíticas):', {
+          message: ax.message,
+          status: ax.response?.status,
+          data: ax.response?.data,
+        });
+        if (!cancelado) setContasAnaliticas([]);
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, [modalAberto]);
 
   const carregarDados = async () => {
     setLoading(true);
@@ -89,15 +219,7 @@ export function CadastroPessoa() {
   };
 
   const abrirModalEditar = (pessoa: IPessoa) => {
-    setFormData({
-      ...pessoa,
-      codigo: pessoa.codigo || '', 
-      tipo: pessoa.tipo || 'JURIDICA',
-      cpfCnpj: pessoa.cpfCnpj || pessoa.cnpjCpf || '',
-      limiteCredito: pessoa.limiteCredito?.toString() || '',
-      prazoPadrao: pessoa.prazoPadrao?.toString() || '',
-      observacoes: pessoa.obsGerais || pessoa.observacoes || ''
-    });
+    setFormData(higienizarPessoaParaForm(pessoa));
     setStepAtual(1);
     
     if (pessoa.limiteCredito) {
@@ -116,7 +238,7 @@ export function CadastroPessoa() {
   };
 
   const preencherComAurya = async () => {
-    const cnpjLimpo = formData.cpfCnpj.replace(/\D/g, '');
+    const cnpjLimpo = normalizarDigitosCpfCnpjBr(formData.cpfCnpj ?? '');
     if (cnpjLimpo.length !== 14) {
       alert("Por favor, digite um CNPJ válido com 14 dígitos.");
       return;
@@ -129,7 +251,12 @@ export function CadastroPessoa() {
 
       const razaoSocial = dados.razao_social || dados.nome || '';
       const nomeFantasia = dados.nome_fantasia || dados.fantasia || razaoSocial;
-      const cnae = dados.cnae_fiscal || dados.atividade_principal?.[0]?.code?.replace(/\D/g, '') || '';
+      const cnaeRaw = dados.cnae_fiscal ?? dados.atividade_principal?.[0]?.code;
+      const cnaeDigits =
+        typeof cnaeRaw === 'number'
+          ? String(Math.trunc(cnaeRaw)).replace(/\D/g, '')
+          : String(cnaeRaw ?? '').replace(/\D/g, '');
+      const cnae = cnaeDigits || '';
       const naturezaJuridica = dados.natureza_juridica || '';
       
       const regimeInferido = (naturezaJuridica.toUpperCase().includes('MICROEMPREENDEDOR') || naturezaJuridica.toUpperCase().includes('MEI'))
@@ -188,27 +315,79 @@ export function CadastroPessoa() {
     }
 
     try {
-      const payload = {
-        ...formData,
-        codigo: formData.codigo ? formData.codigo.trim() : '', // ✅ Proteção ativada!
-        limiteCredito: parseFloat(String(formData.limiteCredito)) || 0,
-        prazoPadrao: parseInt(String(formData.prazoPadrao)) || 0,
-        forceCadastro: forcarCadastro 
+      const cpfCnpjLimpo = normalizarDigitosCpfCnpjBr(formData.cpfCnpj ?? '');
+      let papeis = papeisDoTipo(formData.tipo);
+      if (!Array.isArray(papeis) || papeis.length === 0) {
+        papeis = ['CLIENTE'];
+      }
+
+      const {
+        contaCliente: _omitCliente,
+        contaFornecedor: _omitFornec,
+        cnpjCpf: _omitCnpjAlias,
+        ...formRest
+      } = formData as IPessoa & {
+        contaCliente?: unknown;
+        contaFornecedor?: unknown;
       };
 
-      if (formData.id) {
-        await api.put(`/api/pessoas/${formData.id}`, payload);
+      const payloadSemMaiusculas: Record<string, unknown> = {
+        ...formRest,
+        cpfCnpj: cpfCnpjLimpo,
+        papeis,
+        codigo: formData.codigo ? formData.codigo.trim() : '',
+        limiteCredito: parseFloat(String(formData.limiteCredito)) || 0,
+        prazoPadrao: parseInt(String(formData.prazoPadrao), 10) || 0,
+        forceCadastro: forcarCadastro,
+        contaClienteId: formData.contaClienteId?.trim() || null,
+        contaFornecedorId: formData.contaFornecedorId?.trim() || null,
+      };
+
+      if (!formData.id?.trim()) {
+        delete payloadSemMaiusculas.id;
+      }
+
+      const payloadFinal = transformarParaMaiusculas(
+        payloadSemMaiusculas
+      ) as Record<string, unknown>;
+
+      const camposTextoCoerce = [
+        'cnae',
+        'codigo',
+        'inscricaoEstadual',
+        'inscricaoMunicipal',
+        'cep',
+      ] as const;
+      for (const k of camposTextoCoerce) {
+        const v = payloadFinal[k];
+        if (v !== undefined && v !== null && typeof v !== 'string') {
+          payloadFinal[k] = String(v);
+        }
+      }
+
+      stringsVaziasParaNull(payloadFinal);
+      console.log('Payload Pessoa:', payloadFinal);
+
+      if (formData.id?.trim()) {
+        await api.put(`/api/pessoas/${formData.id}`, payloadFinal);
       } else {
-        await api.post('/api/pessoas', payload);
+        await api.post('/api/pessoas', payloadFinal);
       }
 
       alert(`✅ Parceiro salvo com sucesso!`);
       setModalAberto(false);
       carregarDados(); 
       
-    } catch (err: any) {
-      if (err.response?.status === 409 && err.response?.data?.precisaConfirmacao) {
-        const confirmacao = window.confirm(err.response.data.mensagem);
+    } catch (err: unknown) {
+      const ax = err as AxiosError<{
+        precisaConfirmacao?: boolean;
+        mensagem?: string;
+        erro?: string;
+        error?: string;
+        detalhes?: Array<{ path: (string | number)[]; message: string }>;
+      }>;
+      if (ax.response?.status === 409 && ax.response?.data?.precisaConfirmacao) {
+        const confirmacao = window.confirm(String(ax.response.data.mensagem ?? ''));
         if (confirmacao) {
           handleSalvar(true); 
           return;
@@ -217,7 +396,16 @@ export function CadastroPessoa() {
         }
       }
 
-      const errorMessage = err.response?.data?.error || err.response?.data?.mensagem || "Ocorreu um erro ao salvar os dados.";
+      if (ax.response?.data) {
+        console.error('Erros de Validação Zod:', JSON.stringify(ax.response.data, null, 2));
+      }
+
+      const data = ax.response?.data;
+      const errorMessage =
+        (typeof data?.erro === 'string' ? data.erro : undefined) ||
+        (typeof data?.error === 'string' ? data.error : undefined) ||
+        (typeof data?.mensagem === 'string' ? data.mensagem : undefined) ||
+        "Ocorreu um erro ao salvar os dados.";
       alert(errorMessage);
     }
   };
@@ -485,12 +673,59 @@ export function CadastroPessoa() {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
                           <label className="block text-xs font-bold text-emerald-300 uppercase tracking-wider mb-2">Limite de Crédito Aprovado (R$)</label>
-                          <input type="number" value={formData.limiteCredito} onChange={e => setFormData({...formData, limiteCredito: e.target.value})} className={`${inputClass} border-emerald-500/40 focus:border-emerald-500 focus:ring-emerald-500 text-xl font-black`} placeholder="0.00" />
+                          <input type="number" value={formData.limiteCredito ?? ''} onChange={e => setFormData({...formData, limiteCredito: e.target.value})} className={`${inputClass} border-emerald-500/40 focus:border-emerald-500 focus:ring-emerald-500 text-xl font-black`} placeholder="0.00" />
                         </div>
                         <div>
                           <label className="block text-xs font-bold text-emerald-300 uppercase tracking-wider mb-2">Prazo Padrão de Faturamento (Dias)</label>
-                          <input type="number" value={formData.prazoPadrao} onChange={e => setFormData({...formData, prazoPadrao: e.target.value})} className={`${inputClass} border-emerald-500/40 focus:border-emerald-500 focus:ring-emerald-500 text-xl font-black`} placeholder="Ex: 28" />
+                          <input type="number" value={formData.prazoPadrao ?? ''} onChange={e => setFormData({...formData, prazoPadrao: e.target.value})} className={`${inputClass} border-emerald-500/40 focus:border-emerald-500 focus:ring-emerald-500 text-xl font-black`} placeholder="Ex: 28" />
                         </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-[#0b1324] border border-violet-500/25 rounded-3xl p-8 shadow-inner">
+                      <h3 className="text-sm font-black text-violet-300 uppercase tracking-widest mb-1">Vínculo contábil</h3>
+                      <p className="text-xs text-slate-500 mb-6">Opcional: se vazio, o sistema gera conta analítica no grupo de clientes e/ou fornecedores conforme o papel.</p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {(formData.tipo === 'CLIENTE' || formData.tipo === 'AMBOS' || formData.tipo === 'FUNCIONARIO') && (
+                          <div>
+                            <label className={labelClass}>Conta contábil — Clientes (a receber)</label>
+                            <select
+                              value={formData.contaClienteId || ''}
+                              onChange={(e) => setFormData({ ...formData, contaClienteId: e.target.value })}
+                              className={`${inputClass} ${formData.consumidorFinal ? 'opacity-50 cursor-not-allowed' : ''}`}
+                              disabled={formData.consumidorFinal === true}
+                            >
+                              <option value="">Automático ao salvar</option>
+                              {contasAnaliticas.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.codigoEstrutural} — {c.nomeConta}
+                                </option>
+                              ))}
+                            </select>
+                            {formData.consumidorFinal && (
+                              <p className="mt-2 text-xs text-amber-300/90 leading-relaxed">
+                                Conta genérica de Consumidor Final será vinculada automaticamente (sem conta nominal com o nome desta pessoa).
+                              </p>
+                            )}
+                          </div>
+                        )}
+                        {(formData.tipo === 'FORNECEDOR' || formData.tipo === 'AMBOS' || formData.tipo === 'FUNCIONARIO') && (
+                          <div>
+                            <label className={labelClass}>Conta contábil — Fornecedores (a pagar)</label>
+                            <select
+                              value={formData.contaFornecedorId || ''}
+                              onChange={(e) => setFormData({ ...formData, contaFornecedorId: e.target.value })}
+                              className={inputClass}
+                            >
+                              <option value="">Automático ao salvar</option>
+                              {contasAnaliticas.map((c) => (
+                                <option key={`f-${c.id}`} value={c.id}>
+                                  {c.codigoEstrutural} — {c.nomeConta}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

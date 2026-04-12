@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
+import { Layout } from '../../../components/Layout';
 import { 
   CheckCircle2, XCircle, Clock, Search, Filter, FileText, 
-  AlertTriangle, User, Package, Loader2, Calendar 
+  AlertTriangle, User, Package, Loader2, Calendar, RotateCcw
 } from 'lucide-react';
 import { api } from '../../../services/api'; 
 
 interface ItemSolicitacao {
   id: string;
   quantidade: number;
-  quantidadeAprovada?: number; // 🚀 Novo campo para aprovação parcial
+  quantidadeAprovada?: number;
+  especificacao?: string | null;
   produto?: { nome: string; codigoBarras: string; codigo: string; };
 }
 
@@ -18,9 +20,25 @@ interface SolicitacaoCompra {
   createdAt: string;
   dataAprovacao?: string;
   observacao: string;
+  tipoNecessidade?: 'ESTOQUE' | 'APLICACAO_DIRETA';
+  centroCusto?: string | null;
   status: string; 
   solicitante?: { nome: string };
   itens: ItemSolicitacao[];
+}
+
+type TabAprovacao = 'PENDENTES' | 'APROVADOS' | 'REPROVADOS' | 'CANCELADOS';
+
+function statusNoGrupo(tab: TabAprovacao, status: string): boolean {
+  if (tab === 'PENDENTES') {
+    return status === 'AGUARDANDO_SUPERVISAO' || status === 'RASCUNHO';
+  }
+  if (tab === 'APROVADOS') {
+    return ['APROVADA', 'EM_COTACAO', 'ATENDIDA'].includes(status);
+  }
+  if (tab === 'REPROVADOS') return status === 'REPROVADA';
+  if (tab === 'CANCELADOS') return status === 'CANCELADA';
+  return false;
 }
 
 export const AprovacaoSolicitacaoCompra: React.FC = () => {
@@ -34,8 +52,10 @@ export const AprovacaoSolicitacaoCompra: React.FC = () => {
   // 🚀 ESTADO PARA AS QUANTIDADES APROVADAS (PARCIAL)
   const [quantidadesEditadas, setQuantidadesEditadas] = useState<Record<string, number>>({});
 
+  const [tabStatus, setTabStatus] = useState<TabAprovacao>('PENDENTES');
+
   // Filtros
-  const [filtroStatus, setFiltroStatus] = useState<string>('AGUARDANDO_SUPERVISAO');
+  const [filtroStatus, setFiltroStatus] = useState<string>('');
   const [filtroDataSolicitacao, setFiltroDataSolicitacao] = useState<string>('');
   const [filtroDataMovimento, setFiltroDataMovimento] = useState<string>('');
   const [filtroSolicitante, setFiltroSolicitante] = useState<string>('');
@@ -56,14 +76,14 @@ export const AprovacaoSolicitacaoCompra: React.FC = () => {
   useEffect(() => { buscarSolicitacoes(); }, []);
 
   useEffect(() => {
-    let result = solicitacoes;
+    let result = solicitacoes.filter((req) => statusNoGrupo(tabStatus, req.status));
     if (filtroStatus) result = result.filter(req => req.status === filtroStatus);
     if (filtroDataSolicitacao) result = result.filter(req => req.createdAt?.startsWith(filtroDataSolicitacao));
     if (filtroDataMovimento) result = result.filter(req => req.dataAprovacao?.startsWith(filtroDataMovimento));
     if (filtroSolicitante) result = result.filter(req => req.solicitante?.nome?.toLowerCase().includes(filtroSolicitante.toLowerCase()));
     if (filtroProduto) result = result.filter(req => req.itens?.some(item => item.produto?.nome?.toLowerCase().includes(filtroProduto.toLowerCase())));
     setSolicitacoesFiltradas(result);
-  }, [solicitacoes, filtroStatus, filtroDataSolicitacao, filtroDataMovimento, filtroSolicitante, filtroProduto]);
+  }, [solicitacoes, tabStatus, filtroStatus, filtroDataSolicitacao, filtroDataMovimento, filtroSolicitante, filtroProduto]);
 
   // 🚀 SELECIONAR SOLICITAÇÃO E PREPARAR QUANTIDADES
   const handleSelecionar = (req: SolicitacaoCompra) => {
@@ -74,6 +94,22 @@ export const AprovacaoSolicitacaoCompra: React.FC = () => {
       qtdsIniciais[item.id] = item.quantidadeAprovada ?? item.quantidade;
     });
     setQuantidadesEditadas(qtdsIniciais);
+  };
+
+  const handleReabrir = async (id: string) => {
+    if (!window.confirm('Reabrir esta solicitação para nova avaliação da supervisão?')) return;
+    try {
+      setActionLoading(true);
+      await api.put(`/api/compras/solicitacoes/${id}/reabrir`);
+      alert('✅ Solicitação reaberta para pendente.');
+      await buscarSolicitacoes();
+      setSolicitacaoSelecionada(null);
+    } catch (e) {
+      console.error(e);
+      alert('❌ Não foi possível reabrir.');
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const handleAvaliar = async (id: string, status: 'APROVADA' | 'REPROVADA') => {
@@ -127,15 +163,18 @@ export const AprovacaoSolicitacaoCompra: React.FC = () => {
 
   if (loading && solicitacoes.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-96 text-violet-500">
-        <Loader2 className="w-10 h-10 animate-spin mb-4" />
-        <p className="text-white font-bold">Carregando requisições...</p>
-      </div>
+      <Layout>
+        <div className="flex h-96 flex-col items-center justify-center text-violet-500">
+          <Loader2 className="mb-4 h-10 w-10 animate-spin" />
+          <p className="font-bold text-white">Carregando requisições...</p>
+        </div>
+      </Layout>
     );
   }
 
   return (
-    <div className="w-full space-y-6">
+    <Layout>
+    <div className="w-full space-y-6 pb-10">
       <div className="rounded-2xl border border-white/10 bg-[#08101f]/40 p-6 backdrop-blur-xl shadow-lg flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-3">
@@ -143,6 +182,26 @@ export const AprovacaoSolicitacaoCompra: React.FC = () => {
           </h1>
           <p className="text-sm text-slate-400 mt-1">Analise, filtre e autorize as requisições internas da loja.</p>
         </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2 rounded-xl border border-white/10 bg-[#0b1324]/80 p-2">
+        {(['PENDENTES', 'APROVADOS', 'REPROVADOS', 'CANCELADOS'] as TabAprovacao[]).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTabStatus(t)}
+            className={`rounded-lg px-4 py-2 text-xs font-black uppercase tracking-wider transition-colors ${
+              tabStatus === t
+                ? 'bg-violet-600 text-white shadow-lg shadow-violet-500/20'
+                : 'text-slate-400 hover:bg-white/5 hover:text-white'
+            }`}
+          >
+            {t === 'PENDENTES' && 'Pendentes'}
+            {t === 'APROVADOS' && 'Aprovados'}
+            {t === 'REPROVADOS' && 'Reprovados'}
+            {t === 'CANCELADOS' && 'Cancelados'}
+          </button>
+        ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -163,19 +222,22 @@ export const AprovacaoSolicitacaoCompra: React.FC = () => {
             <div className="bg-[#08101f]/80 border border-white/10 rounded-xl p-4 space-y-4 animate-in fade-in">
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Status</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Refinar status (opcional)</label>
                   <select value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value)} className={inputClass}>
-                    <option value="">Todos os Status</option>
-                    <option value="AGUARDANDO_SUPERVISAO">Pendentes</option>
-                    <option value="APROVADA">Aprovadas</option>
-                    <option value="REPROVADA">Reprovadas</option>
+                    <option value="">Todos nesta aba</option>
+                    <option value="AGUARDANDO_SUPERVISAO">Aguardando supervisão</option>
+                    <option value="APROVADA">Aprovada</option>
+                    <option value="EM_COTACAO">Em cotação</option>
+                    <option value="ATENDIDA">Atendida</option>
+                    <option value="REPROVADA">Reprovada</option>
+                    <option value="CANCELADA">Cancelada</option>
                   </select>
                 </div>
                 <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Data Solicitação</label><input type="date" value={filtroDataSolicitacao} onChange={(e) => setFiltroDataSolicitacao(e.target.value)} className={inputClass} /></div>
                 <div><label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Data Movimento</label><input type="date" value={filtroDataMovimento} onChange={(e) => setFiltroDataMovimento(e.target.value)} className={inputClass} /></div>
                 <div className="col-span-2"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Solicitante</label><input type="text" placeholder="Nome" value={filtroSolicitante} onChange={(e) => setFiltroSolicitante(e.target.value)} className={inputClass} /></div>
               </div>
-              <button onClick={() => { setFiltroStatus(''); setFiltroDataSolicitacao(''); setFiltroDataMovimento(''); setFiltroSolicitante(''); setFiltroProduto(''); }} className="w-full py-2 text-xs font-bold text-slate-400 hover:text-white border border-white/5 rounded-lg hover:bg-white/5 transition-colors">Limpar Filtros</button>
+              <button onClick={() => { setFiltroStatus(''); setFiltroDataSolicitacao(''); setFiltroDataMovimento(''); setFiltroSolicitante(''); setFiltroProduto(''); }} className="w-full py-2 text-xs font-bold text-slate-400 hover:text-white border border-white/5 rounded-lg hover:bg-white/5 transition-colors">Limpar filtros refinados</button>
             </div>
           )}
 
@@ -208,6 +270,21 @@ export const AprovacaoSolicitacaoCompra: React.FC = () => {
                     <span className={`text-xs font-bold px-3 py-1 rounded-full border ${getStatusColor(solicitacaoSelecionada.status)}`}>{solicitacaoSelecionada.status === 'AGUARDANDO_SUPERVISAO' ? 'Pendente' : solicitacaoSelecionada.status}</span>
                   </div>
                   <p className="text-slate-400 text-sm">Solicitado por <strong className="text-white">{solicitacaoSelecionada.solicitante?.nome || 'Desconhecido'}</strong></p>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Necessidade:{' '}
+                    <span className="font-bold text-violet-300">
+                      {solicitacaoSelecionada.tipoNecessidade === 'APLICACAO_DIRETA'
+                        ? 'APLICAÇÃO DIRETA'
+                        : 'ESTOQUE'}
+                    </span>
+                    {solicitacaoSelecionada.centroCusto && (
+                      <>
+                        {' '}
+                        · CC:{' '}
+                        <span className="text-slate-300">{solicitacaoSelecionada.centroCusto}</span>
+                      </>
+                    )}
+                  </p>
                 </div>
               </div>
 
@@ -226,6 +303,7 @@ export const AprovacaoSolicitacaoCompra: React.FC = () => {
                       <thead>
                         <tr className="bg-black/20 border-b border-white/10 text-[10px] uppercase tracking-wider text-slate-500">
                           <th className="p-3 font-bold">Produto</th>
+                          <th className="p-3 font-bold text-center">Especificação</th>
                           <th className="p-3 font-bold text-center">Código</th>
                           <th className="p-3 font-bold text-center">Qtd Solicitada</th>
                           <th className="p-3 font-bold text-center bg-violet-900/20 text-violet-300">Qtd Aprovada</th>
@@ -235,6 +313,9 @@ export const AprovacaoSolicitacaoCompra: React.FC = () => {
                         {solicitacaoSelecionada.itens?.map(item => (
                           <tr key={item.id} className="border-b border-white/5 hover:bg-white/[0.02]">
                             <td className="p-3 text-white font-medium">{item.produto?.nome || 'Removido'}</td>
+                            <td className="p-3 text-center text-slate-400 text-xs max-w-[140px] truncate" title={item.especificacao || ''}>
+                              {item.especificacao || '—'}
+                            </td>
                             <td className="p-3 text-center text-slate-400 text-xs font-mono">{item.produto?.codigo || '-'}</td>
                             <td className="p-3 text-center text-slate-300"><span className="font-bold text-white text-lg">{item.quantidade}</span></td>
                             <td className="p-3 text-center bg-violet-900/10">
@@ -262,7 +343,18 @@ export const AprovacaoSolicitacaoCompra: React.FC = () => {
               </div>
 
               {/* AÇÕES (FOOTER) - SEMPRE VISÍVEIS PARA PERMITIR REAVALIAÇÃO E EDIÇÃO */}
-              <div className="p-6 border-t border-white/10 bg-black/20 flex justify-end gap-3 rounded-b-2xl">
+              <div className="p-6 border-t border-white/10 bg-black/20 flex flex-wrap justify-end gap-3 rounded-b-2xl">
+                {['APROVADA', 'REPROVADA', 'CANCELADA', 'EM_COTACAO'].includes(solicitacaoSelecionada.status) && (
+                  <button
+                    type="button"
+                    onClick={() => handleReabrir(solicitacaoSelecionada.id)}
+                    disabled={actionLoading}
+                    className="px-6 py-2.5 rounded-xl font-bold text-sm text-amber-300 hover:bg-amber-500/10 border border-amber-500/30 transition-all flex items-center gap-2"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    Desfazer / Reavaliar
+                  </button>
+                )}
                 <button 
                   onClick={() => handleAvaliar(solicitacaoSelecionada.id, 'REPROVADA')}
                   disabled={actionLoading || solicitacaoSelecionada.status === 'REPROVADA'}
@@ -293,5 +385,6 @@ export const AprovacaoSolicitacaoCompra: React.FC = () => {
 
       </div>
     </div>
+    </Layout>
   );
 };

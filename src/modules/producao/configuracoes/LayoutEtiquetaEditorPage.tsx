@@ -9,7 +9,42 @@ import EtiquetaToolbox from './EtiquetaToolbox';
 import EtiquetaCanvasEditor from './EtiquetaCanvasEditor';
 import EtiquetaPropertiesPanel from './EtiquetaPropertiesPanel';
 import PlaceholdersPanel from './PlaceholdersPanel';
-import { LayoutEtiquetaJson, LayoutElemento, EtiquetaElementType, DEFAULT_LAYOUT_JSON } from '../types/etiquetas';
+import {
+  LayoutEtiquetaJson,
+  LayoutElemento,
+  EtiquetaElementType,
+  DEFAULT_LAYOUT_JSON,
+  BarcodeType,
+} from '../types/etiquetas';
+import {
+  type VariavelEtiquetaDef,
+  variavelIdParaPlaceholder,
+  placeholderParaVariavelId,
+} from '../types/variaveisEtiqueta';
+
+function alvoDomEstaEmCampoDeEdicao(): boolean {
+  const el = document.activeElement;
+  if (!el) return false;
+  const tag = el.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (el instanceof HTMLElement && el.isContentEditable) return true;
+  return false;
+}
+
+function barcodeTypeParaVariavel(id: string): BarcodeType {
+  const u = id.toLowerCase();
+  if (u.includes('gtin14') || u.includes('itf')) return 'ITF14';
+  if (u.includes('ean14')) return 'EAN14';
+  if (
+    u.includes('codigobarras') ||
+    u.includes('.ean') ||
+    u === 'ean' ||
+    u === 'codigobarras'
+  ) {
+    return 'EAN13';
+  }
+  return 'CODE128';
+}
 
 // 1. BLINDAGEM: Interface forte para os metadados (removendo o "any")
 interface LayoutEtiqueta {
@@ -17,6 +52,7 @@ interface LayoutEtiqueta {
   nome: string;
   descricao?: string;
   tipoEtiqueta: string;
+  tipoAplicacao?: 'INTERNA' | 'ROTULO' | 'TESTEIRA';
   larguraMm?: number;
   alturaMm?: number;
   larguraPx?: number;
@@ -41,6 +77,12 @@ export default function LayoutEtiquetaEditorPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+
+  const layoutJsonRef = useRef(layoutJson);
+  layoutJsonRef.current = layoutJson;
+
+  const clipboardElementoRef = useRef<LayoutElemento | null>(null);
+  const canvasWorkspaceRef = useRef<HTMLDivElement>(null);
 
   // CARREGAR DADOS DO BANCO
   useEffect(() => {
@@ -142,22 +184,93 @@ export default function LayoutEtiquetaEditorPage() {
 
     switch (type) {
       case 'text':
-        novoElemento = { id: baseId, type: 'text', x: 20, y: 20, width: 100, height: 30, visible: true, zIndex: zIndexBase, text: 'Novo Texto', fontSize: 14 };
+        novoElemento = {
+          id: baseId,
+          type: 'text',
+          x: 20,
+          y: 20,
+          width: 100,
+          height: 30,
+          visible: true,
+          zIndex: zIndexBase,
+          text: 'Novo Texto',
+          fontSize: 14,
+          fontWeight: 'normal',
+          fontStyle: 'normal',
+          textAlign: 'left',
+          fontFamily: 'Arial',
+        };
         break;
       case 'dynamic_text':
-        novoElemento = { id: baseId, type: 'dynamic_text', x: 20, y: 20, width: 100, height: 30, visible: true, zIndex: zIndexBase, placeholder: '{{produto}}', fontSize: 14 };
+        novoElemento = {
+          id: baseId,
+          type: 'dynamic_text',
+          x: 20,
+          y: 20,
+          width: 100,
+          height: 30,
+          visible: true,
+          zIndex: zIndexBase,
+          placeholder: '{{produto}}',
+          fontSize: 14,
+          fontWeight: 'normal',
+          fontStyle: 'normal',
+          textAlign: 'left',
+          fontFamily: 'Arial',
+        };
         break;
       case 'barcode':
-        novoElemento = { id: baseId, type: 'barcode', x: 20, y: 20, width: 150, height: 50, visible: true, zIndex: zIndexBase, barcodeType: 'CODE128', valueMode: 'dynamic', placeholder: '{{codigoBarras}}', showHumanReadable: true };
+        novoElemento = {
+          id: baseId,
+          type: 'barcode',
+          x: 20,
+          y: 20,
+          width: 150,
+          height: 50,
+          visible: true,
+          zIndex: zIndexBase,
+          barcodeType: 'CODE128',
+          valueMode: 'dynamic',
+          placeholder: '{{codigoBarras}}',
+          showText: true,
+          showHumanReadable: true,
+        };
         break;
       case 'qrcode':
-        novoElemento = { id: baseId, type: 'qrcode', x: 20, y: 20, width: 80, height: 80, visible: true, zIndex: zIndexBase, valueMode: 'dynamic', placeholder: '{{codigoBarras}}' };
+        novoElemento = {
+          id: baseId,
+          type: 'qrcode',
+          x: 20,
+          y: 20,
+          width: 80,
+          height: 80,
+          visible: true,
+          zIndex: zIndexBase,
+          valueMode: 'dynamic',
+          placeholder: '{{codigoBarras}}',
+          showText: true,
+        };
         break;
       case 'line':
         novoElemento = { id: baseId, type: 'line', x: 20, y: 20, width: 100, height: 30, visible: true, zIndex: zIndexBase, lineThickness: 2 };
         break;
       case 'rectangle':
         novoElemento = { id: baseId, type: 'rectangle', x: 20, y: 20, width: 100, height: 30, visible: true, zIndex: zIndexBase, borderThickness: 2 };
+        break;
+      case 'image':
+        novoElemento = {
+          id: baseId,
+          type: 'image',
+          x: 20,
+          y: 20,
+          width: 120,
+          height: 120,
+          visible: true,
+          zIndex: zIndexBase,
+          src: '',
+          objectFit: 'contain',
+          borderRadius: 0,
+        };
         break;
       default:
         return;
@@ -171,12 +284,163 @@ export default function LayoutEtiquetaEditorPage() {
     setHasUnsavedChanges(true); // Marca como alterado
   }, [layoutJson.elements.length]);
 
+  const handleAddVariavel = useCallback(
+    (def: VariavelEtiquetaDef) => {
+      const baseId = `el_${crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)}`;
+      const zIndexBase = layoutJson.elements.length + 1;
+      const ph = variavelIdParaPlaceholder(def.id);
+
+      let novoElemento: LayoutElemento;
+
+      switch (def.tipo) {
+        case 'texto':
+        case 'texto_longo':
+        case 'preco':
+        case 'peso':
+        case 'data':
+        case 'hora':
+          novoElemento = {
+            id: baseId,
+            type: 'dynamic_text',
+            x: 20,
+            y: 20,
+            width:
+              def.tipo === 'texto_longo' ? 280 : def.tipo === 'preco' ? 140 : 180,
+            height: def.tipo === 'texto_longo' ? 100 : 28,
+            visible: true,
+            zIndex: zIndexBase,
+            placeholder: ph,
+            variavel: def.id,
+            fontSize:
+              def.tipo === 'preco' ? 20 : def.tipo === 'texto_longo' ? 11 : 14,
+            fontFamily: 'Arial',
+            fontWeight: def.tipo === 'preco' ? 'bold' : 'normal',
+            fontStyle: 'normal',
+            textAlign: 'left',
+          };
+          break;
+        case 'codigo_barras':
+          novoElemento = {
+            id: baseId,
+            type: 'barcode',
+            x: 20,
+            y: 20,
+            width: 220,
+            height: 64,
+            visible: true,
+            zIndex: zIndexBase,
+            barcodeType: barcodeTypeParaVariavel(def.id),
+            valueMode: 'dynamic',
+            placeholder: ph,
+            variavel: def.id,
+            showText: true,
+            showHumanReadable: true,
+          };
+          break;
+        case 'qrcode_valor':
+          novoElemento = {
+            id: baseId,
+            type: 'qrcode',
+            x: 20,
+            y: 20,
+            width: 88,
+            height: 88,
+            visible: true,
+            zIndex: zIndexBase,
+            valueMode: 'dynamic',
+            placeholder: ph,
+            variavel: def.id,
+            showText: true,
+          };
+          break;
+        case 'texto_estatico':
+          novoElemento = {
+            id: baseId,
+            type: 'text',
+            x: 20,
+            y: 20,
+            width: 160,
+            height: 32,
+            visible: true,
+            zIndex: zIndexBase,
+            text: 'Texto livre',
+            fontSize: 14,
+            fontFamily: 'Arial',
+            fontWeight: 'normal',
+            fontStyle: 'normal',
+            textAlign: 'left',
+          };
+          break;
+        case 'forma':
+          if (def.formaId === 'linha') {
+            novoElemento = {
+              id: baseId,
+              type: 'line',
+              x: 20,
+              y: 40,
+              width: 200,
+              height: 4,
+              visible: true,
+              zIndex: zIndexBase,
+              lineThickness: 2,
+            };
+          } else {
+            novoElemento = {
+              id: baseId,
+              type: 'rectangle',
+              x: 20,
+              y: 20,
+              width: 160,
+              height: 80,
+              visible: true,
+              zIndex: zIndexBase,
+              borderThickness: 2,
+            };
+          }
+          break;
+        case 'imagem':
+          novoElemento = {
+            id: baseId,
+            type: 'image',
+            x: 20,
+            y: 20,
+            width: 120,
+            height: 120,
+            visible: true,
+            zIndex: zIndexBase,
+            src: '',
+            objectFit: 'contain',
+            borderRadius: 9999,
+          };
+          break;
+        default:
+          return;
+      }
+
+      setLayoutJson((prev) => ({
+        ...prev,
+        elements: [...prev.elements, novoElemento],
+      }));
+      setSelectedElementId(novoElemento.id);
+      setHasUnsavedChanges(true);
+    },
+    [layoutJson.elements.length],
+  );
+
   const handleUpdateElement = useCallback((elementId: string, updates: Partial<LayoutElemento>) => {
     setLayoutJson(prev => ({
       ...prev,
       elements: prev.elements.map(el => el.id === elementId ? { ...el, ...updates } as LayoutElemento : el)
     }));
     setHasUnsavedChanges(true); // Marca como alterado
+  }, []);
+
+  const handleReplaceElement = useCallback((elementId: string, next: LayoutElemento) => {
+    setLayoutJson((prev) => ({
+      ...prev,
+      elements: prev.elements.map((el) => (el.id === elementId ? next : el)),
+    }));
+    setHasUnsavedChanges(true);
   }, []);
 
   const handleDeleteSelected = useCallback(() => {
@@ -201,7 +465,11 @@ export default function LayoutEtiquetaEditorPage() {
       return;
     }
 
-    handleUpdateElement(selectedElementId, { placeholder });
+    const vid = placeholderParaVariavelId(placeholder.trim());
+    handleUpdateElement(selectedElementId, {
+      placeholder,
+      variavel: vid,
+    } as Partial<LayoutElemento>);
   }, [selectedElementId, layoutJson.elements, handleUpdateElement]);
 
   // SALVAR NO BANCO
@@ -232,16 +500,79 @@ export default function LayoutEtiquetaEditorPage() {
     navigate('/layout-etiquetas'); // ✅ CORREÇÃO: Apontando para a rota correta de listagem
   };
 
-  // Captura o "Delete" do teclado para apagar elementos
+  // Atalhos: nudge (setas), copiar/colar, excluir — ignorados em inputs do inspetor
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Delete' && selectedElementId) {
-        if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
-        handleDeleteSelected();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (alvoDomEstaEmCampoDeEdicao()) return;
+
+      const meta = e.metaKey || e.ctrlKey;
+      const keyLower = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+
+      if (meta && keyLower === 'c' && selectedElementId) {
+        const el = layoutJsonRef.current.elements.find((x) => x.id === selectedElementId);
+        if (el) {
+          clipboardElementoRef.current = JSON.parse(JSON.stringify(el)) as LayoutElemento;
+          e.preventDefault();
+        }
+        return;
       }
+
+      if (meta && keyLower === 'v') {
+        const template = clipboardElementoRef.current;
+        if (!template) return;
+        e.preventDefault();
+        const newId = `el_${crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)}`;
+        setLayoutJson((prev) => {
+          const maxZ = prev.elements.reduce((m, x) => Math.max(m, x.zIndex ?? 0), 0);
+          const clone = JSON.parse(JSON.stringify(template)) as LayoutElemento;
+          const next = {
+            ...clone,
+            id: newId,
+            x: Math.max(0, clone.x + 10),
+            y: Math.max(0, clone.y + 10),
+            zIndex: maxZ + 1,
+          } as LayoutElemento;
+          return { ...prev, elements: [...prev.elements, next] };
+        });
+        setSelectedElementId(newId);
+        setHasUnsavedChanges(true);
+        return;
+      }
+
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedElementId) {
+        e.preventDefault();
+        handleDeleteSelected();
+        return;
+      }
+
+      if (!selectedElementId) return;
+
+      const step = e.shiftKey ? 10 : 1;
+      const k = e.key;
+      if (k !== 'ArrowUp' && k !== 'ArrowDown' && k !== 'ArrowLeft' && k !== 'ArrowRight') {
+        return;
+      }
+
+      const atual = layoutJsonRef.current.elements.find((x) => x.id === selectedElementId);
+      if (!atual || atual.locked) return;
+
+      e.preventDefault();
+      setLayoutJson((prev) => ({
+        ...prev,
+        elements: prev.elements.map((el) => {
+          if (el.id !== selectedElementId || el.locked) return el;
+          if (k === 'ArrowLeft') return { ...el, x: Math.max(0, el.x - step) } as LayoutElemento;
+          if (k === 'ArrowRight') return { ...el, x: el.x + step } as LayoutElemento;
+          if (k === 'ArrowUp') return { ...el, y: Math.max(0, el.y - step) } as LayoutElemento;
+          if (k === 'ArrowDown') return { ...el, y: el.y + step } as LayoutElemento;
+          return el;
+        }),
+      }));
+      setHasUnsavedChanges(true);
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, [selectedElementId, handleDeleteSelected]);
 
   if (isLoading) {
@@ -316,32 +647,46 @@ export default function LayoutEtiquetaEditorPage() {
         
         {/* COLUNA 1: ESQUERDA (Toolbox & Variáveis) */}
         <aside className="w-72 flex-none bg-[#0b1324] border-r border-white/10 flex flex-col overflow-y-auto custom-scrollbar p-4 gap-8 z-10">
-          <EtiquetaToolbox onAddElement={handleAddElement} />
+          <EtiquetaToolbox onAddElement={handleAddElement} onAddVariavel={handleAddVariavel} />
           <PlaceholdersPanel onInsertPlaceholder={handleInsertPlaceholder} />
         </aside>
 
-        {/* COLUNA 2: CENTRO (Canvas Workspace) */}
-        <main className="flex-1 bg-[#060816] relative overflow-auto flex items-center justify-center p-8">
+        {/* COLUNA 2: CENTRO (Canvas Workspace) — tabIndex para foco e atalhos */}
+        <main
+          ref={canvasWorkspaceRef}
+          tabIndex={0}
+          className="flex-1 bg-[#060816] relative overflow-auto flex items-center justify-center p-8 outline-none focus-visible:ring-2 focus-visible:ring-violet-500/35 focus-visible:ring-inset rounded-sm"
+          onMouseDown={(ev) => {
+            const alvo = ev.target as HTMLElement;
+            if (alvo.closest('[data-layout-etiqueta-canvas]')) {
+              canvasWorkspaceRef.current?.focus({ preventScroll: true });
+            }
+          }}
+        >
           <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: 'radial-gradient(#475569 1px, transparent 1px)', backgroundSize: '24px 24px' }} />
           
-          <div className="relative shadow-[0_0_50px_rgba(0,0,0,0.5)] ring-1 ring-white/20"
-               style={{ 
-                 width: layoutJson.canvas.width, 
-                 height: layoutJson.canvas.height,
-                 backgroundColor: layoutJson.canvas.background || '#ffffff'
-               }}>
-            
+          <div
+            data-layout-etiqueta-canvas
+            className="relative shadow-[0_0_50px_rgba(0,0,0,0.5)] ring-1 ring-white/20"
+            style={{
+              width: layoutJson.canvas.width,
+              height: layoutJson.canvas.height,
+              backgroundColor: layoutJson.canvas.background || '#ffffff',
+            }}
+          >
             <EtiquetaCanvasEditor 
               elements={layoutJson.elements}
               selectedId={selectedElementId}
               onSelect={setSelectedElementId}
               onUpdateElement={handleUpdateElement}
             />
-
           </div>
 
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#08101f]/80 backdrop-blur border border-white/10 px-4 py-2 rounded-full flex items-center gap-2 text-xs text-slate-400 shadow-xl pointer-events-none">
-            <MousePointer2 size={14} /> Selecione um elemento para editar. Pressione Delete para remover.
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#08101f]/80 backdrop-blur border border-white/10 px-4 py-2 rounded-full flex items-center gap-2 text-xs text-slate-400 shadow-xl pointer-events-none max-w-[95%] text-center leading-snug">
+            <MousePointer2 size={14} className="shrink-0" />
+            <span>
+              Clique na etiqueta para focar o canvas. Setas 1px (Shift 10px), Ctrl+C / Ctrl+V, Delete.
+            </span>
           </div>
         </main>
 
@@ -364,6 +709,7 @@ export default function LayoutEtiquetaEditorPage() {
             <EtiquetaPropertiesPanel 
               selectedElement={selectedElementData}
               onUpdateElement={handleUpdateElement}
+              onReplaceElement={handleReplaceElement}
             />
           </div>
         </aside>

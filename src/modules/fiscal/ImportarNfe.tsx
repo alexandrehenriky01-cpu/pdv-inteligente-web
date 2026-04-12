@@ -22,17 +22,61 @@ export interface ICfop {
   id: string;
   codigo: string;
   descricao: string;
+  /** Aliases do motor fiscal (NaturezaOperacao) */
+  codigoCfop?: string;
+  descricaoInterna?: string;
   tipoOperacao: string;
   movimentaEstoque: boolean;
 }
 
 export interface IItemXmlPreview {
+  numeroItem?: number;
+  /** cProd do XML */
+  codigo?: string;
   descricaoOriginal: string;
   ean: string;
+  ncm?: string;
+  /** CFOP constante no XML (operação do emitente) */
+  cfopNota?: string;
   quantidade: number;
   valorUnitario: number;
+  valorTotal?: number;
+  unidadeMedida?: string;
   produtoIdSelecionado: string | null;
   produtoNomeSelecionado: string;
+  produtoCodigoSelecionado?: string;
+}
+
+export interface INfeDuplicataPreview {
+  numero?: string;
+  dataVencimento?: string;
+  valor?: number;
+}
+
+export interface INfeCobrancaPreview {
+  fatura?: {
+    numero?: string;
+    valorOriginal?: number;
+    valorDesconto?: number;
+    valorLiquido?: number;
+  };
+  duplicatas?: INfeDuplicataPreview[];
+}
+
+export interface ITotaisFiscaisNfePreview {
+  baseCalculoIcms?: number;
+  valorIcms?: number;
+  baseCalculoIcmsSt?: number;
+  valorIcmsSt?: number;
+  valorIpi?: number;
+  valorPis?: number;
+  valorCofins?: number;
+  valorTotalProdutos?: number;
+  valorTotalNota?: number;
+  valorFrete?: number;
+  valorSeguro?: number;
+  valorDesconto?: number;
+  valorOutrasDespesas?: number;
 }
 
 export interface IPreviewXml {
@@ -41,13 +85,47 @@ export interface IPreviewXml {
     serie: string;
     dataEmissao: string;
     valorTotalDocumento: number;
+    valorTotalProdutos?: number;
     chaveAcesso: string;
+    naturezaOperacao?: string;
+    modelo?: string;
   };
   fornecedor: {
     razaoSocial: string;
     cnpjCpf: string;
+    nomeFantasia?: string;
+    inscricaoEstadual?: string;
+    indicadorIE?: 'CONTRIBUINTE' | 'NAO_CONTRIBUINTE' | 'ISENTO';
+    cep?: string;
+    logradouro?: string;
+    numero?: string;
+    complemento?: string;
+    bairro?: string;
+    cidade?: string;
+    estado?: string;
   };
   itens: IItemXmlPreview[];
+  /** Enriquecido pelo backend a partir do XML (ICMSTot, cobr, infAdic) */
+  totaisFiscais?: ITotaisFiscaisNfePreview;
+  cobranca?: INfeCobrancaPreview;
+  infComplementar?: string;
+  /** CFOPs constantes nos itens da nota (operação do emitente) */
+  cfopsNota?: string[];
+}
+
+/** Resposta de GET /api/compras/recebimento-mercadorias/pedidos-elegiveis */
+export interface IPedidoElegivelNfe {
+  id: string;
+  status: string;
+  dataPedido: string;
+  fornecedor: { id: string; razaoSocial: string; nomeFantasia?: string; cnpjCpf: string };
+  itens: Array<{
+    id: string;
+    produtoId: string;
+    quantidadePedida: string;
+    quantidadeRecebida: string;
+    produto: { id: string; nome: string; codigo: string };
+  }>;
 }
 
 export interface IProdutoBusca {
@@ -57,6 +135,7 @@ export interface IProdutoBusca {
 }
 
 export interface IPayloadEntradaXml extends IPreviewXml {
+  pedidoCompraId: string;
   cfopId: string;
   movimentaEstoque: boolean;
 }
@@ -70,6 +149,9 @@ export function ImportarNfe() {
   const [cfopsDisponiveis, setCfopsDisponiveis] = useState<ICfop[]>([]);
   const [selectedCfopId, setSelectedCfopId] = useState('');
   const [movimentaEstoque, setMovimentaEstoque] = useState(false);
+  const [pedidosP2p, setPedidosP2p] = useState<IPedidoElegivelNfe[]>([]);
+  const [carregandoPedidosP2p, setCarregandoPedidosP2p] = useState(false);
+  const [pedidoCompraId, setPedidoCompraId] = useState('');
 
   const [produtosPesquisa, setProdutosPesquisa] = useState<IProdutoBusca[]>([]);
   const [termoPesquisa, setTermoPesquisa] = useState('');
@@ -85,8 +167,10 @@ export function ImportarNfe() {
   useEffect(() => {
     const carregarDadosIniciais = async () => {
       try {
-        const resCfop = await api.get<ICfop[]>('/api/cfops');
-        setCfopsDisponiveis(resCfop.data.filter((c) => c.tipoOperacao === 'ENTRADA'));
+        const resCfop = await api.get<{ sucesso?: boolean; dados?: ICfop[] } | ICfop[]>('/api/cfops');
+        const raw = resCfop.data;
+        const lista: ICfop[] = Array.isArray(raw) ? raw : raw?.dados ?? [];
+        setCfopsDisponiveis(lista.filter((c) => c.tipoOperacao === 'ENTRADA'));
       } catch (err) {
         const error = err as AxiosError<{ error?: string }>;
         console.error('Erro ao carregar CFOPs', error.response?.data || error.message);
@@ -94,6 +178,38 @@ export function ImportarNfe() {
     };
     carregarDadosIniciais();
   }, []);
+
+  const apenasDigitosDoc = (v: string) => String(v || '').replace(/\D/g, '');
+
+  useEffect(() => {
+    if (!previewData) {
+      setPedidosP2p([]);
+      setPedidoCompraId('');
+      return;
+    }
+
+    const carregarPedidos = async () => {
+      setCarregandoPedidosP2p(true);
+      try {
+        const res = await api.get<{ sucesso: boolean; dados?: IPedidoElegivelNfe[] }>(
+          '/api/compras/recebimento-mercadorias/pedidos-elegiveis',
+        );
+        const lista = res.data.sucesso && res.data.dados ? res.data.dados : [];
+        const alvo = apenasDigitosDoc(previewData.fornecedor.cnpjCpf);
+        const filtrados = lista.filter((p) => apenasDigitosDoc(p.fornecedor.cnpjCpf) === alvo);
+        setPedidosP2p(filtrados);
+        setPedidoCompraId('');
+      } catch (err) {
+        const error = err as AxiosError<{ erro?: string }>;
+        console.error('Erro ao carregar pedidos P2P', error.response?.data || error.message);
+        setPedidosP2p([]);
+      } finally {
+        setCarregandoPedidosP2p(false);
+      }
+    };
+
+    void carregarPedidos();
+  }, [previewData]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -145,14 +261,46 @@ export function ImportarNfe() {
 
   const handleConfirmarEntrada = async () => {
     if (!previewData) return;
-    if (!selectedCfopId) return alert('⚠️ Selecione uma Operação Fiscal (CFOP).');
+    if (!selectedCfopId) return alert('⚠️ SELECIONE UMA OPERAÇÃO FISCAL (CFOP).');
+    if (!pedidoCompraId) return alert('⚠️ SELECIONE O PEDIDO DE COMPRA (P2P) DO EMITENTE.');
+    if (!movimentaEstoque) {
+      return alert('⚠️ CONFIRME A MOVIMENTAÇÃO DE ESTOQUE PARA INTEGRAR AO RECEBIMENTO P2P.');
+    }
+    const semVinculo = previewData.itens.some((it) => !it.produtoIdSelecionado);
+    if (semVinculo) {
+      return alert(
+        '⚠️ VINCULE CADA ITEM DA NOTA A UM PRODUTO DO ESTOQUE QUE EXISTA NO PEDIDO DE COMPRA (SEM CADASTRO AVULSO NESTE FLUXO).',
+      );
+    }
+
+    const pedidoSel = pedidosP2p.find((p) => p.id === pedidoCompraId);
+    if (pedidoSel) {
+      const idsNoPedido = new Set(pedidoSel.itens.map((i) => i.produtoId));
+      const fora = previewData.itens.filter((it) => it.produtoIdSelecionado && !idsNoPedido.has(it.produtoIdSelecionado));
+      if (fora.length > 0) {
+        return alert(
+          '⚠️ EXISTEM PRODUTOS VINCULADOS QUE NÃO CONSTAM NO PEDIDO SELECIONADO. AJUSTE O PEDIDO OU O VÍNCULO.',
+        );
+      }
+    }
 
     setSalvando(true);
     try {
       const payload: IPayloadEntradaXml = {
         ...previewData,
+        pedidoCompraId,
         cfopId: selectedCfopId,
         movimentaEstoque,
+        itens: previewData.itens.map((it, idx) => ({
+          numeroItem: it.numeroItem ?? idx + 1,
+          descricaoOriginal: it.descricaoOriginal,
+          ean: it.ean,
+          quantidade: it.quantidade,
+          valorUnitario: it.valorUnitario,
+          valorTotal: it.valorTotal ?? it.quantidade * it.valorUnitario,
+          unidadeMedida: it.unidadeMedida || 'UN',
+          produtoIdSelecionado: it.produtoIdSelecionado,
+        })),
       };
 
       const response = await api.post<{ message?: string }>('/api/nfe/entradas/salvar', payload);
@@ -255,8 +403,9 @@ export function ImportarNfe() {
               </h1>
 
               <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-300 sm:text-[15px]">
-                Importe o XML do fornecedor, vincule produtos do estoque e aplique
-                a regra fiscal e contábil antes de integrar ao ERP.
+                Importe o XML, vincule cada linha a produtos que existam no pedido de compra (P2P), escolha o
+                CFOP de entrada e confirme: o sistema grava a NF fiscal, cria o DocumentoEntrada, atualiza
+                estoque e gera o título a pagar na mesma transação.
               </p>
             </div>
           </div>
@@ -477,6 +626,70 @@ export function ImportarNfe() {
               )}
             </div>
 
+            <div className="overflow-hidden rounded-[30px] border border-white/10 bg-[#08101f]/90 shadow-[0_20px_50px_rgba(0,0,0,0.35)] backdrop-blur-xl">
+              <div className="border-b border-white/10 bg-black/10 p-6">
+                <h3 className="flex items-center gap-3 text-sm font-black uppercase tracking-[0.18em] text-cyan-300">
+                  <Database className="h-5 w-5" />
+                  Recebimento P2P (Compras)
+                </h3>
+              </div>
+
+              <div className="space-y-5 p-6">
+                <div className="md:max-w-2xl">
+                  <label className={labelClass}>Pedido de compra (mesmo CNPJ do emitente) *</label>
+                  <select
+                    value={pedidoCompraId}
+                    onChange={(e) => setPedidoCompraId(e.target.value)}
+                    disabled={carregandoPedidosP2p}
+                    className={`${inputClass} font-bold uppercase tracking-wide text-cyan-200`}
+                  >
+                    <option value="">
+                      {carregandoPedidosP2p
+                        ? 'CARREGANDO PEDIDOS ELEGÍVEIS...'
+                        : '-- SELECIONE O PEDIDO VINCULADO A ESTA NF --'}
+                    </option>
+                    {pedidosP2p.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {`#${p.id.slice(0, 8).toUpperCase()} · ${p.status.replace(/_/g, ' ')} · ${new Date(p.dataPedido).toLocaleDateString('pt-BR')}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {!carregandoPedidosP2p && previewData && pedidosP2p.length === 0 && (
+                  <div className="flex items-start gap-3 rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm font-bold uppercase tracking-wide text-amber-200">
+                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                    <span>
+                      NENHUM PEDIDO ELEGÍVEL PARA ESTE FORNECEDOR. APROVE / ENVIE UM PEDIDO NO MÓDULO DE
+                      COMPRAS OU AGUARDE STATUS COMPATÍVEL (APROVADO, ENVIADO OU RECEBIDO PARCIAL).
+                    </span>
+                  </div>
+                )}
+
+                {pedidoCompraId && previewData && (
+                  <div className="grid gap-4 rounded-2xl border border-white/10 bg-[#0b1324] p-5 md:grid-cols-2">
+                    <div>
+                      <p className="mb-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+                        Valor total (XML)
+                      </p>
+                      <p className="text-xl font-black uppercase text-white">
+                        {formatarMoeda(previewData.documento.valorTotalDocumento)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="mb-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+                        Provisão financeira / estoque (P2P)
+                      </p>
+                      <p className="text-sm font-bold uppercase leading-relaxed text-slate-300">
+                        ESTOQUE E TÍTULO A PAGAR USAM PREÇO E QUANTIDADE DO PEDIDO (NÃO O VALOR DO XML).
+                        QUANTIDADES DA NF DEVEM CABER NO SALDO EM ABERTO DE CADA LINHA.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
             <div className="overflow-hidden rounded-[30px] border border-white/10 bg-[#08101f]/90 shadow-[0_25px_60px_rgba(0,0,0,0.35)] backdrop-blur-xl">
               <div className="border-b border-white/10 bg-black/10 p-6">
                 <h3 className="flex items-center gap-3 text-sm font-black uppercase tracking-[0.18em] text-white">
@@ -577,8 +790,8 @@ export function ImportarNfe() {
 
               <button
                 onClick={handleConfirmarEntrada}
-                disabled={salvando || !selectedCfopId}
-                className="inline-flex w-full items-center justify-center gap-3 rounded-2xl border border-emerald-400/20 bg-gradient-to-r from-emerald-600 to-emerald-500 px-10 py-4 font-black text-white shadow-[0_0_20px_rgba(16,185,129,0.22)] transition-all hover:scale-[1.02] hover:brightness-110 disabled:opacity-50 disabled:hover:scale-100 sm:w-auto"
+                disabled={salvando || !selectedCfopId || !pedidoCompraId || !movimentaEstoque}
+                className="inline-flex w-full items-center justify-center gap-3 rounded-2xl border border-emerald-400/20 bg-gradient-to-r from-emerald-600 to-emerald-500 px-10 py-4 font-black uppercase tracking-wide text-white shadow-[0_0_20px_rgba(16,185,129,0.22)] transition-all hover:scale-[1.02] hover:brightness-110 disabled:opacity-50 disabled:hover:scale-100 sm:w-auto"
               >
                 {salvando ? (
                   <Loader2 className="h-6 w-6 animate-spin" />

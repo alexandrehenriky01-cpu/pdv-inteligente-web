@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Layout } from '../../../components/Layout';
 import { api } from '../../../services/api';
 import {
@@ -14,6 +15,10 @@ import {
   ShieldCheck,
   CircleDollarSign,
   ClipboardList,
+  Printer,
+  Mail,
+  MessageCircle,
+  RotateCcw,
 } from 'lucide-react';
 import { AxiosError } from 'axios';
 
@@ -45,7 +50,51 @@ export interface IPedidoCompra {
   valorTotal: string | number;
   fornecedor?: IFornecedorResumo;
   motivoReprovacao?: string;
+  observacao?: string | null;
+  observacoes?: string | null;
+  condicaoPagamento?: string | null;
+  prazoEntrega?: string | null;
   itens: IItemPedido[];
+}
+
+type TabPedido = 'PENDENTES' | 'APROVADOS' | 'REPROVADOS' | 'CANCELADOS';
+
+function pedidoNaTab(status: string, tab: TabPedido): boolean {
+  if (tab === 'PENDENTES') return status === 'AGUARDANDO_DIRETORIA';
+  if (tab === 'APROVADOS') {
+    return ['APROVADO', 'ENVIADO_FORNECEDOR', 'RECEBIDO_PARCIAL', 'RECEBIDO_TOTAL'].includes(
+      status,
+    );
+  }
+  if (tab === 'REPROVADOS') return status === 'REPROVADO';
+  if (tab === 'CANCELADOS') return status === 'CANCELADO';
+  return false;
+}
+
+/** Aba correta para exibir um pedido (ex.: deep link a partir da listagem de NF-e). */
+function tabParaStatusPedido(status: string): TabPedido {
+  if (pedidoNaTab(status, 'PENDENTES')) return 'PENDENTES';
+  if (pedidoNaTab(status, 'APROVADOS')) return 'APROVADOS';
+  if (pedidoNaTab(status, 'REPROVADOS')) return 'REPROVADOS';
+  if (pedidoNaTab(status, 'CANCELADOS')) return 'CANCELADOS';
+  return 'APROVADOS';
+}
+
+function montarResumoPedidoTexto(p: IPedidoCompra): string {
+  const forn = p.fornecedor?.nomeFantasia || p.fornecedor?.razaoSocial || 'FORNECEDOR';
+  let t = `PEDIDO DE COMPRA #${p.id.substring(0, 6).toUpperCase()}\n`;
+  t += `FORNECEDOR: ${forn}\n`;
+  if (p.condicaoPagamento) t += `CONDIÇÃO PAGTO: ${p.condicaoPagamento}\n`;
+  if (p.prazoEntrega) t += `PRAZO ENTREGA: ${p.prazoEntrega}\n`;
+  if (p.observacoes || p.observacao) {
+    t += `OBS: ${p.observacoes || p.observacao}\n`;
+  }
+  t += '\nITENS:\n';
+  p.itens.forEach((i) => {
+    t += `- ${Number(i.quantidadePedida)} x ${i.produto?.nome || 'ITEM'} (UNIT R$ ${Number(i.valorUnitario).toFixed(2)})\n`;
+  });
+  t += `\nVALOR TOTAL: R$ ${Number(p.valorTotal).toFixed(2)}`;
+  return t;
 }
 
 interface IUsuarioStorage {
@@ -54,8 +103,19 @@ interface IUsuarioStorage {
 }
 
 export function PedidosCompraPage() {
+  const location = useLocation();
+  const highlightPedidoId =
+    (location.state as { highlightPedidoId?: string } | null)?.highlightPedidoId ?? undefined;
+  const highlightAplicado = useRef<string | null>(null);
+
   const [pedidos, setPedidos] = useState<IPedidoCompra[]>([]);
   const [loading, setLoading] = useState(false);
+  const [tabPedido, setTabPedido] = useState<TabPedido>('PENDENTES');
+  const [editPedidoId, setEditPedidoId] = useState<string | null>(null);
+  const [editObservacoes, setEditObservacoes] = useState('');
+  const [editCondicao, setEditCondicao] = useState('');
+  const [editPrazo, setEditPrazo] = useState('');
+  const [salvandoCampos, setSalvandoCampos] = useState(false);
 
   const usuarioLogado = JSON.parse(localStorage.getItem('@PDVUsuario') || '{}') as IUsuarioStorage;
   const isDiretoria =
@@ -67,6 +127,21 @@ export function PedidosCompraPage() {
     carregarDados();
   }, []);
 
+  useEffect(() => {
+    if (!highlightPedidoId || pedidos.length === 0) return;
+    if (highlightAplicado.current === highlightPedidoId) return;
+    const alvo = pedidos.find((p) => p.id === highlightPedidoId);
+    if (!alvo) return;
+    highlightAplicado.current = highlightPedidoId;
+    setTabPedido(tabParaStatusPedido(alvo.status));
+    window.setTimeout(() => {
+      document.getElementById(`pedido-compra-${highlightPedidoId}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    }, 280);
+  }, [highlightPedidoId, pedidos]);
+
   const carregarDados = async () => {
     setLoading(true);
     try {
@@ -77,6 +152,82 @@ export function PedidosCompraPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const pedidosFiltrados = pedidos.filter((p) => pedidoNaTab(p.status, tabPedido));
+
+  const iniciarEdicaoPedido = (p: IPedidoCompra) => {
+    setEditPedidoId(p.id);
+    setEditObservacoes(p.observacoes || p.observacao || '');
+    setEditCondicao(p.condicaoPagamento || '');
+    setEditPrazo(p.prazoEntrega || '');
+  };
+
+  const salvarCamposPedido = async () => {
+    if (!editPedidoId) return;
+    const u = (s: string) => s.trim().toUpperCase();
+    setSalvandoCampos(true);
+    try {
+      await api.patch(`/api/compras/pedidos/${editPedidoId}`, {
+        observacoes: editObservacoes.trim() ? u(editObservacoes) : null,
+        condicaoPagamento: editCondicao.trim() ? u(editCondicao) : null,
+        prazoEntrega: editPrazo.trim() ? u(editPrazo) : null,
+      });
+      setEditPedidoId(null);
+      await carregarDados();
+    } catch (err) {
+      const e = err as AxiosError<{ error?: string }>;
+      alert(e.response?.data?.error || 'Erro ao salvar dados do pedido.');
+    } finally {
+      setSalvandoCampos(false);
+    }
+  };
+
+  const reabrirPedido = async (id: string) => {
+    if (!window.confirm('Reabrir este pedido para nova avaliação da diretoria?')) return;
+    try {
+      await api.put(`/api/compras/pedidos/${id}/reabrir`);
+      alert('✅ Pedido reaberto como pendente.');
+      await carregarDados();
+    } catch (err) {
+      const e = err as AxiosError<{ error?: string }>;
+      alert(e.response?.data?.error || 'Erro ao reabrir.');
+    }
+  };
+
+  const imprimirPedido = (p: IPedidoCompra) => {
+    const w = window.open('', '_blank');
+    if (!w) return;
+    const texto = montarResumoPedidoTexto(p)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    w.document.write(
+      `<!DOCTYPE html><html><head><title>Pedido ${p.id.substring(0, 6)}</title>
+      <style>body{font-family:system-ui;padding:24px;background:#fff;color:#111}</style></head>
+      <body><pre style="white-space:pre-wrap;font-family:monospace">${texto}</pre>
+      <script>window.onload=function(){window.print();}</script></body></html>`,
+    );
+    w.document.close();
+  };
+
+  const emailPedido = (p: IPedidoCompra) => {
+    const emails =
+      p.fornecedor?.contatos
+        ?.map((c) => c.email)
+        .filter(Boolean)
+        .join(',') || '';
+    const subject = encodeURIComponent(`PEDIDO DE COMPRA #${p.id.substring(0, 6).toUpperCase()}`);
+    const body = encodeURIComponent(montarResumoPedidoTexto(p));
+    window.location.href = `mailto:${emails}?subject=${subject}&body=${body}`;
+  };
+
+  const whatsappPedido = (p: IPedidoCompra) => {
+    const texto = montarResumoPedidoTexto(p);
+    window.open(
+      `https://wa.me/?text=${encodeURIComponent(texto)}`,
+      '_blank',
+    );
   };
 
   const avaliarPedido = async (id: string, status: 'APROVADO' | 'REPROVADO') => {
@@ -165,6 +316,13 @@ export function PedidosCompraPage() {
             Reprovado
           </span>
         );
+      case 'CANCELADO':
+        return (
+          <span className="inline-flex w-max items-center gap-1 rounded-full border border-slate-500/30 bg-slate-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">
+            <XCircle className="h-3 w-3" />
+            Cancelado
+          </span>
+        );
       default:
         return (
           <span className="inline-flex w-max rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">
@@ -219,6 +377,28 @@ export function PedidosCompraPage() {
           </div>
         </div>
 
+        <div className="flex flex-wrap gap-2 rounded-2xl border border-white/10 bg-[#08101f]/80 p-2">
+          {(['PENDENTES', 'APROVADOS', 'REPROVADOS', 'CANCELADOS'] as TabPedido[]).map(
+            (t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTabPedido(t)}
+                className={`rounded-xl px-4 py-2 text-xs font-black uppercase tracking-wider transition-colors ${
+                  tabPedido === t
+                    ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20'
+                    : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                }`}
+              >
+                {t === 'PENDENTES' && 'Pendentes'}
+                {t === 'APROVADOS' && 'Aprovados'}
+                {t === 'REPROVADOS' && 'Reprovados'}
+                {t === 'CANCELADOS' && 'Cancelados'}
+              </button>
+            ),
+          )}
+        </div>
+
         <div className="flex-1 space-y-6">
           {loading && pedidos.length === 0 ? (
             <div className="rounded-[30px] border border-white/10 bg-[#08101f]/90 p-12 text-center shadow-[0_20px_50px_rgba(0,0,0,0.35)]">
@@ -231,7 +411,7 @@ export function PedidosCompraPage() {
                 </p>
               </div>
             </div>
-          ) : pedidos.length === 0 ? (
+          ) : pedidosFiltrados.length === 0 ? (
             <div className="relative overflow-hidden rounded-[30px] border border-white/10 border-dashed bg-[#08101f]/90 py-20 text-center shadow-[0_20px_50px_rgba(0,0,0,0.35)]">
               <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.08),_transparent_28%)]" />
               <div className="relative z-10 flex flex-col items-center">
@@ -239,18 +419,25 @@ export function PedidosCompraPage() {
                   <AlertCircle className="h-12 w-12 text-slate-500" />
                 </div>
                 <h3 className="mb-2 text-2xl font-black text-white">
-                  Nenhum pedido de compra
+                  {pedidos.length === 0
+                    ? 'Nenhum pedido de compra'
+                    : 'Nenhum pedido nesta aba'}
                 </h3>
                 <p className="max-w-md text-base leading-7 text-slate-400">
-                  Os pedidos aparecerão aqui quando as cotações forem aprovadas.
+                  {pedidos.length === 0
+                    ? 'Os pedidos aparecerão aqui quando as cotações forem aprovadas.'
+                    : 'Altere a aba acima ou aguarde novos movimentos no fluxo.'}
                 </p>
               </div>
             </div>
           ) : (
-            pedidos.map(pedido => (
+            pedidosFiltrados.map(pedido => (
               <div
                 key={pedido.id}
-                className="overflow-hidden rounded-[30px] border border-white/10 bg-[#08101f]/90 shadow-[0_20px_50px_rgba(0,0,0,0.35)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:border-emerald-400/15"
+                id={`pedido-compra-${pedido.id}`}
+                className={`overflow-hidden rounded-[30px] border border-white/10 bg-[#08101f]/90 shadow-[0_20px_50px_rgba(0,0,0,0.35)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:border-emerald-400/15 ${
+                  highlightPedidoId === pedido.id ? 'ring-2 ring-cyan-400/40 ring-offset-2 ring-offset-[#0b1020]' : ''
+                }`}
               >
                 <div className="flex flex-col gap-4 border-b border-white/10 bg-black/10 p-6 md:flex-row md:items-start md:justify-between">
                   <div>
@@ -268,6 +455,32 @@ export function PedidosCompraPage() {
                         {pedido.fornecedor?.nomeFantasia || pedido.fornecedor?.razaoSocial}
                       </strong>
                     </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        title="Imprimir"
+                        onClick={() => imprimirPedido(pedido)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:border-violet-400/30 hover:text-white"
+                      >
+                        <Printer className="h-3.5 w-3.5" /> Imprimir
+                      </button>
+                      <button
+                        type="button"
+                        title="E-mail"
+                        onClick={() => emailPedido(pedido)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:border-sky-400/30 hover:text-white"
+                      >
+                        <Mail className="h-3.5 w-3.5" /> E-mail
+                      </button>
+                      <button
+                        type="button"
+                        title="WhatsApp"
+                        onClick={() => whatsappPedido(pedido)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-300 hover:border-emerald-400/30 hover:text-white"
+                      >
+                        <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
+                      </button>
+                    </div>
                   </div>
 
                   <div className="w-full rounded-2xl border border-white/10 bg-[#0b1324] p-4 md:w-auto md:min-w-[230px] md:text-right">
@@ -336,6 +549,59 @@ export function PedidosCompraPage() {
                         <div className="mb-1 flex items-center gap-2">
                           <ShieldCheck className="h-4 w-4 text-violet-300" />
                           <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">
+                            Dados antes da aprovação
+                          </p>
+                        </div>
+                        {editPedidoId === pedido.id ? (
+                          <div className="space-y-2">
+                            <input
+                              value={editObservacoes}
+                              onChange={(e) => setEditObservacoes(e.target.value)}
+                              placeholder="OBSERVAÇÕES"
+                              className="w-full rounded-xl border border-white/10 bg-[#0b1324] px-3 py-2 text-xs text-white uppercase placeholder:text-slate-600"
+                            />
+                            <input
+                              value={editCondicao}
+                              onChange={(e) => setEditCondicao(e.target.value)}
+                              placeholder="CONDIÇÃO DE PAGAMENTO"
+                              className="w-full rounded-xl border border-white/10 bg-[#0b1324] px-3 py-2 text-xs text-white uppercase placeholder:text-slate-600"
+                            />
+                            <input
+                              value={editPrazo}
+                              onChange={(e) => setEditPrazo(e.target.value)}
+                              placeholder="PRAZO DE ENTREGA"
+                              className="w-full rounded-xl border border-white/10 bg-[#0b1324] px-3 py-2 text-xs text-white uppercase placeholder:text-slate-600"
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                disabled={salvandoCampos}
+                                onClick={() => void salvarCamposPedido()}
+                                className="flex-1 rounded-xl bg-violet-600 py-2 text-xs font-black text-white"
+                              >
+                                {salvandoCampos ? '...' : 'Salvar'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditPedidoId(null)}
+                                className="rounded-xl border border-white/10 px-3 py-2 text-xs text-slate-400"
+                              >
+                                Cancelar
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => iniciarEdicaoPedido(pedido)}
+                            className="w-full rounded-xl border border-violet-500/30 py-2 text-xs font-bold text-violet-200 hover:bg-violet-500/10"
+                          >
+                            Editar observações / pagamento / prazo
+                          </button>
+                        )}
+
+                        <div className="border-t border-white/10 pt-3">
+                          <p className="mb-2 text-xs font-black uppercase tracking-[0.18em] text-slate-500">
                             Alçada de aprovação
                           </p>
                         </div>
@@ -394,6 +660,18 @@ export function PedidosCompraPage() {
                         </p>
                       </div>
                     )}
+
+                    {isDiretoria &&
+                      ['APROVADO', 'REPROVADO', 'CANCELADO'].includes(pedido.status) && (
+                        <button
+                          type="button"
+                          onClick={() => void reabrirPedido(pedido.id)}
+                          className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-amber-500/30 py-3 text-xs font-black uppercase tracking-wider text-amber-200 hover:bg-amber-500/10"
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                          Desfazer / Reavaliar
+                        </button>
+                      )}
                   </div>
                 </div>
               </div>

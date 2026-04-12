@@ -2,14 +2,16 @@
 import React from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { IUsuario } from '../types/auth';
+import { AUTH_TOKEN_KEY, AUTH_USER_KEY } from '../services/authStorage';
+import { clearAuthSessionAndAxios } from '../services/authSession';
 
 interface PrivateRouteProps {
   rolesPermitidas?: Array<IUsuario['role']>;
 }
 
 export function PrivateRoute({ rolesPermitidas }: PrivateRouteProps) {
-  const token = localStorage.getItem('@PDVToken');
-  const usuarioRaw = localStorage.getItem('@PDVUsuario');
+  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  const usuarioRaw = localStorage.getItem(AUTH_USER_KEY);
   
   // 1. Verifica se está logado (se não tem token ou dados do usuário)
   if (!token || !usuarioRaw) {
@@ -27,10 +29,8 @@ export function PrivateRoute({ rolesPermitidas }: PrivateRouteProps) {
 
     // 3. Tudo certo, renderiza a tela solicitada
     return <Outlet />;
-  } catch (error) {
-    // Se houver erro ao dar parse no JSON do localStorage (dados corrompidos), força o login
-    localStorage.removeItem('@PDVToken');
-    localStorage.removeItem('@PDVUsuario');
+  } catch {
+    clearAuthSessionAndAxios();
     return <Navigate to="/" replace />;
   }
 }

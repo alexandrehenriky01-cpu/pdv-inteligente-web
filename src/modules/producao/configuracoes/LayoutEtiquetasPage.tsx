@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'; // ✅ NOVO: Para navegar até o
 import { 
   Plus, Search, Edit2, Trash2, Power, PowerOff, Eye, X, AlertTriangle, Loader2, Palette 
 } from 'lucide-react'; // ✅ NOVO: Ícone Palette para o botão de Design
+import { Layout } from '../../../components/Layout';
 import { api } from '../../../services/api';
 import LayoutEtiquetaFormModal from './LayoutEtiquetaFormModal'; // Ajustei o caminho relativo
 import { LayoutEtiquetaJson } from '../types/etiquetas';
@@ -18,11 +19,19 @@ type TipoEtiquetaLayout =
   | 'CAIXA'
   | 'GENERICA';
 
+type TipoAplicacaoEtiqueta = 'INTERNA' | 'ROTULO' | 'TESTEIRA';
+
+function rotuloTipoAplicacao(t: TipoAplicacaoEtiqueta | string): string {
+  if (t === 'ROTULO') return 'RÓTULO';
+  return t;
+}
+
 interface LayoutEtiqueta {
   id: string;
   nome: string;
   descricao?: string | null;
   tipoEtiqueta: TipoEtiquetaLayout;
+  tipoAplicacao: TipoAplicacaoEtiqueta;
   ativo: boolean;
   larguraMm?: number | null;
   alturaMm?: number | null;
@@ -54,7 +63,8 @@ const LayoutEtiquetasPage: React.FC = () => {
   const [busca, setBusca] = useState('');
   const [buscaDebounce, setBuscaDebounce] = useState('');
   const [statusFiltro, setStatusFiltro] = useState('');
-  const [tipoFiltro, setTipoFiltro] = useState('');
+  const [tipoAplicacaoFiltro, setTipoAplicacaoFiltro] = useState('');
+  const [categoriaEtiquetaFiltro, setCategoriaEtiquetaFiltro] = useState('');
 
   // Helper seguro para extrair erro de requisições sem usar 'any'
   const getErrorMessage = (error: unknown): string => {
@@ -78,7 +88,8 @@ const LayoutEtiquetasPage: React.FC = () => {
       const params = new URLSearchParams();
       if (buscaDebounce) params.append('busca', buscaDebounce);
       if (statusFiltro) params.append('status', statusFiltro);
-      if (tipoFiltro) params.append('tipoEtiqueta', tipoFiltro);
+      if (tipoAplicacaoFiltro) params.append('tipoAplicacao', tipoAplicacaoFiltro);
+      if (categoriaEtiquetaFiltro) params.append('tipoEtiqueta', categoriaEtiquetaFiltro);
 
       // ✅ CORREÇÃO: Adicionado o /api antes de /layout-etiquetas
       const response = await api.get(`/api/layout-etiquetas?${params.toString()}`);
@@ -94,7 +105,7 @@ const LayoutEtiquetasPage: React.FC = () => {
   useEffect(() => {
     carregarLayouts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buscaDebounce, statusFiltro, tipoFiltro]);
+  }, [buscaDebounce, statusFiltro, tipoAplicacaoFiltro, categoriaEtiquetaFiltro]);
 
   const handleNovo = () => {
     setLayoutEditando(null);
@@ -173,8 +184,8 @@ const LayoutEtiquetasPage: React.FC = () => {
   const totalAtivos = useMemo(() => layouts.filter((l) => l.ativo).length, [layouts]);
 
   return (
-    <div className="min-h-screen bg-[#08101f] text-white p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <Layout>
+      <div className="max-w-7xl mx-auto space-y-6 text-white">
         
         {/* HEADER E CARDS DE RESUMO */}
         <div className="rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_top_left,_rgba(139,92,246,0.16),_transparent_26%),linear-gradient(135deg,_#0b1020_0%,_#08101f_45%,_#0a1224_100%)] p-6 shadow-[0_25px_70px_rgba(0,0,0,0.40)] sm:p-8">
@@ -237,11 +248,24 @@ const LayoutEtiquetasPage: React.FC = () => {
             </select>
 
             <select
-              value={tipoFiltro}
-              onChange={(e) => setTipoFiltro(e.target.value)}
-              className="rounded-xl border border-gray-700 bg-[#131b2f] px-4 py-3 text-white outline-none focus:border-violet-500"
+              value={tipoAplicacaoFiltro}
+              onChange={(e) => setTipoAplicacaoFiltro(e.target.value)}
+              className="rounded-xl border border-gray-700 bg-[#131b2f] px-4 py-3 text-white outline-none focus:border-violet-500 min-w-[160px]"
+              aria-label="Filtrar por tipo de aplicação"
             >
               <option value="">Todos os tipos</option>
+              <option value="INTERNA">INTERNA</option>
+              <option value="ROTULO">RÓTULO</option>
+              <option value="TESTEIRA">TESTEIRA</option>
+            </select>
+
+            <select
+              value={categoriaEtiquetaFiltro}
+              onChange={(e) => setCategoriaEtiquetaFiltro(e.target.value)}
+              className="rounded-xl border border-gray-700 bg-[#131b2f] px-4 py-3 text-white outline-none focus:border-violet-500 min-w-[180px]"
+              aria-label="Filtrar por categoria operacional"
+            >
+              <option value="">Todas as categorias</option>
               <option value="PRODUTO">Produto</option>
               <option value="PESAGEM">Pesagem</option>
               <option value="PRODUCAO">Produção</option>
@@ -272,7 +296,7 @@ const LayoutEtiquetasPage: React.FC = () => {
                 <thead className="bg-[#131b2f] text-gray-300 text-sm uppercase tracking-wider">
                   <tr>
                     <th className="p-4 text-left font-medium">Nome do Layout</th>
-                    <th className="p-4 text-left font-medium">Tipo</th>
+                    <th className="p-4 text-left font-medium">Tipo / Categoria</th>
                     <th className="p-4 text-left font-medium">Dimensões</th>
                     <th className="p-4 text-center font-medium">Status</th>
                     <th className="p-4 text-right font-medium">Ações</th>
@@ -301,8 +325,11 @@ const LayoutEtiquetasPage: React.FC = () => {
 
                           <td className="p-4">
                             <span className="inline-flex rounded-lg border border-violet-500/20 bg-violet-500/10 px-2.5 py-1 text-xs font-semibold text-violet-300">
-                              {layout.tipoEtiqueta}
+                              {rotuloTipoAplicacao(layout.tipoAplicacao ?? 'ROTULO')}
                             </span>
+                            <div className="mt-1 text-[11px] text-gray-500">
+                              {layout.tipoEtiqueta}
+                            </div>
                           </td>
 
                           <td className="p-4 text-sm text-gray-400">
@@ -471,7 +498,7 @@ const LayoutEtiquetasPage: React.FC = () => {
         </div>
       )}
 
-    </div>
+    </Layout>
   );
 };
 

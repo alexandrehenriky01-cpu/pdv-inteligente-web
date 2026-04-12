@@ -121,7 +121,7 @@ export const FormEndereco: React.FC<IFormPessoaProps> = ({
 
             <input
               type="text"
-              value={formData.cep}
+              value={formData.cep ?? ''}
               onChange={handleCepChange}
               onBlur={e => buscarCep(e.target.value)}
               className="w-full bg-[#0b1324] border border-white/10 rounded-xl px-4 py-3.5 text-white font-mono placeholder:text-slate-500 focus:outline-none focus:border-violet-500/40 focus:ring-2 focus:ring-violet-500/20"
@@ -138,7 +138,7 @@ export const FormEndereco: React.FC<IFormPessoaProps> = ({
 
             <input
               type="text"
-              value={formData.logradouro}
+              value={formData.logradouro ?? ''}
               onChange={e =>
                 setFormData({
                   ...formData,
@@ -159,7 +159,7 @@ export const FormEndereco: React.FC<IFormPessoaProps> = ({
 
             <input
               type="text"
-              value={formData.numero}
+              value={formData.numero ?? ''}
               onChange={e =>
                 setFormData({
                   ...formData,
@@ -180,7 +180,7 @@ export const FormEndereco: React.FC<IFormPessoaProps> = ({
 
             <input
               type="text"
-              value={formData.complemento}
+              value={formData.complemento ?? ''}
               onChange={e =>
                 setFormData({
                   ...formData,
@@ -201,7 +201,7 @@ export const FormEndereco: React.FC<IFormPessoaProps> = ({
 
             <input
               type="text"
-              value={formData.bairro}
+              value={formData.bairro ?? ''}
               onChange={e =>
                 setFormData({
                   ...formData,
@@ -221,7 +221,7 @@ export const FormEndereco: React.FC<IFormPessoaProps> = ({
 
             <input
               type="text"
-              value={formData.cidade}
+              value={formData.cidade ?? ''}
               onChange={e =>
                 setFormData({
                   ...formData,
@@ -241,7 +241,7 @@ export const FormEndereco: React.FC<IFormPessoaProps> = ({
 
             <input
               type="text"
-              value={formData.estado}
+              value={formData.estado ?? ''}
               onChange={handleEstadoChange}
               className="w-full bg-[#0b1324] border border-white/10 rounded-xl px-4 py-3.5 text-white uppercase font-bold text-center focus:outline-none focus:border-violet-500/40 focus:ring-2 focus:ring-violet-500/20"
               placeholder="SP"

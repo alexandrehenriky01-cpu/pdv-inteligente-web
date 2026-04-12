@@ -161,13 +161,23 @@ export function OrdemProducao() {
       const [resOPs, resProd, resEstacoes] = await Promise.all([
         api.get<IOP[]>('/api/producao/op').catch(() => ({ data: [] })),
         api.get<IProduto[]>('/api/produtos'),
-        api.get<EstacaoTrabalho[]>('/api/estacoes-trabalho').catch(() => ({ data: [] }))
+        api.get('/api/estacoes-trabalho').catch(() => ({ data: { data: [] as EstacaoTrabalho[] } }))
       ]);
       setOps(resOPs.data);
-      setEstacoes(resEstacoes.data);
-      
-      if (resEstacoes.data.length > 0 && !estacaoSelecionada) {
-        setEstacaoSelecionada(resEstacoes.data[0].id);
+      const estPayload = resEstacoes.data as unknown;
+      const listaEst: EstacaoTrabalho[] = Array.isArray(estPayload)
+        ? estPayload
+        : estPayload &&
+            typeof estPayload === 'object' &&
+            estPayload !== null &&
+            'data' in estPayload &&
+            Array.isArray((estPayload as { data: EstacaoTrabalho[] }).data)
+          ? (estPayload as { data: EstacaoTrabalho[] }).data
+          : [];
+      setEstacoes(listaEst);
+
+      if (listaEst.length > 0 && !estacaoSelecionada) {
+        setEstacaoSelecionada(listaEst[0].id);
       }
 
       const produtosComPeso = resProd.data.map(p => ({

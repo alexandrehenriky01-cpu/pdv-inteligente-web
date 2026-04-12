@@ -8,6 +8,7 @@ import {
   Users, Calculator, Bot, ShieldAlert, XCircle
 } from 'lucide-react';
 import { AxiosError } from 'axios';
+import { toast } from 'react-toastify';
 
 // --- INTERFACES ---
 interface IProduto {
@@ -254,7 +255,17 @@ export function PdvFoodService() {
         pagamentos: pagamentosFinais.map(p => ({ tipoPagamento: p.tipoPagamento, valor: p.valor }))
       };
 
-      await api.post('/api/vendas', payload);
+      const resVenda = await api.post<{
+        auryaCorrecoesTributarias?: { nomeProduto: string; cstAnterior: string; csosnNovo: string }[];
+      }>('/api/vendas', payload);
+
+      const correcoes = resVenda.data.auryaCorrecoesTributarias ?? [];
+      for (const c of correcoes) {
+        toast.success(
+          `Aurya: CST do produto ${c.nomeProduto} corrigido automaticamente para Simples Nacional`,
+          { autoClose: 4500 }
+        );
+      }
 
       alert('✅ Venda finalizada com sucesso! Mesa liberada.');
       

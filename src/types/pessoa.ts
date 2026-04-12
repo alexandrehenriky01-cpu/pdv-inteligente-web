@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type TipoPessoa = 'FISICA' | 'JURIDICA' | 'CLIENTE' | 'FORNECEDOR' | 'AMBOS';
+export type TipoPessoa = 'FISICA' | 'JURIDICA' | 'CLIENTE' | 'FORNECEDOR' | 'AMBOS' | 'FUNCIONARIO';
 export type RegimeTributario = 'SIMPLES_NACIONAL' | 'LUCRO_PRESUMIDO' | 'LUCRO_REAL' | '';
 
 // 🚀 NOVO: Enum exato mapeado do backend
@@ -36,8 +36,16 @@ export interface IPessoa {
   prazoPadrao: string | number;
   observacoes: string;
   obsGerais?: string;
-  contaCliente?: { nomeConta: string; codigoEstrutural: string };
-  contaFornecedor?: { nomeConta: string; codigoEstrutural: string };
+  /** SIF / SISP / SIE / SIM — fornecedores */
+  registroSanitario?: string;
+  /** Federal | Estadual | Municipal */
+  tipoInspecao?: string;
+  contaClienteId?: string;
+  contaFornecedorId?: string;
+  contaCliente?: { id?: string; nomeConta: string; codigoEstrutural: string };
+  contaFornecedor?: { id?: string; nomeConta: string; codigoEstrutural: string };
+  /** Vínculo à conta analítica genérica CONSUMIDOR FINAL (sem conta nominal). */
+  consumidorFinal?: boolean;
 }
 
 export interface IIASugestoes {

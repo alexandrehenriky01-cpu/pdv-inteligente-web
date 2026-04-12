@@ -1,348 +1,784 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../../services/api';
 import { Layout } from '../../components/Layout';
-import { AxiosError } from 'axios'; 
+import { AxiosError } from 'axios';
 
-// 🛡️ INTERFACE DE TIPAGEM ESTRITA
-export interface ICfop {
-  id?: string;
-  codigo: string;
-  descricao: string;
-  tipoOperacao: 'ENTRADA' | 'SAIDA' | string;
-  aplicacao: 'COMERCIALIZACAO' | 'USO_CONSUMO' | 'ATIVO_IMOBILIZADO' | 'SERVICO' | 'REMESSA_RETORNO' | 'OUTROS' | string;
-  movimentaEstoque: boolean;
-  geraFinanceiro: boolean;
+/** Linha retornada pela API (campos canônicos + aliases legados). */
+export interface INaturezaOperacaoApi {
+  id: string;
+  codigoCfop: string;
+  descricaoInterna: string;
+  tipoOperacao: 'ENTRADA' | 'SAIDA';
+  aplicacao?: string | null;
+  controlaEstoque: boolean;
+  controlaFinanceiro: boolean;
+  controlaContabilidade: boolean;
+  controlaLivroFiscal: boolean;
+  exigeProcessoCompras: boolean;
   somaFaturamento: boolean;
   operacaoDevolucao: boolean;
   calculaTributos: boolean;
-  cfopInverso: string;
-  contaContabil: string;
-  
-  // Impostos Atuais
-  cstIcmsPadrao: string;
-  aliquotaIcmsPadrao: string | number;
-  cstPisPadrao: string;
-  aliquotaPisPadrao: string | number;
-  cstCofinsPadrao: string;
-  aliquotaCofinsPadrao: string | number;
-  cstIpiPadrao: string;
-  aliquotaIpiPadrao: string | number;
-  
-  // Reforma Tributária
-  cstIbsCbsPadrao: string;
-  aliquotaIbsPadrao: string | number;
-  aliquotaCbsPadrao: string | number;
-  aliquotaIsPadrao: string | number;
+  cfopInverso?: string | null;
+  contaContabil?: string | null;
+  cstIcmsPadrao?: string | null;
+  aliquotaIcmsPadrao?: number | null;
+  percRedBcIcmsPadrao?: number | null;
+  cstCsosnPadrao?: string | null;
+  cstPisPadrao?: string | null;
+  aliquotaPisPadrao?: number | null;
+  cstCofinsPadrao?: string | null;
+  aliquotaCofinsPadrao?: number | null;
+  cstIpiPadrao?: string | null;
+  aliquotaIpiPadrao?: number | null;
+  ipiEnquadramento?: string | null;
+  tributacaoIcms?: unknown;
+  tributacaoPisCofins?: unknown;
+  tributacaoIpi?: unknown;
+  cstIbsCbsPadrao?: string | null;
+  aliquotaIbsPadrao?: number | null;
+  aliquotaCbsPadrao?: number | null;
+  aliquotaIsPadrao?: number | null;
+  codigo?: string;
+  descricao?: string;
+  movimentaEstoque?: boolean;
+  geraFinanceiro?: boolean;
 }
 
-export function CadastroCfop() {
-  const [cfops, setCfops] = useState<ICfop[]>([]);
-  const [loading, setLoading] = useState(false);
-  
-  const estadoInicial: ICfop = {
-    codigo: '',
-    descricao: '',
+type TabId = 'identificacao' | 'icms' | 'pis' | 'ipi';
+
+function extrairLista(res: { data: unknown }): INaturezaOperacaoApi[] {
+  const raw = res.data as { sucesso?: boolean; dados?: INaturezaOperacaoApi[] } | INaturezaOperacaoApi[];
+  if (Array.isArray(raw)) return raw;
+  return raw?.dados ?? [];
+}
+
+function jsonToText(v: unknown): string {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'string') return v;
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return '';
+  }
+}
+
+function parseJsonOpcional(raw: string): unknown | undefined {
+  const t = raw.trim();
+  if (!t) return undefined;
+  return JSON.parse(t) as unknown;
+}
+
+function formatFloat(val: string | number | null | undefined): number | null {
+  if (val === null || val === undefined || val === '') return null;
+  if (typeof val === 'number') return Number.isFinite(val) ? val : null;
+  const n = parseFloat(String(val).replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+}
+
+function estadoInicialForm(): Record<string, string | boolean | number | ''> {
+  return {
+    codigoCfop: '',
+    descricaoInterna: '',
     tipoOperacao: 'ENTRADA',
-    aplicacao: 'COMERCIALIZACAO',
-    movimentaEstoque: true,
-    geraFinanceiro: true,
+    aplicacao: '',
+    cfopInverso: '',
+    contaContabil: '',
+    controlaEstoque: true,
+    controlaFinanceiro: true,
+    controlaContabilidade: true,
+    controlaLivroFiscal: true,
+    exigeProcessoCompras: false,
     somaFaturamento: true,
     operacaoDevolucao: false,
     calculaTributos: true,
-    cfopInverso: '',
-    contaContabil: '',
-    
-    cstIcmsPadrao: '', aliquotaIcmsPadrao: '',
-    cstPisPadrao: '', aliquotaPisPadrao: '',
-    cstCofinsPadrao: '', aliquotaCofinsPadrao: '',
-    cstIpiPadrao: '', aliquotaIpiPadrao: '',
-    
+    cstIcmsPadrao: '',
+    cstCsosnPadrao: '',
+    aliquotaIcmsPadrao: '',
+    percRedBcIcmsPadrao: '',
+    cstPisPadrao: '',
+    aliquotaPisPadrao: '',
+    cstCofinsPadrao: '',
+    aliquotaCofinsPadrao: '',
+    cstIpiPadrao: '',
+    aliquotaIpiPadrao: '',
+    ipiEnquadramento: '',
     cstIbsCbsPadrao: '',
     aliquotaIbsPadrao: '',
     aliquotaCbsPadrao: '',
-    aliquotaIsPadrao: ''
+    aliquotaIsPadrao: '',
+    tributacaoIcmsJson: '',
+    tributacaoPisCofinsJson: '',
+    tributacaoIpiJson: '',
   };
+}
 
-  const [formData, setFormData] = useState<ICfop>(estadoInicial);
+function rowParaForm(n: INaturezaOperacaoApi): Record<string, string | boolean | number | ''> {
+  const cod = n.codigoCfop ?? n.codigo ?? '';
+  const desc = n.descricaoInterna ?? n.descricao ?? '';
+  return {
+    codigoCfop: cod,
+    descricaoInterna: desc,
+    tipoOperacao: n.tipoOperacao,
+    aplicacao: n.aplicacao ?? '',
+    cfopInverso: n.cfopInverso ?? '',
+    contaContabil: n.contaContabil ?? '',
+    controlaEstoque: n.controlaEstoque ?? n.movimentaEstoque ?? true,
+    controlaFinanceiro: n.controlaFinanceiro ?? n.geraFinanceiro ?? true,
+    controlaContabilidade: n.controlaContabilidade ?? true,
+    controlaLivroFiscal: n.controlaLivroFiscal ?? true,
+    exigeProcessoCompras: n.exigeProcessoCompras ?? false,
+    somaFaturamento: n.somaFaturamento ?? true,
+    operacaoDevolucao: n.operacaoDevolucao ?? false,
+    calculaTributos: n.calculaTributos ?? true,
+    cstIcmsPadrao: n.cstIcmsPadrao ?? '',
+    cstCsosnPadrao: n.cstCsosnPadrao ?? '',
+    aliquotaIcmsPadrao: n.aliquotaIcmsPadrao ?? '',
+    percRedBcIcmsPadrao: n.percRedBcIcmsPadrao ?? '',
+    cstPisPadrao: n.cstPisPadrao ?? '',
+    aliquotaPisPadrao: n.aliquotaPisPadrao ?? '',
+    cstCofinsPadrao: n.cstCofinsPadrao ?? '',
+    aliquotaCofinsPadrao: n.aliquotaCofinsPadrao ?? '',
+    cstIpiPadrao: n.cstIpiPadrao ?? '',
+    aliquotaIpiPadrao: n.aliquotaIpiPadrao ?? '',
+    ipiEnquadramento: n.ipiEnquadramento ?? '',
+    cstIbsCbsPadrao: n.cstIbsCbsPadrao ?? '',
+    aliquotaIbsPadrao: n.aliquotaIbsPadrao ?? '',
+    aliquotaCbsPadrao: n.aliquotaCbsPadrao ?? '',
+    aliquotaIsPadrao: n.aliquotaIsPadrao ?? '',
+    tributacaoIcmsJson: jsonToText(n.tributacaoIcms),
+    tributacaoPisCofinsJson: jsonToText(n.tributacaoPisCofins),
+    tributacaoIpiJson: jsonToText(n.tributacaoIpi),
+  };
+}
 
-  const carregarCfops = async () => {
+export function CadastroCfop() {
+  const [lista, setLista] = useState<INaturezaOperacaoApi[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [aba, setAba] = useState<TabId>('identificacao');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [filtroQ, setFiltroQ] = useState('');
+  const [filtroCodigo, setFiltroCodigo] = useState('');
+  const [filtroDesc, setFiltroDesc] = useState('');
+
+  const [form, setForm] = useState(() => estadoInicialForm());
+
+  const setCampo = useCallback((campo: string, valor: string | boolean | number) => {
+    setForm((prev) => ({ ...prev, [campo]: valor }));
+  }, []);
+
+  const carregarLista = useCallback(async () => {
     try {
-      // 🚀 FIM DO ANY: Tipagem estrita na resposta da API
-      const response = await api.get<ICfop[]>('/api/cfops');
-      setCfops(response.data);
+      const params: Record<string, string> = {};
+      if (filtroQ.trim()) params.q = filtroQ.trim();
+      if (filtroCodigo.trim()) params.codigoCfop = filtroCodigo.trim();
+      if (filtroDesc.trim()) params.descricaoInterna = filtroDesc.trim();
+      const response = await api.get('/api/cfops', { params });
+      setLista(extrairLista(response));
     } catch (error) {
-      console.error("Erro ao carregar CFOPs", error);
+      console.error('Erro ao carregar naturezas de operação', error);
+      setLista([]);
     }
-  };
+  }, [filtroQ, filtroCodigo, filtroDesc]);
 
   useEffect(() => {
-    carregarCfops();
-  }, []);
+    void carregarLista();
+  }, [carregarLista]);
+
+  const limparForm = () => {
+    setForm(estadoInicialForm());
+    setEditingId(null);
+    setFormError(null);
+    setAba('identificacao');
+  };
+
+  const montarPayload = () => {
+    let tributacaoIcms: unknown | undefined;
+    let tributacaoPisCofins: unknown | undefined;
+    let tributacaoIpi: unknown | undefined;
+    try {
+      tributacaoIcms = parseJsonOpcional(String(form.tributacaoIcmsJson ?? ''));
+    } catch {
+      throw new Error('JSON inválido na aba ICMS (tributação avançada).');
+    }
+    try {
+      tributacaoPisCofins = parseJsonOpcional(String(form.tributacaoPisCofinsJson ?? ''));
+    } catch {
+      throw new Error('JSON inválido na aba PIS/COFINS (tributação avançada).');
+    }
+    try {
+      tributacaoIpi = parseJsonOpcional(String(form.tributacaoIpiJson ?? ''));
+    } catch {
+      throw new Error('JSON inválido na aba IPI (tributação avançada).');
+    }
+
+    const aplicacaoStr = String(form.aplicacao ?? '').trim();
+
+    return {
+      codigoCfop: String(form.codigoCfop ?? '').trim(),
+      descricaoInterna: String(form.descricaoInterna ?? '').trim(),
+      tipoOperacao: form.tipoOperacao as 'ENTRADA' | 'SAIDA',
+      aplicacao: aplicacaoStr.length ? aplicacaoStr : null,
+      controlaEstoque: Boolean(form.controlaEstoque),
+      controlaFinanceiro: Boolean(form.controlaFinanceiro),
+      controlaContabilidade: Boolean(form.controlaContabilidade),
+      controlaLivroFiscal: Boolean(form.controlaLivroFiscal),
+      exigeProcessoCompras: Boolean(form.exigeProcessoCompras),
+      somaFaturamento: Boolean(form.somaFaturamento),
+      operacaoDevolucao: Boolean(form.operacaoDevolucao),
+      calculaTributos: Boolean(form.calculaTributos),
+      cfopInverso: String(form.cfopInverso ?? '').trim() || null,
+      contaContabil: String(form.contaContabil ?? '').trim() || null,
+      cstIcmsPadrao: String(form.cstIcmsPadrao ?? '').trim() || null,
+      aliquotaIcmsPadrao: formatFloat(form.aliquotaIcmsPadrao),
+      percRedBcIcmsPadrao: formatFloat(form.percRedBcIcmsPadrao),
+      cstCsosnPadrao: String(form.cstCsosnPadrao ?? '').trim() || null,
+      cstPisPadrao: String(form.cstPisPadrao ?? '').trim() || null,
+      aliquotaPisPadrao: formatFloat(form.aliquotaPisPadrao),
+      cstCofinsPadrao: String(form.cstCofinsPadrao ?? '').trim() || null,
+      aliquotaCofinsPadrao: formatFloat(form.aliquotaCofinsPadrao),
+      cstIpiPadrao: String(form.cstIpiPadrao ?? '').trim() || null,
+      aliquotaIpiPadrao: formatFloat(form.aliquotaIpiPadrao),
+      ipiEnquadramento: String(form.ipiEnquadramento ?? '').trim() || null,
+      tributacaoIcms,
+      tributacaoPisCofins,
+      tributacaoIpi,
+      cstIbsCbsPadrao: String(form.cstIbsCbsPadrao ?? '').trim() || null,
+      aliquotaIbsPadrao: formatFloat(form.aliquotaIbsPadrao),
+      aliquotaCbsPadrao: formatFloat(form.aliquotaCbsPadrao),
+      aliquotaIsPadrao: formatFloat(form.aliquotaIsPadrao),
+    };
+  };
 
   const handleSalvar = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    
-    const formatFloat = (val: string | number) => {
-      if (!val) return null;
-      if (typeof val === 'number') return val;
-      return parseFloat(val.replace(',', '.'));
-    };
+    setFormError(null);
+    if (!String(form.codigoCfop ?? '').trim() || !String(form.descricaoInterna ?? '').trim()) {
+      setFormError('Código CFOP e descrição interna são obrigatórios.');
+      setAba('identificacao');
+      return;
+    }
 
-    const payload = {
-      ...formData,
-      aliquotaIcmsPadrao: formatFloat(formData.aliquotaIcmsPadrao),
-      aliquotaPisPadrao: formatFloat(formData.aliquotaPisPadrao),
-      aliquotaCofinsPadrao: formatFloat(formData.aliquotaCofinsPadrao),
-      aliquotaIpiPadrao: formatFloat(formData.aliquotaIpiPadrao),
-      aliquotaIbsPadrao: formatFloat(formData.aliquotaIbsPadrao),
-      aliquotaCbsPadrao: formatFloat(formData.aliquotaCbsPadrao),
-      aliquotaIsPadrao: formatFloat(formData.aliquotaIsPadrao),
-    };
-
+    let payload: ReturnType<typeof montarPayload>;
     try {
-      // 🚀 FIM DO ANY: Tipagem na criação
-      await api.post<ICfop>('/api/cfops', payload);
-      alert('✅ CFOP cadastrado com sucesso!');
-      carregarCfops();
-      setFormData(estadoInicial);
+      payload = montarPayload();
     } catch (err) {
-      const error = err as AxiosError<{error?: string}>;
-      alert(error.response?.data?.error || 'Erro ao salvar CFOP');
+      setFormError(err instanceof Error ? err.message : 'Dados inválidos.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      if (editingId) {
+        await api.put(`/api/cfops/${editingId}`, payload);
+      } else {
+        await api.post('/api/cfops', payload);
+      }
+      await carregarLista();
+      limparForm();
+    } catch (err) {
+      const ax = err as AxiosError<{ erro?: string; error?: string }>;
+      const msg =
+        ax.response?.data?.erro ||
+        ax.response?.data?.error ||
+        (err instanceof Error ? err.message : 'Erro ao salvar.');
+      setFormError(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleExcluir = async (id?: string) => {
-    if (!id) return;
-    if (!window.confirm('Tem certeza que deseja excluir este CFOP?')) return;
+  const handleExcluir = async (id: string) => {
+    if (!window.confirm('Excluir esta natureza de operação?')) return;
     try {
-      // 🚀 ROTA CORRIGIDA: Estava no singular (/api/cfop), mudei para o plural RESTful (/api/cfops)
       await api.delete(`/api/cfops/${id}`);
-      carregarCfops();
+      await carregarLista();
+      if (editingId === id) limparForm();
     } catch (err) {
-      const error = err as AxiosError<{error?: string}>;
-      console.error(error);
-      alert('Erro ao excluir. O CFOP pode estar em uso.');
+      const ax = err as AxiosError<{ erro?: string; error?: string }>;
+      alert(ax.response?.data?.erro || ax.response?.data?.error || 'Erro ao excluir.');
     }
   };
 
-  const inputClass = "w-full p-2.5 bg-[#0b1324] border border-white/10 text-white rounded-xl focus:outline-none focus:border-violet-500/40 focus:ring-2 focus:ring-violet-500/20 transition-all placeholder:text-slate-500 text-sm";
-  const labelClass = "block text-xs font-bold text-slate-400 uppercase tracking-[0.16em] mb-1.5";
+  const inputClass =
+    'w-full p-2.5 bg-[#0b1324] border border-white/10 text-white rounded-xl focus:outline-none focus:border-violet-500/40 focus:ring-2 focus:ring-violet-500/20 transition-all placeholder:text-slate-500 text-sm';
+  const labelClass = 'block text-xs font-bold text-slate-400 uppercase tracking-[0.16em] mb-1.5';
+  const tabBtn = (id: TabId, label: string) => (
+    <button
+      type="button"
+      key={id}
+      onClick={() => setAba(id)}
+      className={`rounded-xl px-3 py-2 text-xs font-bold uppercase tracking-wider transition-all ${
+        aba === id
+          ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/40'
+          : 'bg-[#0b1324] text-slate-400 hover:text-white border border-white/10'
+      }`}
+    >
+      {label}
+    </button>
+  );
+
+  const toggleRow = (n: INaturezaOperacaoApi) => {
+    setEditingId(n.id);
+    setForm(rowParaForm(n));
+    setFormError(null);
+    setAba('identificacao');
+  };
+
+  const cfopDisplay = (n: INaturezaOperacaoApi) => n.codigoCfop ?? n.codigo ?? '—';
+  const descDisplay = (n: INaturezaOperacaoApi) => n.descricaoInterna ?? n.descricao ?? '—';
 
   return (
     <Layout>
       <div className="mx-auto max-w-7xl space-y-6 pb-12">
-        
-        {/* CABEÇALHO */}
         <div className="relative overflow-hidden rounded-[30px] border border-white/10 bg-[radial-gradient(circle_at_top_left,_rgba(139,92,246,0.16),_transparent_26%),radial-gradient(circle_at_top_right,_rgba(16,185,129,0.10),_transparent_20%),linear-gradient(135deg,_#0b1020_0%,_#08101f_45%,_#0a1224_100%)] p-6 shadow-[0_25px_70px_rgba(0,0,0,0.40)]">
-          <h1 className="text-3xl font-extrabold text-white">Regras Fiscais e CFOP</h1>
-          <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-violet-500/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-violet-300">Fiscal Intelligence</div>
-          <p className="text-slate-400 mt-1">Configure os Códigos Fiscais, regras de tributação (Atuais e Reforma Tributária) e automações do ERP.</p>
+          <h1 className="text-3xl font-extrabold text-white">Natureza de operação / motor fiscal</h1>
+          <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-violet-500/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.18em] text-violet-300">
+            CFOP duplicável por descrição interna
+          </div>
+          <p className="mt-2 text-slate-400">
+            Cadastre várias regras com o mesmo código CFOP (ex.: 5102) diferenciadas pela descrição interna e parâmetros
+            de estoque, financeiro e tributação.
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          
-          {/* FORMULÁRIO */}
-          <div className="lg:col-span-6 bg-[#08101f]/90 backdrop-blur-xl p-6 rounded-[30px] shadow-[0_25px_60px_rgba(0,0,0,0.35)] border border-white/10 h-fit">
-            <h2 className="mb-6 flex items-center gap-2 border-b border-white/10 pb-3 text-lg font-bold text-violet-300">
-              <span className="text-2xl">⚙️</span> Novo Cadastro de CFOP
-            </h2>
-            
-            <form onSubmit={handleSalvar} className="space-y-6">
-              
-              {/* BLOCO 1: DADOS BÁSICOS */}
-              <div className="space-y-4">
-                <h3 className="text-xs font-bold text-violet-300 uppercase tracking-[0.16em] flex items-center gap-2">
-                  <span className="w-4 h-0.5 bg-violet-400 rounded-full"></span> Identificação
-                </h3>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className={labelClass}>Código CFOP</label>
-                    <input required type="text" placeholder="Ex: 5102"
-                      value={formData.codigo} onChange={e => setFormData({...formData, codigo: e.target.value})}
-                      className={inputClass} />
-                  </div>
-                  <div>
-                    <label className={labelClass}>Tipo</label>
-                    <select 
-                      value={formData.tipoOperacao} onChange={e => setFormData({...formData, tipoOperacao: e.target.value})}
-                      className={inputClass}>
-                      <option value="ENTRADA">Entrada</option>
-                      <option value="SAIDA">Saída</option>
-                    </select>
-                  </div>
-                </div>
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
+          <div className="lg:col-span-6">
+            <div className="flex h-fit flex-col rounded-[30px] border border-white/10 bg-[#08101f]/90 p-6 shadow-[0_25px_60px_rgba(0,0,0,0.35)] backdrop-blur-xl">
+              <h2 className="mb-4 flex items-center gap-2 border-b border-white/10 pb-3 text-lg font-bold text-violet-300">
+                <span className="text-2xl">⚙️</span>
+                {editingId ? 'Editar natureza de operação' : 'Nova natureza de operação'}
+              </h2>
 
-                <div>
-                  <label className={labelClass}>Descrição da Operação</label>
-                  <input required type="text" placeholder="Ex: Venda de mercadoria"
-                    value={formData.descricao} onChange={e => setFormData({...formData, descricao: e.target.value})}
-                    className={inputClass} />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className={labelClass}>Aplicação / Finalidade</label>
-                    <select 
-                      value={formData.aplicacao} onChange={e => setFormData({...formData, aplicacao: e.target.value})}
-                      className={inputClass}>
-                      <option value="COMERCIALIZACAO">Comercialização / Revenda</option>
-                      <option value="USO_CONSUMO">Uso e Consumo</option>
-                      <option value="ATIVO_IMOBILIZADO">Ativo Imobilizado</option>
-                      <option value="SERVICO">Prestação de Serviço</option>
-                      <option value="REMESSA_RETORNO">Remessa / Retorno</option>
-                      <option value="OUTROS">Outros</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className={labelClass}>CFOP Inverso (Devolução)</label>
-                    <input type="text" placeholder="Ex: 1202"
-                      value={formData.cfopInverso} onChange={e => setFormData({...formData, cfopInverso: e.target.value})}
-                      className={inputClass} />
-                  </div>
-                </div>
+              <div className="mb-4 flex flex-wrap gap-2">
+                {tabBtn('identificacao', '1 · Identificação')}
+                {tabBtn('icms', '2 · ICMS')}
+                {tabBtn('pis', '3 · PIS/COFINS')}
+                {tabBtn('ipi', '4 · IPI')}
               </div>
 
-              {/* BLOCO 2: AUTOMAÇÕES DO ERP */}
-              <div className="p-4 bg-[#0b1324]/70 rounded-2xl border border-white/10 space-y-3">
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-[0.16em] mb-3">Comportamento no ERP</h3>
-                
-                <label className="flex items-center gap-3 cursor-pointer group">
-                  <div className="relative flex items-center justify-center">
-                    <input type="checkbox" checked={formData.movimentaEstoque}
-                      onChange={e => setFormData({...formData, movimentaEstoque: e.target.checked})}
-                      className="peer appearance-none w-5 h-5 border-2 border-white/10 rounded bg-[#08101f] checked:bg-violet-500 checked:border-violet-400 transition-all cursor-pointer" />
-                    <svg className="absolute w-3 h-3 text-slate-900 pointer-events-none opacity-0 peer-checked:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"></path></svg>
-                  </div>
-                  <span className="text-sm font-medium text-slate-300 group-hover:text-white transition-colors">Movimenta Estoque Físico</span>
-                </label>
+              {formError && (
+                <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                  {formError}
+                </div>
+              )}
 
-                <label className="flex items-center gap-3 cursor-pointer group">
-                  <div className="relative flex items-center justify-center">
-                    <input type="checkbox" checked={formData.geraFinanceiro}
-                      onChange={e => setFormData({...formData, geraFinanceiro: e.target.checked})}
-                      className="peer appearance-none w-5 h-5 border-2 border-white/10 rounded bg-[#08101f] checked:bg-emerald-500 checked:border-emerald-400 transition-all cursor-pointer" />
-                    <svg className="absolute w-3 h-3 text-slate-900 pointer-events-none opacity-0 peer-checked:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"></path></svg>
-                  </div>
-                  <span className="text-sm font-medium text-slate-300 group-hover:text-white transition-colors">Gera Financeiro (A Pagar/Receber)</span>
-                </label>
+              <form onSubmit={handleSalvar} className="flex flex-1 flex-col">
+                <div className="min-h-[420px] space-y-4">
+                  {aba === 'identificacao' && (
+                    <>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className={labelClass}>Código CFOP</label>
+                          <input
+                            required
+                            type="text"
+                            placeholder="Ex: 5102"
+                            value={String(form.codigoCfop ?? '')}
+                            onChange={(e) => setCampo('codigoCfop', e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelClass}>Tipo</label>
+                          <select
+                            value={String(form.tipoOperacao)}
+                            onChange={(e) => setCampo('tipoOperacao', e.target.value)}
+                            className={inputClass}
+                          >
+                            <option value="ENTRADA">Entrada</option>
+                            <option value="SAIDA">Saída</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div>
+                        <label className={labelClass}>Descrição interna</label>
+                        <input
+                          required
+                          type="text"
+                          placeholder="Ex: Compra p/ comercialização — fora do estado"
+                          value={String(form.descricaoInterna ?? '')}
+                          onChange={(e) => setCampo('descricaoInterna', e.target.value)}
+                          className={inputClass}
+                        />
+                      </div>
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div>
+                          <label className={labelClass}>Aplicação / finalidade (texto livre)</label>
+                          <input
+                            type="text"
+                            placeholder="Ex: COMERCIALIZACAO"
+                            value={String(form.aplicacao ?? '')}
+                            onChange={(e) => setCampo('aplicacao', e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelClass}>CFOP inverso (devolução)</label>
+                          <input
+                            type="text"
+                            value={String(form.cfopInverso ?? '')}
+                            onChange={(e) => setCampo('cfopInverso', e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className={labelClass}>Conta contábil (referência)</label>
+                        <input
+                          type="text"
+                          value={String(form.contaContabil ?? '')}
+                          onChange={(e) => setCampo('contaContabil', e.target.value)}
+                          className={inputClass}
+                        />
+                      </div>
 
-                <label className="flex items-center gap-3 cursor-pointer group">
-                  <div className="relative flex items-center justify-center">
-                    <input type="checkbox" checked={formData.somaFaturamento}
-                      onChange={e => setFormData({...formData, somaFaturamento: e.target.checked})}
-                      className="peer appearance-none w-5 h-5 border-2 border-white/10 rounded bg-[#08101f] checked:bg-fuchsia-500 checked:border-fuchsia-400 transition-all cursor-pointer" />
-                    <svg className="absolute w-3 h-3 text-slate-900 pointer-events-none opacity-0 peer-checked:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"></path></svg>
-                  </div>
-                  <span className="text-sm font-medium text-slate-300 group-hover:text-white transition-colors">Soma no Faturamento Bruto</span>
-                </label>
-              </div>
+                      <div className="space-y-3 rounded-2xl border border-white/10 bg-[#0b1324]/70 p-4">
+                        <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                          Controles internos
+                        </p>
+                        {(
+                          [
+                            ['controlaEstoque', 'Controla estoque físico'],
+                            ['controlaFinanceiro', 'Controla financeiro (AP/AR)'],
+                            ['controlaContabilidade', 'Controla contabilidade'],
+                            ['controlaLivroFiscal', 'Controla livro fiscal'],
+                            ['exigeProcessoCompras', 'Exige processo de compras'],
+                            ['somaFaturamento', 'Soma faturamento bruto'],
+                            ['operacaoDevolucao', 'Operação de devolução'],
+                            ['calculaTributos', 'Calcular tributos na operação'],
+                          ] as const
+                        ).map(([key, label]) => (
+                          <label key={key} className="flex cursor-pointer items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(form[key])}
+                              onChange={(e) => setCampo(key, e.target.checked)}
+                              className="h-4 w-4 rounded border-white/20 bg-[#08101f] accent-violet-500"
+                            />
+                            <span className="text-sm text-slate-300">{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </>
+                  )}
 
-              {/* BLOCO 3: IMPOSTOS ATUAIS */}
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-bold text-emerald-300 uppercase tracking-[0.16em] flex items-center gap-2">
-                    <span className="w-4 h-0.5 bg-emerald-300 rounded-full"></span> Impostos Atuais
-                  </h3>
-                  <label className="flex items-center gap-2 cursor-pointer bg-slate-950/50 px-3 py-1.5 rounded-full border border-slate-700">
-                    <input type="checkbox" checked={formData.calculaTributos} onChange={e => setFormData({...formData, calculaTributos: e.target.checked})} className="w-3.5 h-3.5 accent-emerald-500 rounded" />
-                    <span className="text-xs font-bold text-slate-300">Calcular Tributos</span>
-                  </label>
+                  {aba === 'icms' && (
+                    <>
+                      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                        <div className="col-span-2">
+                          <label className={labelClass}>CST ICMS</label>
+                          <input
+                            type="text"
+                            value={String(form.cstIcmsPadrao ?? '')}
+                            onChange={(e) => setCampo('cstIcmsPadrao', e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <label className={labelClass}>CSOSN (Simples)</label>
+                          <input
+                            type="text"
+                            value={String(form.cstCsosnPadrao ?? '')}
+                            onChange={(e) => setCampo('cstCsosnPadrao', e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <label className={labelClass}>Alíquota ICMS (%)</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={String(form.aliquotaIcmsPadrao ?? '')}
+                            onChange={(e) => setCampo('aliquotaIcmsPadrao', e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <label className={labelClass}>% redução BC ICMS</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={String(form.percRedBcIcmsPadrao ?? '')}
+                            onChange={(e) => setCampo('percRedBcIcmsPadrao', e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-fuchsia-500/20 bg-gradient-to-br from-fuchsia-900/15 to-transparent p-4">
+                        <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-fuchsia-300">
+                          Reforma tributária (IBS/CBS/IS)
+                        </p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="col-span-2">
+                            <label className={labelClass}>CST IBS/CBS</label>
+                            <input
+                              type="text"
+                              value={String(form.cstIbsCbsPadrao ?? '')}
+                              onChange={(e) => setCampo('cstIbsCbsPadrao', e.target.value)}
+                              className={inputClass}
+                            />
+                          </div>
+                          <div>
+                            <label className={labelClass}>Alíq. IBS (%)</label>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={String(form.aliquotaIbsPadrao ?? '')}
+                              onChange={(e) => setCampo('aliquotaIbsPadrao', e.target.value)}
+                              className={inputClass}
+                            />
+                          </div>
+                          <div>
+                            <label className={labelClass}>Alíq. CBS (%)</label>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={String(form.aliquotaCbsPadrao ?? '')}
+                              onChange={(e) => setCampo('aliquotaCbsPadrao', e.target.value)}
+                              className={inputClass}
+                            />
+                          </div>
+                          <div className="col-span-2">
+                            <label className={labelClass}>Alíq. IS (%)</label>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={String(form.aliquotaIsPadrao ?? '')}
+                              onChange={(e) => setCampo('aliquotaIsPadrao', e.target.value)}
+                              className={inputClass}
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className={labelClass}>JSON — tributação ICMS (avançado)</label>
+                        <textarea
+                          rows={5}
+                          value={String(form.tributacaoIcmsJson ?? '')}
+                          onChange={(e) => setCampo('tributacaoIcmsJson', e.target.value)}
+                          placeholder='{"modBC":"3","pRedBC":"0"}'
+                          className={`${inputClass} font-mono text-xs`}
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {aba === 'pis' && (
+                    <>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className={labelClass}>CST PIS</label>
+                          <input
+                            type="text"
+                            value={String(form.cstPisPadrao ?? '')}
+                            onChange={(e) => setCampo('cstPisPadrao', e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelClass}>Alíquota PIS (%)</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={String(form.aliquotaPisPadrao ?? '')}
+                            onChange={(e) => setCampo('aliquotaPisPadrao', e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelClass}>CST COFINS</label>
+                          <input
+                            type="text"
+                            value={String(form.cstCofinsPadrao ?? '')}
+                            onChange={(e) => setCampo('cstCofinsPadrao', e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelClass}>Alíquota COFINS (%)</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={String(form.aliquotaCofinsPadrao ?? '')}
+                            onChange={(e) => setCampo('aliquotaCofinsPadrao', e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className={labelClass}>JSON — PIS/COFINS (avançado)</label>
+                        <textarea
+                          rows={5}
+                          value={String(form.tributacaoPisCofinsJson ?? '')}
+                          onChange={(e) => setCampo('tributacaoPisCofinsJson', e.target.value)}
+                          className={`${inputClass} font-mono text-xs`}
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {aba === 'ipi' && (
+                    <>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className={labelClass}>CST IPI</label>
+                          <input
+                            type="text"
+                            value={String(form.cstIpiPadrao ?? '')}
+                            onChange={(e) => setCampo('cstIpiPadrao', e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelClass}>Alíquota IPI (%)</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={String(form.aliquotaIpiPadrao ?? '')}
+                            onChange={(e) => setCampo('aliquotaIpiPadrao', e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <label className={labelClass}>Enquadramento IPI</label>
+                          <input
+                            type="text"
+                            value={String(form.ipiEnquadramento ?? '')}
+                            onChange={(e) => setCampo('ipiEnquadramento', e.target.value)}
+                            className={inputClass}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className={labelClass}>JSON — IPI (avançado)</label>
+                        <textarea
+                          rows={5}
+                          value={String(form.tributacaoIpiJson ?? '')}
+                          onChange={(e) => setCampo('tributacaoIpiJson', e.target.value)}
+                          className={`${inputClass} font-mono text-xs`}
+                        />
+                      </div>
+                    </>
+                  )}
                 </div>
 
-                <div className="grid grid-cols-4 gap-3">
-                  <div className="col-span-2"><label className={labelClass}>CST ICMS</label><input type="text" placeholder="Ex: 000" value={formData.cstIcmsPadrao} onChange={e => setFormData({...formData, cstIcmsPadrao: e.target.value})} className={inputClass} /></div>
-                  <div className="col-span-2"><label className={labelClass}>Alíq. ICMS (%)</label><input type="number" step="0.01" placeholder="Ex: 18.00" value={formData.aliquotaIcmsPadrao} onChange={e => setFormData({...formData, aliquotaIcmsPadrao: e.target.value})} className={inputClass} /></div>
-                  
-                  <div className="col-span-2"><label className={labelClass}>CST PIS/COFINS</label><input type="text" placeholder="Ex: 01" value={formData.cstPisPadrao} onChange={e => setFormData({...formData, cstPisPadrao: e.target.value, cstCofinsPadrao: e.target.value})} className={inputClass} /></div>
-                  <div><label className={labelClass}>Alíq. PIS</label><input type="number" step="0.01" placeholder="%" value={formData.aliquotaPisPadrao} onChange={e => setFormData({...formData, aliquotaPisPadrao: e.target.value})} className={inputClass} /></div>
-                  <div><label className={labelClass}>Alíq. COF</label><input type="number" step="0.01" placeholder="%" value={formData.aliquotaCofinsPadrao} onChange={e => setFormData({...formData, aliquotaCofinsPadrao: e.target.value})} className={inputClass} /></div>
+                <div className="mt-6 flex flex-col gap-3 border-t border-white/10 pt-4 sm:flex-row">
+                  {editingId && (
+                    <button
+                      type="button"
+                      onClick={limparForm}
+                      className="rounded-xl border border-white/15 px-5 py-3 text-sm font-bold text-slate-300 hover:bg-white/5"
+                    >
+                      Cancelar edição
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 py-3.5 font-bold text-white shadow-[0_0_20px_rgba(139,92,246,0.3)] transition-all hover:shadow-[0_0_25px_rgba(139,92,246,0.45)] disabled:opacity-70"
+                  >
+                    {loading ? 'Salvando…' : editingId ? 'Atualizar natureza' : 'Salvar natureza'}
+                  </button>
                 </div>
-              </div>
-
-              {/* BLOCO 4: REFORMA TRIBUTÁRIA (Destaque Roxo/Aurya) */}
-              <div className="p-5 bg-gradient-to-br from-fuchsia-900/20 to-[#08101f]/50 rounded-2xl border border-fuchsia-500/20 space-y-4 relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-fuchsia-500/10 rounded-full blur-3xl"></div>
-                <h3 className="text-xs font-bold text-fuchsia-300 uppercase tracking-[0.16em] relative z-10 flex items-center gap-2">
-                  <span className="w-4 h-0.5 bg-fuchsia-300 rounded-full"></span> Reforma Tributária (IVA)
-                </h3>
-                
-                <div className="grid grid-cols-4 gap-3 relative z-10">
-                  <div className="col-span-4"><label className={labelClass}>CST IBS/CBS</label><input type="text" placeholder="Novo CST" value={formData.cstIbsCbsPadrao} onChange={e => setFormData({...formData, cstIbsCbsPadrao: e.target.value})} className={inputClass} /></div>
-                  
-                  <div className="col-span-2"><label className={labelClass}>Alíq. IBS (%) - Est/Mun</label><input type="number" step="0.01" placeholder="%" value={formData.aliquotaIbsPadrao} onChange={e => setFormData({...formData, aliquotaIbsPadrao: e.target.value})} className={inputClass} /></div>
-                  <div className="col-span-2"><label className={labelClass}>Alíq. CBS (%) - Fed</label><input type="number" step="0.01" placeholder="%" value={formData.aliquotaCbsPadrao} onChange={e => setFormData({...formData, aliquotaCbsPadrao: e.target.value})} className={inputClass} /></div>
-                  <div className="col-span-4"><label className={labelClass}>Alíq. Imposto Seletivo (IS) (%)</label><input type="number" step="0.01" placeholder="%" value={formData.aliquotaIsPadrao} onChange={e => setFormData({...formData, aliquotaIsPadrao: e.target.value})} className={inputClass} /></div>
-                </div>
-              </div>
-
-              <button type="submit" disabled={loading}
-                className="w-full py-3.5 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white font-bold rounded-xl shadow-[0_0_20px_rgba(139,92,246,0.3)] hover:shadow-[0_0_25px_rgba(139,92,246,0.45)] transition-all transform hover:-translate-y-0.5 disabled:opacity-70 disabled:transform-none flex justify-center items-center gap-2">
-                {loading ? 'Salvando...' : '💾 Salvar Regra CFOP'}
-              </button>
-            </form>
+              </form>
+            </div>
           </div>
 
-          {/* LISTAGEM */}
-          <div className="lg:col-span-6 bg-[#08101f]/90 backdrop-blur-xl rounded-[30px] shadow-[0_25px_60px_rgba(0,0,0,0.35)] border border-white/10 overflow-hidden h-fit">
-            <div className="p-5 bg-[#0b1324] border-b border-white/10">
-              <h2 className="text-lg font-bold text-white">Operações Cadastradas</h2>
-            </div>
-            
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="bg-[#0b1324] text-xs text-slate-400 uppercase border-b border-white/10">
-                    <th className="p-4 font-bold tracking-wider">CFOP</th>
-                    <th className="p-4 font-bold tracking-wider">Descrição</th>
-                    <th className="p-4 font-bold tracking-wider text-center">Tributos</th>
-                    <th className="p-4 font-bold tracking-wider text-center">Ações</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {cfops.length === 0 ? (
-                    <tr><td colSpan={4} className="p-12 text-center text-slate-500">Nenhum CFOP cadastrado ainda.</td></tr>
-                  ) : (
-                    cfops.map((cfop) => (
-                      <tr key={cfop.id} className="hover:bg-white/5 transition-colors">
-                        <td className="p-4">
-                          <div className="font-black text-white text-lg">{cfop.codigo}</div>
-                          <span className={`inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full font-bold border ${cfop.tipoOperacao === 'ENTRADA' ? 'bg-sky-500/10 text-sky-300 border-sky-500/20' : 'bg-amber-500/10 text-amber-300 border-amber-500/20'}`}>
-                            {cfop.tipoOperacao}
-                          </span>
-                        </td>
-                        <td className="p-4 text-sm text-slate-300 font-medium">
-                          {cfop.descricao}
-                          <div className="text-xs text-slate-500 mt-1">Aplicação: <span className="text-slate-400">{cfop.aplicacao?.replace('_', ' ')}</span></div>
-                        </td>
-                        <td className="p-4">
-                          <div className="flex flex-col items-center gap-1.5 text-[10px] font-bold">
-                            <span className={`px-2 py-0.5 rounded border ${cfop.calculaTributos ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20" : "bg-[#0b1324] text-slate-400 border-white/10"}`}>
-                              {cfop.calculaTributos ? 'Tributado' : 'Sem Tributo'}
-                            </span>
-                            {(cfop.aliquotaIbsPadrao || cfop.aliquotaCbsPadrao) && (
-                              <span className="px-2 py-0.5 rounded bg-fuchsia-500/10 text-fuchsia-300 border border-fuchsia-500/20">
-                                IVA: {Number(cfop.aliquotaIbsPadrao || 0) + Number(cfop.aliquotaCbsPadrao || 0)}%
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="p-4 text-center">
-                          <button onClick={() => handleExcluir(cfop.id)} className="text-red-300 hover:text-red-200 p-2 hover:bg-red-500/10 rounded-lg transition-colors" title="Excluir">
-                            🗑️
-                          </button>
+          <div className="lg:col-span-6">
+            <div className="overflow-hidden rounded-[30px] border border-white/10 bg-[#08101f]/90 shadow-[0_25px_60px_rgba(0,0,0,0.35)] backdrop-blur-xl">
+              <div className="border-b border-white/10 bg-[#0b1324] p-5">
+                <h2 className="text-lg font-bold text-white">Naturezas cadastradas</h2>
+                <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <input
+                    type="search"
+                    placeholder="Busca geral (código ou descrição)"
+                    value={filtroQ}
+                    onChange={(e) => setFiltroQ(e.target.value)}
+                    className={inputClass}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Filtrar código CFOP"
+                    value={filtroCodigo}
+                    onChange={(e) => setFiltroCodigo(e.target.value)}
+                    className={inputClass}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Filtrar descrição interna"
+                    value={filtroDesc}
+                    onChange={(e) => setFiltroDesc(e.target.value)}
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b border-white/10 bg-[#0b1324] text-xs uppercase text-slate-400">
+                      <th className="p-4 font-bold tracking-wider">CFOP</th>
+                      <th className="p-4 font-bold tracking-wider">Descrição interna</th>
+                      <th className="p-4 text-center font-bold tracking-wider">Controles</th>
+                      <th className="p-4 text-center font-bold tracking-wider">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {lista.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="p-12 text-center text-slate-500">
+                          Nenhum registro encontrado.
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    ) : (
+                      lista.map((n) => (
+                        <tr
+                          key={n.id}
+                          className={`cursor-pointer transition-colors hover:bg-white/5 ${
+                            editingId === n.id ? 'bg-violet-500/10' : ''
+                          }`}
+                          onClick={() => toggleRow(n)}
+                        >
+                          <td className="p-4">
+                            <div className="text-lg font-black text-white">{cfopDisplay(n)}</div>
+                            <span
+                              className={`mt-1 inline-block rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                                n.tipoOperacao === 'ENTRADA'
+                                  ? 'border-sky-500/20 bg-sky-500/10 text-sky-300'
+                                  : 'border-amber-500/20 bg-amber-500/10 text-amber-300'
+                              }`}
+                            >
+                              {n.tipoOperacao}
+                            </span>
+                          </td>
+                          <td className="p-4 text-sm font-medium text-slate-300">{descDisplay(n)}</td>
+                          <td className="p-4 text-center text-[10px] font-bold text-slate-400">
+                            <div className="flex flex-col gap-1">
+                              <span>{(n.controlaEstoque ?? n.movimentaEstoque) ? 'Est' : '—'}</span>
+                              <span>{(n.controlaFinanceiro ?? n.geraFinanceiro) ? 'Fin' : '—'}</span>
+                            </div>
+                          </td>
+                          <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={() => handleExcluir(n.id)}
+                              className="rounded-lg p-2 text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200"
+                              title="Excluir"
+                            >
+                              🗑️
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-
         </div>
       </div>
     </Layout>

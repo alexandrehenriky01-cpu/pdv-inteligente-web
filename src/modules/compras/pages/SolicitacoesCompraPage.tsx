@@ -13,6 +13,7 @@ import {
   Loader2,
   Sparkles,
   ClipboardList,
+  Pencil,
 } from 'lucide-react';
 import { AxiosError } from 'axios';
 
@@ -22,9 +23,17 @@ export interface IProdutoResumo {
 }
 
 export interface IItemSolicitacao {
+  id?: string;
   produtoId: string;
   quantidade: string | number;
+  especificacao?: string | null;
   produto?: IProdutoResumo;
+}
+
+interface ICentroCusto {
+  id: string;
+  codigo: string;
+  descricao: string;
 }
 
 export interface ISolicitacaoCompra {
@@ -32,6 +41,8 @@ export interface ISolicitacaoCompra {
   dataSolicitacao: string | Date;
   dataNecessidade: string | Date;
   observacao?: string;
+  tipoNecessidade?: 'ESTOQUE' | 'APLICACAO_DIRETA';
+  centroCusto?: string | null;
   status: string;
   solicitante?: { nome: string };
   aprovador?: { nome: string };
@@ -48,11 +59,15 @@ export function SolicitacoesCompraPage() {
   const [solicitacoes, setSolicitacoes] = useState<ISolicitacaoCompra[]>([]);
   const [produtos, setProdutos] = useState<IProdutoResumo[]>([]);
   const [isModalNovoAberto, setIsModalNovoAberto] = useState(false);
+  const [solicitacaoParaEdicao, setSolicitacaoParaEdicao] = useState<ISolicitacaoCompra | null>(null);
   const [loading, setLoading] = useState(false);
 
   const [dataNecessidade, setDataNecessidade] = useState('');
   const [observacao, setObservacao] = useState('');
+  const [tipoNecessidade, setTipoNecessidade] = useState<'ESTOQUE' | 'APLICACAO_DIRETA'>('ESTOQUE');
+  const [centroCusto, setCentroCusto] = useState('');
   const [itensForm, setItensForm] = useState<IItemSolicitacao[]>([]);
+  const [centrosCusto, setCentrosCusto] = useState<ICentroCusto[]>([]);
 
   const usuarioLogado = JSON.parse(localStorage.getItem('@PDVUsuario') || '{}') as IUsuarioStorage;
   const isSupervisor =
@@ -63,6 +78,49 @@ export function SolicitacoesCompraPage() {
   useEffect(() => {
     carregarDados();
   }, []);
+
+  useEffect(() => {
+    if (!isModalNovoAberto) return;
+    void (async () => {
+      try {
+        const { data } = await api.get<ICentroCusto[]>('/api/contabilidade/centros');
+        setCentrosCusto(Array.isArray(data) ? data : []);
+      } catch {
+        setCentrosCusto([]);
+      }
+    })();
+  }, [isModalNovoAberto]);
+
+  useEffect(() => {
+    if (!isModalNovoAberto) return;
+    if (!solicitacaoParaEdicao) {
+      setDataNecessidade(new Date().toISOString().split('T')[0]);
+      setTipoNecessidade('ESTOQUE');
+      setCentroCusto('');
+      setObservacao('');
+      setItensForm([]);
+      return;
+    }
+    const s = solicitacaoParaEdicao;
+    const rawNec = s.dataNecessidade as string | Date;
+    const iso =
+      typeof rawNec === 'string'
+        ? rawNec.slice(0, 10)
+        : new Date(rawNec).toISOString().split('T')[0];
+    setDataNecessidade(iso);
+    setObservacao(s.observacao || '');
+    setTipoNecessidade(s.tipoNecessidade === 'APLICACAO_DIRETA' ? 'APLICACAO_DIRETA' : 'ESTOQUE');
+    const ccSalvo = (s.centroCusto || '').trim();
+    const codigoInferido = ccSalvo.split(/[—\-]/)[0].trim().toUpperCase();
+    setCentroCusto(codigoInferido);
+    setItensForm(
+      s.itens.map((i) => ({
+        produtoId: i.produtoId,
+        quantidade: String(i.quantidade),
+        especificacao: i.especificacao || '',
+      })),
+    );
+  }, [isModalNovoAberto, solicitacaoParaEdicao]);
 
   const carregarDados = async () => {
     setLoading(true);
@@ -81,13 +139,18 @@ export function SolicitacoesCompraPage() {
   };
 
   const adicionarItemForm = () => {
-    setItensForm([...itensForm, { produtoId: '', quantidade: '1' }]);
+    setItensForm([...itensForm, { produtoId: '', quantidade: '1', especificacao: '' }]);
   };
 
   const removerItemForm = (index: number) => {
     const novosItens = [...itensForm];
     novosItens.splice(index, 1);
     setItensForm(novosItens);
+  };
+
+  const fecharModalSolicitacao = () => {
+    setIsModalNovoAberto(false);
+    setSolicitacaoParaEdicao(null);
   };
 
   const salvarSolicitacao = async () => {
@@ -98,25 +161,69 @@ export function SolicitacoesCompraPage() {
     ) {
       return alert('Preencha a data de necessidade e certifique-se de que todos os itens têm quantidade válida.');
     }
+    if (tipoNecessidade === 'APLICACAO_DIRETA' && !centroCusto.trim()) {
+      return alert('Selecione ou informe o centro de custo para necessidade do tipo Aplicação Direta.');
+    }
 
     setLoading(true);
     try {
-      await api.post('/api/compras/solicitacoes', {
-        dataNecessidade,
-        observacao,
-        itens: itensForm.map(i => ({ ...i, quantidade: Number(i.quantidade) }))
-      });
+      const u = (s: string) => s.trim().toUpperCase();
+      const descricaoCc = centrosCusto.find((c) => c.codigo.toUpperCase() === centroCusto.trim().toUpperCase())
+        ?.descricao;
+      const centroGravacao =
+        tipoNecessidade === 'APLICACAO_DIRETA'
+          ? descricaoCc
+            ? `${u(centroCusto)} — ${u(descricaoCc)}`
+            : u(centroCusto)
+          : null;
 
-      alert('✅ Solicitação enviada para supervisão com sucesso!');
-      setIsModalNovoAberto(false);
+      const payload = {
+        dataNecessidade,
+        observacao: observacao.trim() ? u(observacao) : null,
+        tipoNecessidade,
+        centroCusto: centroGravacao,
+        itens: itensForm.map(i => ({
+          produtoId: i.produtoId,
+          quantidade: Number(i.quantidade),
+          especificacao: i.especificacao?.trim() ? u(i.especificacao) : null,
+        })),
+      };
+
+      if (solicitacaoParaEdicao) {
+        await api.put(`/api/compras/solicitacoes/${solicitacaoParaEdicao.id}`, payload);
+        alert('✅ Solicitação atualizada com sucesso!');
+      } else {
+        await api.post('/api/compras/solicitacoes', payload);
+        alert('✅ Solicitação enviada para supervisão com sucesso!');
+      }
+
+      fecharModalSolicitacao();
       setItensForm([]);
       setObservacao('');
-      setDataNecessidade('');
+      setDataNecessidade(new Date().toISOString().split('T')[0]);
+      setTipoNecessidade('ESTOQUE');
+      setCentroCusto('');
       carregarDados();
     } catch (err) {
       const error = err as AxiosError<{ error?: string }>;
       alert(error.response?.data?.error || 'Erro ao salvar solicitação.');
+    } finally {
       setLoading(false);
+    }
+  };
+
+  const excluirSolicitacao = async (sol: ISolicitacaoCompra) => {
+    if (sol.status !== 'AGUARDANDO_SUPERVISAO') {
+      return alert('Somente solicitações aguardando supervisão podem ser excluídas.');
+    }
+    if (!window.confirm('Excluir esta solicitação permanentemente?')) return;
+    try {
+      await api.delete(`/api/compras/solicitacoes/${sol.id}`);
+      alert('✅ Solicitação excluída.');
+      carregarDados();
+    } catch (err) {
+      const error = err as AxiosError<{ error?: string }>;
+      alert(error.response?.data?.error || 'Erro ao excluir.');
     }
   };
 
@@ -225,7 +332,11 @@ export function SolicitacoesCompraPage() {
             </div>
 
             <button
-              onClick={() => setIsModalNovoAberto(true)}
+              type="button"
+              onClick={() => {
+                setSolicitacaoParaEdicao(null);
+                setIsModalNovoAberto(true);
+              }}
               className="inline-flex items-center justify-center gap-2 rounded-2xl border border-violet-400/20 bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-3.5 font-black text-white shadow-[0_0_20px_rgba(139,92,246,0.22)] transition-all hover:scale-[1.02] hover:brightness-110"
             >
               <Plus className="h-5 w-5" />
@@ -266,11 +377,9 @@ export function SolicitacoesCompraPage() {
                   <th className="p-5 text-xs font-black uppercase tracking-[0.16em] text-slate-400">
                     Status
                   </th>
-                  {isSupervisor && (
-                    <th className="p-5 text-right text-xs font-black uppercase tracking-[0.16em] text-slate-400">
-                      Ações (Supervisor)
-                    </th>
-                  )}
+                  <th className="p-5 text-right text-xs font-black uppercase tracking-[0.16em] text-slate-400">
+                    Ações
+                  </th>
                 </tr>
               </thead>
 
@@ -335,33 +444,58 @@ export function SolicitacoesCompraPage() {
 
                       <td className="p-5">{getStatusBadge(sol.status)}</td>
 
-                      {isSupervisor && (
-                        <td className="p-5 text-right">
-                          {sol.status === 'AGUARDANDO_SUPERVISAO' ? (
-                            <div className="flex justify-end gap-2">
+                      <td className="p-5 text-right">
+                        <div className="flex flex-wrap justify-end gap-2">
+                          {sol.status === 'AGUARDANDO_SUPERVISAO' && (
+                            <>
                               <button
+                                type="button"
+                                onClick={() => {
+                                  setSolicitacaoParaEdicao(sol);
+                                  setIsModalNovoAberto(true);
+                                }}
+                                className="rounded-xl border border-sky-400/25 bg-sky-500/10 p-2.5 text-sky-300 transition-all hover:bg-sky-500/15"
+                                title="Editar"
+                              >
+                                <Pencil className="h-5 w-5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void excluirSolicitacao(sol)}
+                                className="rounded-xl border border-rose-400/25 bg-rose-500/10 p-2.5 text-rose-300 transition-all hover:bg-rose-500/15"
+                                title="Excluir"
+                              >
+                                <Trash2 className="h-5 w-5" />
+                              </button>
+                            </>
+                          )}
+                          {isSupervisor && sol.status === 'AGUARDANDO_SUPERVISAO' && (
+                            <>
+                              <button
+                                type="button"
                                 onClick={() => avaliarSolicitacao(sol.id, 'APROVADA')}
                                 className="rounded-xl border border-emerald-400/20 bg-emerald-500/10 p-2.5 text-emerald-300 transition-all hover:bg-emerald-500/15"
                                 title="Aprovar"
                               >
                                 <CheckCircle className="h-5 w-5" />
                               </button>
-
                               <button
+                                type="button"
                                 onClick={() => avaliarSolicitacao(sol.id, 'REPROVADA')}
                                 className="rounded-xl border border-rose-400/20 bg-rose-500/10 p-2.5 text-rose-300 transition-all hover:bg-rose-500/15"
                                 title="Reprovar"
                               >
                                 <XCircle className="h-5 w-5" />
                               </button>
-                            </div>
-                          ) : (
-                            <span className="text-xs font-bold italic text-slate-600">
-                              Avaliado
+                            </>
+                          )}
+                          {sol.status !== 'AGUARDANDO_SUPERVISAO' && (
+                            <span className="self-center text-[10px] font-bold uppercase text-slate-600">
+                              —
                             </span>
                           )}
-                        </td>
-                      )}
+                        </div>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -379,11 +513,13 @@ export function SolicitacoesCompraPage() {
                 <div>
                   <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-violet-500/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-violet-300">
                     <Sparkles className="h-3.5 w-3.5" />
-                    Nova requisição
+                    {solicitacaoParaEdicao ? 'Edição' : 'Nova requisição'}
                   </div>
 
                   <h2 className="text-xl font-black tracking-tight text-white">
-                    Nova Solicitação de Compra
+                    {solicitacaoParaEdicao
+                      ? 'Editar solicitação de compra'
+                      : 'Nova solicitação de compra'}
                   </h2>
                   <p className="mt-1 text-sm leading-6 text-slate-400">
                     Preencha os itens que você precisa que o setor de compras cote.
@@ -391,7 +527,8 @@ export function SolicitacoesCompraPage() {
                 </div>
 
                 <button
-                  onClick={() => setIsModalNovoAberto(false)}
+                  type="button"
+                  onClick={fecharModalSolicitacao}
                   className="rounded-full border border-white/10 bg-white/5 p-2 text-slate-400 transition-all hover:border-white/15 hover:bg-white/10 hover:text-white"
                 >
                   <XCircle className="h-6 w-6" />
@@ -421,6 +558,56 @@ export function SolicitacoesCompraPage() {
                       className={inputClass}
                     />
                   </div>
+
+                  <div className="md:col-span-2">
+                    <label className={labelClass}>Tipo de necessidade *</label>
+                    <div className="flex flex-wrap gap-4 pt-1">
+                      <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+                        <input
+                          type="radio"
+                          name="tipoNec"
+                          checked={tipoNecessidade === 'ESTOQUE'}
+                          onChange={() => setTipoNecessidade('ESTOQUE')}
+                          className="accent-violet-500"
+                        />
+                        Estoque (reposição)
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+                        <input
+                          type="radio"
+                          name="tipoNec"
+                          checked={tipoNecessidade === 'APLICACAO_DIRETA'}
+                          onChange={() => setTipoNecessidade('APLICACAO_DIRETA')}
+                          className="accent-violet-500"
+                        />
+                        Aplicação direta (custo / obra / uso imediato)
+                      </label>
+                    </div>
+                  </div>
+
+                  {tipoNecessidade === 'APLICACAO_DIRETA' && (
+                    <div className="md:col-span-2">
+                      <label className={labelClass}>Centro de custo *</label>
+                      <select
+                        value={centroCusto}
+                        onChange={(e) => setCentroCusto(e.target.value.toUpperCase())}
+                        className={inputClass}
+                      >
+                        <option value="">SELECIONE O CENTRO DE CUSTO</option>
+                        {centrosCusto.map((c) => (
+                          <option key={c.id} value={c.codigo.toUpperCase()}>
+                            {`${c.codigo.toUpperCase()} — ${c.descricao.toUpperCase()}`}
+                          </option>
+                        ))}
+                      </select>
+                      {centrosCusto.length === 0 && (
+                        <p className="mt-2 text-xs font-bold uppercase text-amber-400">
+                          Nenhum centro cadastrado para esta loja. Cadastre em Contabilidade (Centros de custo) ou
+                          contate o financeiro.
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="pt-1">
@@ -485,6 +672,23 @@ export function SolicitacoesCompraPage() {
                           />
                         </div>
 
+                        <div className="w-full sm:flex-1 sm:min-w-[200px]">
+                          <label className="mb-1 block text-xs font-bold text-slate-400 sm:hidden">
+                            Especificação
+                          </label>
+                          <input
+                            type="text"
+                            value={item.especificacao || ''}
+                            onChange={e => {
+                              const novosItens = [...itensForm];
+                              novosItens[index].especificacao = e.target.value;
+                              setItensForm(novosItens);
+                            }}
+                            placeholder="Descrição / especificação do item"
+                            className={inputClass}
+                          />
+                        </div>
+
                         <button
                           onClick={() => removerItemForm(index)}
                           className="flex w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5 p-3.5 text-slate-400 transition-all hover:border-rose-400/20 hover:bg-rose-500/10 hover:text-rose-300 sm:w-auto"
@@ -512,23 +716,29 @@ export function SolicitacoesCompraPage() {
 
               <div className="flex shrink-0 flex-col gap-3 border-t border-white/10 bg-black/10 px-6 py-5 sm:flex-row sm:justify-end sm:px-8">
                 <button
-                  onClick={() => setIsModalNovoAberto(false)}
+                  type="button"
+                  onClick={fecharModalSolicitacao}
                   className="w-full rounded-2xl border border-white/10 bg-white/5 px-6 py-3.5 font-bold text-slate-300 transition-all hover:bg-white/10 hover:text-white sm:w-auto"
                 >
                   Cancelar
                 </button>
 
                 <button
-                  onClick={salvarSolicitacao}
+                  type="button"
+                  onClick={() => void salvarSolicitacao()}
                   disabled={loading}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-violet-400/20 bg-gradient-to-r from-violet-600 to-fuchsia-600 px-8 py-3.5 font-black text-white shadow-[0_0_20px_rgba(139,92,246,0.22)] transition-all hover:scale-[1.02] hover:brightness-110 disabled:opacity-50 sm:w-auto"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-violet-400/20 bg-gradient-to-r from-violet-600 to-fuchsia-600 px-8 py-3.5 font-black uppercase tracking-wide text-white shadow-[0_0_20px_rgba(139,92,246,0.22)] transition-all hover:scale-[1.02] hover:brightness-110 disabled:opacity-50 sm:w-auto"
                 >
                   {loading ? (
                     <Loader2 className="h-5 w-5 animate-spin" />
                   ) : (
                     <CheckCircle className="h-5 w-5" />
                   )}
-                  {loading ? 'Enviando...' : 'Enviar Solicitação'}
+                  {loading
+                    ? 'Salvando...'
+                    : solicitacaoParaEdicao
+                      ? 'Salvar alterações'
+                      : 'Enviar solicitação'}
                 </button>
               </div>
             </div>

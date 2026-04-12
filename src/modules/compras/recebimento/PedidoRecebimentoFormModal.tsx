@@ -71,15 +71,15 @@ export const PedidoRecebimentoFormModal: React.FC<Props> = ({ onClose, onSuccess
       // Converte a data local para ISO 8601 (Exigência do Zod no seu backend)
       const dataIso = new Date(dataPrevista).toISOString();
 
-      await api.post('/api/recebimento/pedidos', {
-        fornecedorId: Number(fornecedorId),
+      await api.post('/api/compras/pedidos-recebimento', {
+        fornecedorId: String(fornecedorId),
         dataPrevista: dataIso,
         numeroNotaFiscal: numeroNotaFiscal || undefined,
-        itens: itens.map(i => ({
+        itens: itens.map((i) => ({
           produtoId: i.produtoId,
           qtdPecasEsperada: Number(i.qtdPecasEsperada),
-          pesoEsperado: Number(i.pesoEsperado) || undefined
-        }))
+          pesoEsperado: Number(i.pesoEsperado) || undefined,
+        })),
       });
 
       onSuccess();

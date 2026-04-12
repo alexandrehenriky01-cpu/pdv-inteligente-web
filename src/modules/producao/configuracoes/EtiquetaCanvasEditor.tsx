@@ -3,7 +3,58 @@
 import React, { useCallback } from 'react';
 import { Rnd } from 'react-rnd';
 import { DraggableEvent, DraggableData } from 'react-draggable';
-import { LayoutElemento } from '../types/etiquetas';
+import {
+  LayoutElemento,
+  BarcodeType,
+  barcodeExibirNumeracao,
+  qrcodeExibirLegenda,
+} from '../types/etiquetas';
+import {
+  textoExemploParaVariavel,
+  textoExemploParaPlaceholder,
+} from '../types/variaveisEtiqueta';
+
+function textoPreviewParaElemento(el: LayoutElemento): string {
+  switch (el.type) {
+    case 'text':
+      return el.text;
+    case 'dynamic_text':
+      if (el.variavel) return textoExemploParaVariavel(el.variavel);
+      return textoExemploParaPlaceholder(el.placeholder);
+    case 'barcode':
+      if (el.valueMode === 'fixed') return el.text;
+      if (el.variavel) return textoExemploParaVariavel(el.variavel);
+      return textoExemploParaPlaceholder(el.placeholder);
+    case 'qrcode':
+      if (el.valueMode === 'fixed') return el.text;
+      if (el.variavel) return textoExemploParaVariavel(el.variavel);
+      return textoExemploParaPlaceholder(el.placeholder);
+    case 'image':
+      return '';
+    default:
+      return '';
+  }
+}
+
+function estiloListrasBarcode(
+  barcodeType: BarcodeType,
+  inverted: boolean,
+): React.CSSProperties {
+  const fg = inverted ? '#ffffff' : '#000000';
+  const bg = inverted ? '#000000' : '#ffffff';
+  let stripe = 2;
+  let gap = 2;
+  if (barcodeType === 'ITF14' || barcodeType === 'EAN14') {
+    stripe = 1;
+    gap = 1;
+  } else if (barcodeType === 'EAN13' || barcodeType === 'EAN8') {
+    stripe = 2;
+    gap = 3;
+  }
+  return {
+    backgroundImage: `repeating-linear-gradient(90deg, ${fg}, ${fg} ${stripe}px, ${bg} ${stripe}px, ${bg} ${stripe + gap}px)`,
+  };
+}
 
 // ============================================================================
 // 1. COMPONENTE ISOLADO E MEMOIZADO (Otimização de Performance O(1))
@@ -21,66 +72,150 @@ const CanvasElement = React.memo(({ el, isSelected, onSelect, onUpdateElement }:
   const renderConteudo = () => {
     switch (el.type) {
       case 'text':
-      case 'dynamic_text':
+      case 'dynamic_text': {
+        const inv = el.inverted === true;
         return (
           <div
-            className="w-full h-full flex items-center overflow-hidden px-1"
+            className="w-full h-full flex items-center overflow-hidden px-1 box-border"
             style={{
               fontSize: `${el.fontSize || 24}px`,
               fontWeight: el.fontWeight || 'normal',
+              fontStyle: el.fontStyle || 'normal',
               fontFamily: el.fontFamily || 'Arial, sans-serif',
               justifyContent: el.textAlign === 'center' ? 'center' : el.textAlign === 'right' ? 'flex-end' : 'flex-start',
               textAlign: el.textAlign || 'left',
-              color: '#000000',
               whiteSpace: 'pre-wrap',
               wordBreak: 'break-word',
+              ...(inv
+                ? { backgroundColor: '#000000', color: '#ffffff', padding: '2px 4px' }
+                : { color: '#000000' }),
             }}
           >
-            {el.type === 'text' ? el.text : el.placeholder || 'Texto'}
+            {el.type === 'text' ? el.text : textoPreviewParaElemento(el)}
           </div>
         );
+      }
 
-      case 'barcode':
+      case 'barcode': {
+        const inv = el.inverted === true;
+        const mostrarNumeracao = barcodeExibirNumeracao(el);
         return (
-          <div className="w-full h-full flex flex-col items-center justify-between border border-dashed border-gray-400 bg-white p-1 overflow-hidden">
-            <div className="w-full flex-1 bg-[repeating-linear-gradient(90deg,#000,#000_2px,transparent_2px,transparent_4px)]" />
-            <span className="text-[10px] text-black mt-1 leading-none text-center truncate w-full">
-              {el.valueMode === 'fixed' ? el.text : el.placeholder || 'Código de barras'}
-            </span>
-          </div>
-        );
-
-      case 'qrcode':
-        return (
-          <div className="w-full h-full border border-dashed border-gray-400 bg-white flex items-center justify-center p-1 overflow-hidden">
+          <div
+            className={`w-full h-full flex flex-col items-center justify-between border border-dashed p-1 overflow-hidden box-border ${
+              inv ? 'border-gray-600 bg-black' : 'border-gray-400 bg-white'
+            }`}
+          >
             <div
-              className="w-full h-full bg-[linear-gradient(45deg,#000_25%,transparent_25%,transparent_75%,#000_75%,#000),linear-gradient(45deg,#000_25%,transparent_25%,transparent_75%,#000_75%,#000)]"
-              style={{ backgroundSize: '10px 10px', backgroundPosition: '0 0, 5px 5px' }}
+              className="w-full flex-1 min-h-[12px] flex items-stretch"
+              style={estiloListrasBarcode(el.barcodeType, inv)}
             />
+            {mostrarNumeracao ? (
+              <div
+                className={`w-full text-center text-[10px] mt-1 leading-none tracking-wide truncate shrink-0 ${
+                  inv ? 'text-white' : 'text-black'
+                }`}
+              >
+                {textoPreviewParaElemento(el) || 'Código de barras'}
+              </div>
+            ) : null}
           </div>
         );
+      }
+
+      case 'qrcode': {
+        const inv = el.inverted === true;
+        const fg = inv ? '#ffffff' : '#000000';
+        const bgCell = inv ? '#000000' : '#ffffff';
+        const mostrarLegenda = qrcodeExibirLegenda(el);
+        return (
+          <div
+            className={`w-full h-full border border-dashed flex flex-col items-stretch justify-between p-1 overflow-hidden box-border ${
+              inv ? 'border-gray-600 bg-black' : 'border-gray-400 bg-white'
+            }`}
+          >
+            <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-0.5">
+              <div
+                className="w-[70%] max-w-[90%] aspect-square"
+                style={{
+                  backgroundImage: `linear-gradient(45deg, ${fg} 25%, transparent 25%, transparent 75%, ${fg} 75%, ${fg}), linear-gradient(45deg, ${fg} 25%, transparent 25%, transparent 75%, ${fg} 75%, ${fg})`,
+                  backgroundColor: bgCell,
+                  backgroundSize: '8px 8px',
+                  backgroundPosition: '0 0, 4px 4px',
+                }}
+              />
+              <span className={`text-[8px] font-bold tracking-wider ${inv ? 'text-white' : 'text-black'}`}>
+                QR CODE
+              </span>
+            </div>
+            {mostrarLegenda ? (
+              <span
+                className={`text-[9px] leading-none text-center truncate w-full shrink-0 pt-0.5 ${inv ? 'text-gray-200' : 'text-black'}`}
+              >
+                {textoPreviewParaElemento(el) || 'QR'}
+              </span>
+            ) : null}
+          </div>
+        );
+      }
 
       case 'line': {
         const horizontal = el.width >= el.height;
+        const inv = el.inverted === true;
         return (
-          <div className="w-full h-full flex items-center justify-center bg-transparent">
+          <div
+            className={`w-full h-full flex items-center justify-center box-border ${inv ? 'bg-black' : 'bg-transparent'}`}
+          >
             <div
               style={{
                 width: horizontal ? '100%' : `${el.lineThickness || 2}px`,
                 height: horizontal ? `${el.lineThickness || 2}px` : '100%',
-                backgroundColor: '#000000',
+                backgroundColor: inv ? '#ffffff' : '#000000',
               }}
             />
           </div>
         );
       }
 
-      case 'rectangle':
+      case 'rectangle': {
+        const inv = el.inverted === true;
         return (
           <div
-            className="w-full h-full bg-transparent box-border"
-            style={{ border: `${el.borderThickness || 2}px solid #000000` }}
+            className="w-full h-full box-border"
+            style={
+              inv
+                ? {
+                    backgroundColor: '#000000',
+                    border: `${el.borderThickness || 2}px solid #ffffff`,
+                  }
+                : {
+                    backgroundColor: 'transparent',
+                    border: `${el.borderThickness || 2}px solid #000000`,
+                  }
+            }
           />
+        );
+      }
+
+      case 'image':
+        return (
+          <div className="w-full h-full overflow-hidden bg-white/80 box-border flex items-center justify-center border border-dashed border-gray-400">
+            {el.src ? (
+              <img
+                src={el.src}
+                alt=""
+                className="max-w-full max-h-full pointer-events-none"
+                style={{
+                  objectFit: el.objectFit || 'contain',
+                  width: '100%',
+                  height: '100%',
+                  borderRadius: el.borderRadius ? `${el.borderRadius}px` : undefined,
+                }}
+                draggable={false}
+              />
+            ) : (
+              <span className="text-[10px] text-gray-500 text-center px-1">Clique no inspetor para enviar imagem (ex.: selo SIM)</span>
+            )}
+          </div>
         );
 
       default:

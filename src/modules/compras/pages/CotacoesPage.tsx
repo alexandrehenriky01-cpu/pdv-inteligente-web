@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { Layout } from '../../../components/Layout';
 import { api } from '../../../services/api';
 import {
@@ -30,6 +31,7 @@ export interface IItemSolicitacao {
 
 export interface ISolicitacaoPendente {
   id: string;
+  status?: string;
   dataNecessidade: string | Date;
   solicitante?: { nome: string };
   itens: IItemSolicitacao[];
@@ -62,6 +64,10 @@ export function CotacoesPage() {
   const [solicitacaoSelecionada, setSolicitacaoSelecionada] = useState<ISolicitacaoPendente | null>(null);
   const [fornecedorId, setFornecedorId] = useState('');
   const [precos, setPrecos] = useState<Record<string, string>>({});
+  const [apenasRegistrarCotacao, setApenasRegistrarCotacao] = useState(false);
+  const [observacoesCotacao, setObservacoesCotacao] = useState('');
+  const [condicaoPagamentoCotacao, setCondicaoPagamentoCotacao] = useState('');
+  const [prazoEntregaCotacao, setPrazoEntregaCotacao] = useState('');
 
   useEffect(() => {
     carregarDados();
@@ -92,6 +98,10 @@ export function CotacoesPage() {
     setSolicitacaoSelecionada(solicitacao);
     setPrecos({});
     setFornecedorId('');
+    setApenasRegistrarCotacao(false);
+    setObservacoesCotacao('');
+    setCondicaoPagamentoCotacao('');
+    setPrazoEntregaCotacao('');
     setIsModalAberto(true);
   };
 
@@ -117,21 +127,29 @@ export function CotacoesPage() {
 
     setSaving(true);
     try {
+      const u = (s: string) => s.trim().toUpperCase();
       const resCotacao = await api.post<ICotacaoResponse>('/api/compras/cotacoes', {
-        observacao: `Cotação baseada na SC #${solicitacaoSelecionada.id.substring(0, 6)}`,
+        observacao: `COTAÇÃO SC #${solicitacaoSelecionada.id.substring(0, 6)}`,
+        observacoes: observacoesCotacao.trim() ? u(observacoesCotacao) : null,
+        condicaoPagamento: condicaoPagamentoCotacao.trim() ? u(condicaoPagamentoCotacao) : null,
+        prazoEntrega: prazoEntregaCotacao.trim() ? u(prazoEntregaCotacao) : null,
         solicitacaoIds: [solicitacaoSelecionada.id],
         itensCotacao
       });
 
       const itensVencedoresIds = resCotacao.data.cotacao.itens?.map(i => i.id) || [];
 
-      if (itensVencedoresIds.length > 0) {
+      if (!apenasRegistrarCotacao && itensVencedoresIds.length > 0) {
         await api.put(`/api/compras/cotacoes/${resCotacao.data.cotacao.id}/finalizar`, {
           itensVencedoresIds
         });
       }
 
-      alert('✅ Cotação registrada e Pedido de Compra gerado para aprovação da Diretoria!');
+      alert(
+        apenasRegistrarCotacao
+          ? '✅ Cotação registrada. Use Gerenciar Cotações para comparar fornecedores e gerar pedidos otimizados.'
+          : '✅ Cotação registrada e Pedido de Compra gerado para aprovação da Diretoria!'
+      );
       setIsModalAberto(false);
       carregarDados();
     } catch (err) {
@@ -177,6 +195,13 @@ export function CotacoesPage() {
                 Supply Chain Intelligence
               </div>
 
+              <Link
+                to="/compras/gerenciar-cotacoes"
+                className="mb-3 inline-flex rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-amber-200 hover:bg-amber-500/20"
+              >
+                🏆 Análise de cotação & comparar propostas → Gerenciar cotações
+              </Link>
+
               <h1 className="flex items-center gap-4 text-3xl font-black tracking-tight text-white">
                 <div className="rounded-2xl border border-violet-400/20 bg-violet-500/10 p-3 shadow-[0_0_20px_rgba(139,92,246,0.12)]">
                   <Calculator className="h-8 w-8 text-violet-300" />
@@ -196,10 +221,12 @@ export function CotacoesPage() {
           <div className="h-8 w-2 rounded-full bg-gradient-to-b from-violet-400 to-fuchsia-500" />
           <div>
             <h2 className="text-xl font-black tracking-tight text-white">
-              Aguardando cotação
+              Gerar cotação
             </h2>
             <p className="text-sm text-slate-400">
-              Solicitações aprovadas prontas para negociação com fornecedores.
+              Solicitações <strong className="text-slate-200">aprovadas</strong> ou{' '}
+              <strong className="text-slate-200">em cotação</strong> (novas propostas). Aprovação da supervisão é feita em
+              Aprovação de Compras.
             </p>
           </div>
         </div>
@@ -239,9 +266,17 @@ export function CotacoesPage() {
               >
                 <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div>
-                    <span className="mb-3 inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">
+                    <span
+                      className={`mb-3 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${
+                        sol.status === 'EM_COTACAO'
+                          ? 'border-sky-400/25 bg-sky-500/10 text-sky-300'
+                          : 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300'
+                      }`}
+                    >
                       <CheckCircle className="h-3.5 w-3.5" />
-                      SC aprovada
+                      {sol.status === 'EM_COTACAO'
+                        ? 'Em cotação — nova proposta'
+                        : 'SC aprovada'}
                     </span>
 
                     <h3 className="text-xl font-black tracking-tight text-white">
@@ -256,10 +291,10 @@ export function CotacoesPage() {
 
                   <button
                     onClick={() => abrirModalCotacao(sol)}
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-violet-400/20 bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-3 text-sm font-black text-white shadow-[0_0_20px_rgba(139,92,246,0.20)] transition-all hover:scale-[1.02] hover:brightness-110"
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-violet-400/20 bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 py-3 text-sm font-black uppercase tracking-wide text-white shadow-[0_0_20px_rgba(139,92,246,0.20)] transition-all hover:scale-[1.02] hover:brightness-110"
                   >
                     <CircleDollarSign className="h-4 w-4" />
-                    Cotar preços
+                    Gerar cotação
                   </button>
                 </div>
 
@@ -343,6 +378,55 @@ export function CotacoesPage() {
                   </select>
                 </div>
 
+                <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-100">
+                  <input
+                    type="checkbox"
+                    checked={apenasRegistrarCotacao}
+                    onChange={e => setApenasRegistrarCotacao(e.target.checked)}
+                    className="h-4 w-4 accent-amber-500"
+                  />
+                  <span>
+                    Apenas registrar cotação (não gerar pedido agora). Use para comparar vários
+                    fornecedores na tela <strong>Gerenciar Cotações</strong>.
+                  </span>
+                </label>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                  <div>
+                    <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                      Observações da cotação
+                    </label>
+                    <input
+                      value={observacoesCotacao}
+                      onChange={e => setObservacoesCotacao(e.target.value)}
+                      className={inputClass}
+                      placeholder="Detalhes da negociação"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                      Condição de pagamento
+                    </label>
+                    <input
+                      value={condicaoPagamentoCotacao}
+                      onChange={e => setCondicaoPagamentoCotacao(e.target.value)}
+                      className={inputClass}
+                      placeholder="Ex: 30/60 DDL"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                      Prazo de entrega
+                    </label>
+                    <input
+                      value={prazoEntregaCotacao}
+                      onChange={e => setPrazoEntregaCotacao(e.target.value)}
+                      className={inputClass}
+                      placeholder="Ex: 7 DIAS ÚTEIS"
+                    />
+                  </div>
+                </div>
+
                 <div>
                   <h3 className="mb-4 flex items-center gap-2 text-lg font-black tracking-tight text-white">
                     <DollarSign className="h-5 w-5 text-emerald-300" />
@@ -418,7 +502,11 @@ export function CotacoesPage() {
                   ) : (
                     <CheckCircle className="h-5 w-5" />
                   )}
-                  {saving ? 'Gerando Pedido...' : 'Gerar Pedido de Compra'}
+                  {saving
+                    ? 'Salvando...'
+                    : apenasRegistrarCotacao
+                      ? 'Salvar cotação'
+                      : 'Gerar Pedido de Compra'}
                 </button>
               </div>
             </div>

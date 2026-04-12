@@ -2,10 +2,12 @@
 
 export interface IUsuario {
   id: string;
-  codigo?: string; // 🚀 NOVO: Código do operador/usuário adicionado aqui!
+  codigo?: string | null;
   nome: string;
   email: string;
-  role?: 'SUPER_ADMIN' | 'DIRETOR' | 'GERENTE' | 'VENDEDOR' |'CAIXA' | string; 
+  username?: string | null;
+  ativo?: boolean;
+  role?: 'SUPER_ADMIN' | 'SUPORTE_MASTER' | 'DIRETOR' | 'GERENTE' | 'VENDEDOR' | 'CAIXA' | string;
   lojaId: string;
 }
 

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { flushSync } from 'react-dom';
 import { Layout } from '../../components/Layout';
 import { api } from '../../services/api';
 import { 
@@ -7,10 +8,126 @@ import {
   ChevronRight, ChevronLeft, Save, Sparkles,
   Filter, ArrowRight, X, TrendingUp, TrendingDown,
   Loader2, ShieldCheck, Clock, LineChart, Hash,
-  Scale, ThermometerSnowflake, Tag, FileText, Box
+  Scale, ThermometerSnowflake, Tag, FileText, Box, ClipboardList
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { AxiosError } from 'axios'; 
+import { AxiosError } from 'axios';
+import { transformarParaMaiusculas } from '../../utils/formatters';
+
+/** Tipo de item (SPED / Reg. 0200) — valores na raiz do produto. */
+const OPCOES_TIPO_ITEM_SPED: { value: string; label: string }[] = [
+  { value: '', label: '— Não informado —' },
+  { value: '00', label: '00 — Mercadoria para Revenda' },
+  { value: '01', label: '01 — Matéria-Prima' },
+  { value: '02', label: '02 — Embalagem' },
+  { value: '03', label: '03 — Produto em Processo' },
+  { value: '04', label: '04 — Produto Acabado' },
+  { value: '07', label: '07 — Material de Uso e Consumo' },
+  { value: '09', label: '09 — Serviços' },
+  { value: '99', label: '99 — Outras' },
+];
+
+/** Parse numérico que preserva 0 (ex.: 0°C). */
+function parseFloatPermiteZero(val: unknown): number | undefined {
+  if (val === '' || val === undefined || val === null) return undefined;
+  const n = typeof val === 'number' ? val : parseFloat(String(val));
+  if (Number.isNaN(n)) return undefined;
+  return n;
+}
+
+const UUID_LAYOUT_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function pareceUuidLayout(s: string): boolean {
+  return UUID_LAYOUT_REGEX.test(s.trim());
+}
+
+export interface ILayoutEtiquetaResumo {
+  id: string;
+  nome: string;
+  tipoEtiqueta?: string;
+}
+
+function buildOpcoesLayoutSelect(
+  layouts: ILayoutEtiquetaResumo[],
+  valorAtual: string | undefined
+): { value: string; label: string }[] {
+  const v = String(valorAtual ?? '').trim();
+  const fromApi = layouts.map((l) => ({ value: l.id, label: l.nome }));
+  const seen = new Set(fromApi.map((o) => o.value));
+  const extras: { value: string; label: string }[] = [];
+  if (v && !seen.has(v)) {
+    extras.push({
+      value: v,
+      label: pareceUuidLayout(v)
+        ? `Referência antiga (${v.slice(0, 8)}…)`
+        : `${v} (texto legado)`,
+    });
+  }
+  return [{ value: '', label: '— Não informado —' }, ...extras, ...fromApi];
+}
+
+/** Resposta resumida de `GET /api/embalagens` (ficha técnica / BOM). */
+export interface IEmbalagemResumo {
+  id: string;
+  codigo: string;
+  nome: string;
+  ativo?: boolean;
+  /** Decimal serializado pela API (string). */
+  taraTotal?: string;
+}
+
+function extrairIdCategoriaDaResposta(body: unknown): string | undefined {
+  if (!body || typeof body !== 'object') return undefined;
+  const o = body as Record<string, unknown>;
+  if (typeof o.id === 'string' && o.id.trim()) return o.id.trim();
+  const nestedCat = o.categoria;
+  if (nestedCat && typeof nestedCat === 'object') {
+    const id = (nestedCat as Record<string, unknown>).id;
+    if (typeof id === 'string' && id.trim()) return id.trim();
+  }
+  const dados = o.dados;
+  if (dados && typeof dados === 'object') {
+    const id = (dados as Record<string, unknown>).id;
+    if (typeof id === 'string' && id.trim()) return id.trim();
+  }
+  return undefined;
+}
+
+function buildOpcoesEmbalagemSelect(
+  lista: IEmbalagemResumo[],
+  valorAtual: string | undefined
+): { value: string; label: string }[] {
+  const v = String(valorAtual ?? '').trim();
+  const fromApi = lista.map((e) => ({
+    value: e.id,
+    label: `${e.codigo} — ${e.nome}${e.ativo === false ? ' (inativa)' : ''}`,
+  }));
+  const seen = new Set(fromApi.map((o) => o.value));
+  const extras: { value: string; label: string }[] = [];
+  if (v && !seen.has(v)) {
+    extras.push({
+      value: v,
+      label: pareceUuidLayout(v)
+        ? `Referência antiga (${v.slice(0, 8)}…)`
+        : `${v} (texto legado)`,
+    });
+  }
+  return [{ value: '', label: '— Não informado —' }, ...extras, ...fromApi];
+}
+
+function mapTipoConservacaoProducao(raw: unknown): string {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return 'RESFRIADO';
+  const literal = String(raw).trim();
+  const s = literal.toUpperCase().replace(/\s+/g, '_');
+  if (s === 'RESFRIADO' || s === 'REFRIGERADO') return 'RESFRIADO';
+  if (s === 'CONGELADO') return 'CONGELADO';
+  if (s === 'TEMPERATURA_AMBIENTE' || s === 'AMBIENTE') return 'TEMPERATURA_AMBIENTE';
+  if (literal === 'Resfriado') return 'RESFRIADO';
+  if (literal === 'Congelado') return 'CONGELADO';
+  if (literal === 'Ambiente') return 'TEMPERATURA_AMBIENTE';
+  return 'RESFRIADO';
+}
 
 // 🛡️ INTERFACES DE TIPAGEM ESTRITA
 export interface ICategoria {
@@ -40,14 +157,25 @@ export interface IProdutoProducao {
   tipoProdutoProducao?: string;
   registroRotuloPGA?: string;
   descricaoMinisterio?: string;
+  /** Peso de rotulagem/embalagem (kg) — só na raiz `Produto` na API; mantidos aqui no formulário da etapa 5. */
+  pesoLiquido?: string | number;
+  pesoBruto?: string | number;
   descricaoEtiqueta?: string;
   layoutEtiquetaInterna?: string;
   layoutEtiquetaSecundaria?: string;
   embalagemPrimaria?: string;
   embalagemSecundaria?: string;
+  /** Tara (kg) espelhada da embalagem primária — editável após autopreenchimento. */
+  taraPrimaria?: string | number;
+  /** Tara (kg) espelhada da embalagem secundária. */
+  taraSecundaria?: string | number;
   controlaEstoque?: boolean;
   controlaRendimento?: boolean;
   permiteVencido?: boolean;
+  ingredientes?: string;
+  alergenicos?: string;
+  /** Texto JSON no formulário; a API normaliza para `Json` */
+  informacaoNutricional?: string | Record<string, unknown>;
 }
 
 export interface IProduto {
@@ -74,10 +202,20 @@ export interface IProduto {
   aliquotaCofins: string | number;
   contaEstoqueId: string;
   statusFiscal?: string;
+  /** Classificação SPED (tipo item) — códigos 00, 01, … */
+  tipoItem?: string;
   
   // 🚀 NOVO: Dados de Produção
   dadosProducao?: IProdutoProducao;
   controlaProducao?: boolean;
+  /**
+   * Resposta GET: espelho logístico na raiz do produto.
+   * No formulário, validade/peso/conservação são editados apenas em `dadosProducao` (etapa 5).
+   */
+  diasValidade?: string | number | null;
+  tipoConservacao?: string | null;
+  pesoLiquido?: string | number | null;
+  pesoBruto?: string | number | null;
 }
 
 export interface IIASugestoes {
@@ -103,6 +241,8 @@ export interface IIAResponseProduto {
 export function Produtos() {
   const [produtos, setProdutos] = useState<IProduto[]>([]);
   const [categorias, setCategorias] = useState<ICategoria[]>([]);
+  const [layoutsEtiqueta, setLayoutsEtiqueta] = useState<ILayoutEtiquetaResumo[]>([]);
+  const [listaEmbalagens, setListaEmbalagens] = useState<IEmbalagemResumo[]>([]);
   const [planosContas, setPlanosContas] = useState<IPlanoConta[]>([]);
   const [loading, setLoading] = useState(true);
   const [termoBusca, setTermoBusca] = useState('');
@@ -128,6 +268,11 @@ export function Produtos() {
     controlaRendimento: true,
     permiteVencido: false,
     diasValidade: '',
+    pesoLiquido: '',
+    pesoBruto: '',
+    ingredientes: '',
+    alergenicos: '',
+    informacaoNutricional: '',
   };
 
   const [formData, setFormData] = useState<IProduto>({
@@ -137,7 +282,8 @@ export function Produtos() {
     cstCsosnIcms: '', aliquotaIcms: '', cstPis: '', aliquotaPis: '',
     cstCofins: '', aliquotaCofins: '',
     contaEstoqueId: '',
-    dadosProducao: estadoInicialProducao
+    tipoItem: '',
+    dadosProducao: estadoInicialProducao,
   });
   const totalSteps = formData?.controlaProducao ? 5 : 4;   
 
@@ -149,6 +295,35 @@ export function Produtos() {
   useEffect(() => {
     carregarDados();
   }, []);
+
+  useEffect(() => {
+    if (!modalAberto) return;
+    const carregarCatalogosProducao = async () => {
+      try {
+        const [layRes, embRes] = await Promise.all([
+          api.get<ILayoutEtiquetaResumo[]>('/api/layout-etiquetas').catch(() => ({
+            data: [] as ILayoutEtiquetaResumo[],
+          })),
+          api.get<IEmbalagemResumo[]>('/api/embalagens').catch(() => ({ data: [] as IEmbalagemResumo[] })),
+        ]);
+        setLayoutsEtiqueta(Array.isArray(layRes.data) ? layRes.data : []);
+        const embRaw = Array.isArray(embRes.data) ? embRes.data : [];
+        setListaEmbalagens(
+          embRaw.map((e) => ({
+            id: String(e.id),
+            codigo: String(e.codigo ?? ''),
+            nome: String(e.nome ?? ''),
+            ativo: typeof e.ativo === 'boolean' ? e.ativo : true,
+            taraTotal: e.taraTotal !== undefined && e.taraTotal !== null ? String(e.taraTotal) : undefined,
+          }))
+        );
+      } catch {
+        setLayoutsEtiqueta([]);
+        setListaEmbalagens([]);
+      }
+    };
+    void carregarCatalogosProducao();
+  }, [modalAberto]);
 
   useEffect(() => {
     if (produtos && produtos.length > 0) {
@@ -195,13 +370,51 @@ export function Produtos() {
     }
   };
 
+  const criarCategoriaRapida = async () => {
+    const nome = window.prompt('Nome da nova categoria:');
+    if (!nome || !nome.trim()) return;
+    const nomeTrim = nome.trim();
+    try {
+      const payload = transformarParaMaiusculas({ nome: nomeTrim }) as { nome: string };
+      const response = await api.post<ICategoria>('/api/categorias', payload);
+      let novoId = extrairIdCategoriaDaResposta(response.data);
+      if (!novoId) {
+        const listRes = await api.get<ICategoria[]>('/api/categorias');
+        const nomeU = nomeTrim.toUpperCase();
+        novoId = listRes.data.find((c) => c.nome.toUpperCase() === nomeU)?.id;
+      }
+      if (!novoId) {
+        alert('Não foi possível obter o ID da categoria. Abra Cadastros → Categorias e selecione manualmente.');
+        return;
+      }
+      const nomeLista =
+        response.data && typeof response.data === 'object' && typeof response.data.nome === 'string'
+          ? response.data.nome
+          : nomeTrim.toUpperCase();
+      flushSync(() => {
+        setCategorias((prev) => {
+          if (prev.some((c) => c.id === novoId)) {
+            return prev.map((c) => (c.id === novoId ? { ...c, nome: nomeLista } : c));
+          }
+          return [...prev, { id: novoId, nome: nomeLista }];
+        });
+        setFormData((f) => ({ ...f, categoriaId: novoId }));
+      });
+      await carregarDados();
+    } catch (err) {
+      const error = err as AxiosError<{ error?: string }>;
+      alert(error.response?.data?.error || 'Erro ao criar categoria.');
+    }
+  };
+
   const abrirModalNovo = () => {
     setFormData({
       id: '', codigo: '', nome: '', categoriaId: '', unidadeMedida: 'UN', precoCusto: '', precoVenda: '',
       codigoBarras: '', codigoInterno: '', ncm: '', cest: '', cfopPadrao: '', origem: '0',
       cstCsosnIcms: '', aliquotaIcms: '', cstPis: '', aliquotaPis: '', cstCofins: '', aliquotaCofins: '',
       contaEstoqueId: '',
-      dadosProducao: estadoInicialProducao
+      tipoItem: '',
+      dadosProducao: estadoInicialProducao,
     });
     setStepAtual(1);
     setIaSugestoes(null);
@@ -231,8 +444,33 @@ export function Produtos() {
       cstCofins: produto.cstCofins || '',
       aliquotaCofins: produto.aliquotaCofins?.toString() || '',
       contaEstoqueId: produto.contaEstoqueId || '',
-      // 🚀 NOVO: Carrega os dados de produção se existirem
-      dadosProducao: produto.dadosProducao || estadoInicialProducao,
+      tipoItem: produto.tipoItem ?? '',
+      dadosProducao: {
+        ...estadoInicialProducao,
+        ...(produto.dadosProducao || {}),
+        diasValidade:
+          produto.dadosProducao?.diasValidade !== undefined &&
+          produto.dadosProducao?.diasValidade !== ''
+            ? produto.dadosProducao.diasValidade
+            : produto.diasValidade ?? '',
+        tipoConservacao: mapTipoConservacaoProducao(
+          produto.dadosProducao?.tipoConservacao ?? produto.tipoConservacao
+        ),
+        pesoLiquido: produto.pesoLiquido ?? '',
+        pesoBruto: produto.pesoBruto ?? '',
+        ingredientes: produto.dadosProducao?.ingredientes ?? '',
+        alergenicos: produto.dadosProducao?.alergenicos ?? '',
+        informacaoNutricional: (() => {
+          const v = produto.dadosProducao?.informacaoNutricional;
+          if (v == null || v === '') return '';
+          if (typeof v === 'string') return v;
+          try {
+            return JSON.stringify(v, null, 2);
+          } catch {
+            return '';
+          }
+        })(),
+      },
       controlaProducao: !!produto.dadosProducao
     });
     setStepAtual(1);
@@ -241,86 +479,196 @@ export function Produtos() {
     setModalAberto(true);
   };
 
-  const handleProducaoChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleProducaoChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
+  ) => {
     const { name, value, type } = e.target;
-    let parsedValue: any = value;
-    
+    let parsedValue: string | number | boolean = value;
+
     if (type === 'checkbox') {
       parsedValue = (e.target as HTMLInputElement).checked;
     } else if (type === 'number') {
       parsedValue = value === '' ? '' : Number(value);
     }
 
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
       dadosProducao: {
         ...prev.dadosProducao,
-        [name]: parsedValue
-      }
+        [name]: parsedValue,
+      },
     }));
   };
 
-    const handleSalvarProduto = async (status: 'ATIVO' | 'RASCUNHO') => {
-    if (!formData.nome || formData.nome.trim() === '') {
-      alert("⚠️ O Nome do produto é obrigatório!");
-      setStepAtual(1);
-      return;
+  function taraDisplayFromEmbalagem(emb: IEmbalagemResumo | undefined): string {
+    if (!emb || emb.taraTotal === undefined || emb.taraTotal === null || String(emb.taraTotal).trim() === '') {
+      return '';
     }
+    const n = parseFloat(String(emb.taraTotal).replace(',', '.'));
+    if (!Number.isFinite(n)) return '';
+    return String(n);
+  }
 
-    try {
-      let dadosProdFormatados = undefined;
+  const handleEmbalagemPrimariaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const id = e.target.value;
+    const emb = id ? listaEmbalagens.find((x) => x.id === id) : undefined;
+    const taraVal = id === '' ? '' : taraDisplayFromEmbalagem(emb);
+    setFormData((prev) => ({
+      ...prev,
+      dadosProducao: {
+        ...prev.dadosProducao,
+        embalagemPrimaria: id,
+        taraPrimaria: taraVal,
+      },
+    }));
+  };
 
-      if (formData.controlaProducao && formData.dadosProducao) {
-        // 🚀 A MÁGICA AQUI: Removemos os IDs do banco para não dar conflito no Prisma (Resolve o Erro 400)
-        const { id, produtoId, createdAt, updatedAt, ...restProducao } = formData.dadosProducao as any;
-        
-        dadosProdFormatados = {
-          ...restProducao,
-          rendimentoPadrao: parseFloat(String(restProducao.rendimentoPadrao)) || undefined,
-          pesoMedioPeca: parseFloat(String(restProducao.pesoMedioPeca)) || undefined,
-          pesoMedioCaixa: parseFloat(String(restProducao.pesoMedioCaixa)) || undefined,
-          qtdMediaPecasPorCaixa: parseInt(String(restProducao.qtdMediaPecasPorCaixa)) || undefined,
-          pesoPadrao: parseFloat(String(restProducao.pesoPadrao)) || undefined,
-          diasValidade: parseInt(String(restProducao.diasValidade)) || 0,
-          temperaturaInicial: parseFloat(String(restProducao.temperaturaInicial)) || undefined,
-          temperaturaFinal: parseFloat(String(restProducao.temperaturaFinal)) || undefined,
+  const handleEmbalagemSecundariaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const id = e.target.value;
+    const emb = id ? listaEmbalagens.find((x) => x.id === id) : undefined;
+    const taraVal = id === '' ? '' : taraDisplayFromEmbalagem(emb);
+    setFormData((prev) => ({
+      ...prev,
+      dadosProducao: {
+        ...prev.dadosProducao,
+        embalagemSecundaria: id,
+        taraSecundaria: taraVal,
+      },
+    }));
+  };
+
+    const handleSalvarProduto = async (
+      status: 'ATIVO' | 'RASCUNHO',
+      overrideData?: Partial<IProduto>
+    ): Promise<boolean> => {
+      const dadosParaSalvar: IProduto = { ...formData, ...overrideData };
+
+      if (!dadosParaSalvar.nome || dadosParaSalvar.nome.trim() === '') {
+        alert("⚠️ O Nome do produto é obrigatório!");
+        setStepAtual(1);
+        return false;
+      }
+
+      const categoriaIdTrim = String(dadosParaSalvar.categoriaId ?? '').trim();
+      if (!categoriaIdTrim) {
+        alert('⚠️ Selecione ou crie uma categoria antes de salvar.');
+        setStepAtual(1);
+        return false;
+      }
+
+      try {
+        const { controlaProducao, dadosProducao: dpForm, ...restForm } = dadosParaSalvar;
+
+        let dadosProdFormatados: Record<string, unknown> | undefined = undefined;
+        let diasValidadeRaiz: number | null | undefined = undefined;
+        let tipoConservacaoRaiz: string | null | undefined = undefined;
+        let pesoLiquidoRaiz: number | null | undefined = undefined;
+        let pesoBrutoRaiz: number | null | undefined = undefined;
+
+        if (controlaProducao && dpForm) {
+          const dp = dpForm as IProdutoProducao & {
+            id?: string;
+            produtoId?: string;
+            createdAt?: string;
+            updatedAt?: string;
+          };
+          const {
+            id: _i,
+            produtoId: _p,
+            createdAt: _c,
+            updatedAt: _u,
+            pesoLiquido: plForm,
+            pesoBruto: pbForm,
+            ...restProducao
+          } = dp;
+
+          const diasParsed =
+            restProducao.diasValidade === '' || restProducao.diasValidade === undefined
+              ? 0
+              : parseInt(String(restProducao.diasValidade), 10);
+          const diasNested = Number.isNaN(diasParsed) ? 0 : diasParsed;
+
+          const pl =
+            plForm === '' || plForm === undefined ? null : parseFloat(String(plForm));
+          const pb =
+            pbForm === '' || pbForm === undefined ? null : parseFloat(String(pbForm));
+
+          dadosProdFormatados = {
+            ...restProducao,
+            rendimentoPadrao: parseFloat(String(restProducao.rendimentoPadrao)) || undefined,
+            pesoMedioPeca: parseFloat(String(restProducao.pesoMedioPeca)) || undefined,
+            pesoMedioCaixa: parseFloat(String(restProducao.pesoMedioCaixa)) || undefined,
+            qtdMediaPecasPorCaixa: parseInt(String(restProducao.qtdMediaPecasPorCaixa)) || undefined,
+            pesoPadrao: parseFloat(String(restProducao.pesoPadrao)) || undefined,
+            diasValidade: diasNested,
+            temperaturaInicial: parseFloatPermiteZero(restProducao.temperaturaInicial),
+            temperaturaFinal: parseFloatPermiteZero(restProducao.temperaturaFinal),
+            taraPrimaria: parseFloatPermiteZero(restProducao.taraPrimaria),
+            taraSecundaria: parseFloatPermiteZero(restProducao.taraSecundaria),
+            ingredientes: restProducao.ingredientes ? String(restProducao.ingredientes) : undefined,
+            alergenicos: restProducao.alergenicos ? String(restProducao.alergenicos) : undefined,
+            informacaoNutricional: restProducao.informacaoNutricional,
+          };
+
+          diasValidadeRaiz =
+            restProducao.diasValidade === '' || restProducao.diasValidade === undefined
+              ? null
+              : diasNested;
+          tipoConservacaoRaiz =
+            restProducao.tipoConservacao && String(restProducao.tipoConservacao).trim() !== ''
+              ? String(restProducao.tipoConservacao).trim()
+              : null;
+          pesoLiquidoRaiz = pl !== null && !Number.isNaN(pl) ? pl : null;
+          pesoBrutoRaiz = pb !== null && !Number.isNaN(pb) ? pb : null;
+        }
+
+        const payloadSemMaiusculas = {
+          ...restForm,
+          categoriaId: categoriaIdTrim,
+          codigo: restForm.codigo ? restForm.codigo.trim() : '',
+          precoCusto: parseFloat(String(restForm.precoCusto)) || 0,
+          precoVenda: parseFloat(String(restForm.precoVenda)) || 0,
+          statusFiscal: status === 'ATIVO' ? 'CONCLUIDO' : 'PENDENTE',
+          ncm: restForm.ncm ? String(restForm.ncm).replace(/\D/g, '') : '',
+          cfopPadrao: restForm.cfopPadrao ? String(restForm.cfopPadrao).replace(/\D/g, '') : '',
+          cstCsosn: restForm.cstCsosnIcms,
+          ...(controlaProducao
+            ? {
+                diasValidade: diasValidadeRaiz,
+                tipoConservacao: tipoConservacaoRaiz,
+                pesoLiquido: pesoLiquidoRaiz,
+                pesoBruto: pesoBrutoRaiz,
+                dadosProducao: dadosProdFormatados,
+              }
+            : { dadosProducao: undefined }),
         };
+
+        const payload = transformarParaMaiusculas(payloadSemMaiusculas);
+
+        console.log('Payload de Produto Enviado:', dadosParaSalvar);
+
+        if (dadosParaSalvar.id) {
+          await api.put(`/api/produtos/${dadosParaSalvar.id}`, payload);
+        } else {
+          await api.post('/api/produtos', payload);
+        }
+
+        if (isEditModeFromPDV) {
+          window.close();
+          return true;
+        }
+
+        alert('✅ Produto salvo com sucesso!');
+        setModalAberto(false);
+        carregarDados();
+        return true;
+      } catch (err) {
+        const error = err as AxiosError<{ error?: string }>;
+        console.error('Erro ao salvar produto:', error);
+        alert(error.response?.data?.error || 'Ocorreu um erro ao salvar o produto no banco de dados.');
+        return false;
       }
-
-      const payload = {
-        ...formData,
-        codigo: formData.codigo ? formData.codigo.trim() : '', 
-        precoCusto: parseFloat(String(formData.precoCusto)) || 0,
-        precoVenda: parseFloat(String(formData.precoVenda)) || 0,
-        statusFiscal: status === 'ATIVO' ? 'CONCLUIDO' : 'PENDENTE',
-        ncm: formData.ncm ? String(formData.ncm).replace(/\D/g, '') : '',
-        cfopPadrao: formData.cfopPadrao ? String(formData.cfopPadrao).replace(/\D/g, '') : '',
-        cstCsosn: formData.cstCsosnIcms,
-        // 🚀 Envia os dados limpos apenas se a chave estiver ligada
-        dadosProducao: formData.controlaProducao ? dadosProdFormatados : undefined
-      };
-
-      if (formData.id) {
-        await api.put(`/api/produtos/${formData.id}`, payload);
-      } else {
-        await api.post('/api/produtos', payload);
-      }
-
-      if (isEditModeFromPDV) {
-        window.close();
-        return; 
-      }
-
-      alert('✅ Produto salvo com sucesso!');
-      setModalAberto(false);
-      carregarDados(); 
-      
-    } catch (err) {
-      const error = err as AxiosError<{error?: string}>;
-      console.error("Erro ao salvar produto:", error);
-      alert(error.response?.data?.error || "Ocorreu um erro ao salvar o produto no banco de dados.");
-    }
-  };  
+    };  
 
   const excluirProduto = async (id?: string) => {
     if(!id) return;
@@ -373,34 +721,63 @@ export function Produtos() {
 
       const dadosIA = response.data;
 
-      let categoriaIdParaVincular = "";
+      let categoriaIdParaVincular: string | undefined;
       if (dadosIA.categoriaSugerida) {
-        const categoriaExistente = categorias.find(c => c.nome.toLowerCase() === dadosIA.categoriaSugerida?.toLowerCase());
+        const categoriaExistente = categorias.find(
+          (c) => c.nome.toLowerCase() === dadosIA.categoriaSugerida?.toLowerCase()
+        );
         if (categoriaExistente) {
           categoriaIdParaVincular = categoriaExistente.id;
         } else {
-          const catResponse = await api.post<ICategoria>('/api/categorias', { nome: dadosIA.categoriaSugerida });
-          categoriaIdParaVincular = catResponse.data.id;
-          carregarDados(); 
+          const payloadCategoria = transformarParaMaiusculas({
+            nome: dadosIA.categoriaSugerida,
+          }) as { nome: string };
+          const catResponse = await api.post<ICategoria>('/api/categorias', payloadCategoria);
+          let resolvido = extrairIdCategoriaDaResposta(catResponse.data);
+          if (!resolvido) {
+            const listRes = await api.get<ICategoria[]>('/api/categorias');
+            const nomeU = String(dadosIA.categoriaSugerida).trim().toUpperCase();
+            resolvido = listRes.data.find((c) => c.nome.toUpperCase() === nomeU)?.id;
+          }
+          if (!resolvido) {
+            alert('Categoria criada, mas a API não retornou o ID. Recarregue a página e selecione a categoria manualmente.');
+          } else {
+            categoriaIdParaVincular = resolvido;
+            const nomeNova =
+              catResponse.data &&
+              typeof catResponse.data === 'object' &&
+              typeof catResponse.data.nome === 'string'
+                ? catResponse.data.nome
+                : String(dadosIA.categoriaSugerida).trim().toUpperCase();
+            flushSync(() => {
+              setCategorias((prev) => {
+                if (prev.some((c) => c.id === resolvido)) {
+                  return prev.map((c) => (c.id === resolvido ? { ...c, nome: nomeNova } : c));
+                }
+                return [...prev, { id: resolvido, nome: nomeNova }];
+              });
+              setFormData((f) => ({ ...f, categoriaId: resolvido }));
+            });
+            await carregarDados();
+          }
         }
       }
 
-      setFormData(prev => ({
+      setFormData((prev) => ({
         ...prev,
-        categoriaId: categoriaIdParaVincular,
+        ...(categoriaIdParaVincular ? { categoriaId: categoriaIdParaVincular } : {}),
         ncm: dadosIA.ncm || prev.ncm,
         precoCusto: dadosIA.precoCustoSugerido?.toString() || prev.precoCusto,
-        precoVenda: dadosIA.precoVendaSugerido?.toString() || prev.precoVenda, 
+        precoVenda: dadosIA.precoVendaSugerido?.toString() || prev.precoVenda,
         cstCsosnIcms: dadosIA.cst || '102',
-        cfopPadrao: dadosIA.cfop || '5102'
+        cfopPadrao: dadosIA.cfop || '5102',
       }));
-      
+
       setIaSugestoes({
         categoria: dadosIA.categoriaSugerida || 'Geral',
         ncm: dadosIA.ncm || '-',
-        margem: dadosIA.margemSugerida || '30%'
+        margem: dadosIA.margemSugerida || '30%',
       });
-
     } catch (err) {
       const error = err as AxiosError<{error?: string}>;
       console.error("Erro na IA:", error);
@@ -821,7 +1198,7 @@ export function Produtos() {
                         <input 
                           required
                           type="text" 
-                          value={formData.nome} 
+                          value={formData.nome ?? ''} 
                           onChange={e => {
                             setFormData({...formData, nome: e.target.value});
                             if(iaSugestoes) setIaSugestoes(null);
@@ -853,18 +1230,52 @@ export function Produtos() {
 
                       <div>
                         <label className={labelClass}>Categoria *</label>
-                        <select value={formData.categoriaId} onChange={e => setFormData({...formData, categoriaId: e.target.value})} className={inputClass}>
-                          <option value="">Selecione...</option>
-                          {categorias.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
-                        </select>
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                          <select
+                            value={formData.categoriaId ?? ''}
+                            onChange={(e) => setFormData({ ...formData, categoriaId: e.target.value })}
+                            className={`${inputClass} flex-1`}
+                          >
+                            <option value="">Selecione...</option>
+                            {categorias.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.nome}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => void criarCategoriaRapida()}
+                            className="shrink-0 rounded-xl border border-violet-500/40 bg-violet-500/15 px-4 py-3 text-xs font-black uppercase tracking-wider text-violet-200 transition hover:bg-violet-500/25"
+                          >
+                            + Nova categoria
+                          </button>
+                        </div>
                       </div>
                       <div>
                         <label className={labelClass}>Unidade de Medida</label>
-                                                <select value={formData.unidadeMedida} onChange={e => setFormData({...formData, unidadeMedida: e.target.value})} className={inputClass}>
+                                                <select value={formData.unidadeMedida ?? 'UN'} onChange={e => setFormData({...formData, unidadeMedida: e.target.value})} className={inputClass}>
                           <option value="UN">Unidade (UN)</option>
                           <option value="KG">Quilograma (KG)</option>
                           <option value="CX">Caixa (CX)</option>
                         </select>
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className={labelClass}>Tipo de Item (SPED)</label>
+                        <select
+                          value={formData.tipoItem ?? ''}
+                          onChange={(e) => setFormData({ ...formData, tipoItem: e.target.value })}
+                          className={inputClass}
+                        >
+                          {OPCOES_TIPO_ITEM_SPED.map((op) => (
+                            <option key={op.value || 'empty'} value={op.value}>
+                              {op.label}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-[11px] text-slate-500 mt-1.5 font-medium">
+                          Classificação para estoque fiscal (Reg. 0200). Obrigatório em módulos NFe/SPED quando exigido pelo roteiro.
+                        </p>
                       </div>
                     </div>
 
@@ -883,7 +1294,7 @@ export function Produtos() {
                         <input 
                           type="checkbox" 
                           className="sr-only peer" 
-                          checked={formData.controlaProducao}
+                          checked={!!formData.controlaProducao}
                           onChange={(e) => setFormData({...formData, controlaProducao: e.target.checked})}
                         />
                         <div className="w-14 h-7 bg-[#08101f] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 peer-checked:after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-violet-600 border border-white/10 shadow-[0_0_15px_rgba(139,92,246,0.2)]"></div>
@@ -898,11 +1309,11 @@ export function Produtos() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div>
                         <label className={labelClass}>Custo de Aquisição (R$) *</label>
-                        <input type="number" value={formData.precoCusto} onChange={e => setFormData({...formData, precoCusto: e.target.value})} className={inputClass} placeholder="0.00" />
+                        <input type="number" value={formData.precoCusto ?? ''} onChange={e => setFormData({...formData, precoCusto: e.target.value})} className={inputClass} placeholder="0.00" />
                       </div>
                       <div>
                         <label className={labelClass}>Preço de Venda (R$) *</label>
-                        <input type="number" value={formData.precoVenda} onChange={e => setFormData({...formData, precoVenda: e.target.value})} className={inputClass} placeholder="0.00" />
+                        <input type="number" value={formData.precoVenda ?? ''} onChange={e => setFormData({...formData, precoVenda: e.target.value})} className={inputClass} placeholder="0.00" />
                       </div>
                     </div>
 
@@ -954,19 +1365,19 @@ export function Produtos() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div>
                         <label className={labelClass}>Código de Barras (EAN)</label>
-                        <input type="text" value={formData.codigoBarras} onChange={e => setFormData({...formData, codigoBarras: e.target.value})} className={inputClass} placeholder="Pode deixar em branco" />
+                        <input type="text" value={formData.codigoBarras ?? ''} onChange={e => setFormData({...formData, codigoBarras: e.target.value})} className={inputClass} placeholder="Pode deixar em branco" />
                       </div>
                       <div>
                         <label className={labelClass}>NCM *</label>
-                        <input type="text" value={formData.ncm} onChange={e => setFormData({...formData, ncm: e.target.value})} className={inputClass} placeholder="8 dígitos" />
+                        <input type="text" value={formData.ncm ?? ''} onChange={e => setFormData({...formData, ncm: e.target.value})} className={inputClass} placeholder="8 dígitos" />
                       </div>
                       <div>
                         <label className={labelClass}>CST / CSOSN (ICMS)</label>
-                        <input type="text" value={formData.cstCsosnIcms} onChange={e => setFormData({...formData, cstCsosnIcms: e.target.value})} className={inputClass} placeholder="Ex: 102, 500" />
+                        <input type="text" value={formData.cstCsosnIcms ?? ''} onChange={e => setFormData({...formData, cstCsosnIcms: e.target.value})} className={inputClass} placeholder="Ex: 102, 500" />
                       </div>
                       <div>
                         <label className={labelClass}>CFOP Padrão (Venda)</label>
-                        <input type="text" value={formData.cfopPadrao} onChange={e => setFormData({...formData, cfopPadrao: e.target.value})} className={inputClass} placeholder="Ex: 5102" />
+                        <input type="text" value={formData.cfopPadrao ?? ''} onChange={e => setFormData({...formData, cfopPadrao: e.target.value})} className={inputClass} placeholder="Ex: 5102" />
                       </div>
                     </div>
                   </div>
@@ -976,7 +1387,7 @@ export function Produtos() {
                   <div className="space-y-6 animate-fade-in-down">
                     <div className="bg-purple-950/20 p-8 rounded-[30px] border border-purple-500/30 shadow-inner">
                       <label className="block text-sm font-black text-purple-300 uppercase tracking-widest mb-4">Conta de Estoque Analítica (Ativo)</label>
-                      <select value={formData.contaEstoqueId} onChange={e => setFormData({...formData, contaEstoqueId: e.target.value})} className={`${inputClass} border-purple-500/40 focus:border-purple-500 focus:ring-purple-500`}>
+                      <select value={formData.contaEstoqueId ?? ''} onChange={e => setFormData({...formData, contaEstoqueId: e.target.value})} className={`${inputClass} border-purple-500/40 focus:border-purple-500 focus:ring-purple-500`}>
                         <option value="">-- Usar Conta Global Padrão (1.1.4) --</option>
                         {planosContas.filter(c => c.tipo === 'ATIVO').map(c => (
                           <option key={c.id} value={c.id}>{c.codigo} - {c.nome}</option>
@@ -1077,19 +1488,58 @@ export function Produtos() {
                       </div>
                     </div>
 
-                    {/* BLOCO 4: Conservação e Validade */}
+                    {/* BLOCO 4: Peso de rotulagem, validade e conservação (antes da rotulagem textual) */}
                     <div className="bg-[#0b1324]/70 border border-white/10 rounded-2xl p-6 border-l-4 border-l-emerald-500">
                       <div className="flex items-center gap-2 mb-4 text-emerald-400">
                         <ThermometerSnowflake size={20} />
-                        <h3 className="font-bold text-lg text-white">Conservação e Validade</h3>
+                        <h3 className="font-bold text-lg text-white">Rotulagem física, validade e conservação</h3>
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+                      <p className="text-slate-400 text-sm mb-5">
+                        Peso líquido/bruto e shelf life alimentam o cadastro do produto e a ficha de produção de forma consistente (sem duplicar na etapa 1).
+                      </p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                         <div className="flex flex-col justify-end">
-                          <label className={labelClass}>Dias de Validade</label>
-                          <input type="number" name="diasValidade" placeholder="Ex: 7" value={formData.dadosProducao?.diasValidade || ''} onChange={handleProducaoChange} className={inputClass} />
+                          <label className={labelClass}>Peso líquido (kg) — rótulo / embalagem</label>
+                          <input
+                            type="number"
+                            step="0.001"
+                            min="0"
+                            name="pesoLiquido"
+                            placeholder="0,000"
+                            value={
+                              formData.dadosProducao?.pesoLiquido === '' ||
+                              formData.dadosProducao?.pesoLiquido === undefined
+                                ? ''
+                                : formData.dadosProducao.pesoLiquido
+                            }
+                            onChange={handleProducaoChange}
+                            className={inputClass}
+                          />
                         </div>
                         <div className="flex flex-col justify-end">
-                          <label className={labelClass}>Condição de Conservação</label>
+                          <label className={labelClass}>Peso bruto (kg) — rótulo / embalagem</label>
+                          <input
+                            type="number"
+                            step="0.001"
+                            min="0"
+                            name="pesoBruto"
+                            placeholder="0,000"
+                            value={
+                              formData.dadosProducao?.pesoBruto === '' ||
+                              formData.dadosProducao?.pesoBruto === undefined
+                                ? ''
+                                : formData.dadosProducao.pesoBruto
+                            }
+                            onChange={handleProducaoChange}
+                            className={inputClass}
+                          />
+                        </div>
+                        <div className="flex flex-col justify-end">
+                          <label className={labelClass}>Dias de validade</label>
+                          <input type="number" name="diasValidade" placeholder="Ex: 7" value={formData.dadosProducao?.diasValidade ?? ''} onChange={handleProducaoChange} className={inputClass} />
+                        </div>
+                        <div className="flex flex-col justify-end">
+                          <label className={labelClass}>Condição de conservação</label>
                           <select name="tipoConservacao" value={formData.dadosProducao?.tipoConservacao || 'RESFRIADO'} onChange={handleProducaoChange} className={inputClass}>
                             <option value="RESFRIADO">Resfriado</option>
                             <option value="CONGELADO">Congelado</option>
@@ -1097,12 +1547,38 @@ export function Produtos() {
                           </select>
                         </div>
                         <div className="flex flex-col justify-end">
-                          <label className={labelClass}>Temp. Inicial Máx (°C)</label>
-                          <input type="number" step="0.1" name="temperaturaInicial" placeholder="Ex: 7.0" value={formData.dadosProducao?.temperaturaInicial || ''} onChange={handleProducaoChange} className={inputClass} />
+                          <label className={labelClass}>Temp. inicial máx (°C)</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            name="temperaturaInicial"
+                            placeholder="Ex: 0 ou 7.0"
+                            value={
+                              formData.dadosProducao?.temperaturaInicial != null &&
+                              formData.dadosProducao.temperaturaInicial !== ''
+                                ? formData.dadosProducao.temperaturaInicial
+                                : ''
+                            }
+                            onChange={handleProducaoChange}
+                            className={inputClass}
+                          />
                         </div>
                         <div className="flex flex-col justify-end">
-                          <label className={labelClass}>Temp. Final Máx (°C)</label>
-                          <input type="number" step="0.1" name="temperaturaFinal" placeholder="Ex: 4.0" value={formData.dadosProducao?.temperaturaFinal || ''} onChange={handleProducaoChange} className={inputClass} />
+                          <label className={labelClass}>Temp. final máx (°C)</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            name="temperaturaFinal"
+                            placeholder="Ex: 0 ou 4.0"
+                            value={
+                              formData.dadosProducao?.temperaturaFinal != null &&
+                              formData.dadosProducao.temperaturaFinal !== ''
+                                ? formData.dadosProducao.temperaturaFinal
+                                : ''
+                            }
+                            onChange={handleProducaoChange}
+                            className={inputClass}
+                          />
                         </div>
                       </div>
                     </div>
@@ -1113,28 +1589,175 @@ export function Produtos() {
                         <Tag size={20} />
                         <h3 className="font-bold text-lg text-white">Etiquetas e Embalagens</h3>
                       </div>
+                      <p className="text-slate-400 text-sm mb-4">
+                        Layouts vêm de <span className="text-amber-200/90">Cadastros → Layout de etiquetas</span>. Embalagens vêm da{' '}
+                        <span className="text-amber-200/90">ficha técnica (BOM)</span> em Cadastros → Embalagens; valores antigos em texto permanecem como opção legada.
+                      </p>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-5">
                         <div className="flex flex-col justify-end">
                           <label className={labelClass}>Descrição na Etiqueta (Curta)</label>
                           <input type="text" name="descricaoEtiqueta" placeholder="Ex: PICANHA GRILL" maxLength={25} value={formData.dadosProducao?.descricaoEtiqueta || ''} onChange={handleProducaoChange} className={inputClass} />
                         </div>
                         <div className="flex flex-col justify-end">
-                          <label className={labelClass}>Layout Etiqueta Interna</label>
-                          <input type="text" name="layoutEtiquetaInterna" placeholder="Ex: L01" value={formData.dadosProducao?.layoutEtiquetaInterna || ''} onChange={handleProducaoChange} className={inputClass} />
+                          <label className={labelClass}>Layout etiqueta interna</label>
+                          <select
+                            name="layoutEtiquetaInterna"
+                            value={String(formData.dadosProducao?.layoutEtiquetaInterna ?? '')}
+                            onChange={handleProducaoChange}
+                            className={inputClass}
+                          >
+                            {buildOpcoesLayoutSelect(
+                              layoutsEtiqueta,
+                              formData.dadosProducao?.layoutEtiquetaInterna
+                            ).map((op, idx) => (
+                              <option key={`layout-int-${idx}`} value={op.value}>
+                                {op.label}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                         <div className="flex flex-col justify-end">
-                          <label className={labelClass}>Layout Etiqueta Secundária</label>
-                          <input type="text" name="layoutEtiquetaSecundaria" placeholder="Ex: L02" value={formData.dadosProducao?.layoutEtiquetaSecundaria || ''} onChange={handleProducaoChange} className={inputClass} />
+                          <label className={labelClass}>Layout etiqueta secundária</label>
+                          <select
+                            name="layoutEtiquetaSecundaria"
+                            value={String(formData.dadosProducao?.layoutEtiquetaSecundaria ?? '')}
+                            onChange={handleProducaoChange}
+                            className={inputClass}
+                          >
+                            {buildOpcoesLayoutSelect(
+                              layoutsEtiqueta,
+                              formData.dadosProducao?.layoutEtiquetaSecundaria
+                            ).map((op, idx) => (
+                              <option key={`layout-sec-${idx}`} value={op.value}>
+                                {op.label}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                         <div className="flex flex-col justify-end">
-                          <label className={labelClass}>Embalagem Primária</label>
-                          <input type="text" name="embalagemPrimaria" placeholder="Ex: Vácuo Saco Encolhível" value={formData.dadosProducao?.embalagemPrimaria || ''} onChange={handleProducaoChange} className={inputClass} />
+                          <label className={labelClass}>Embalagem primária</label>
+                          <select
+                            name="embalagemPrimaria"
+                            value={String(formData.dadosProducao?.embalagemPrimaria ?? '')}
+                            onChange={handleEmbalagemPrimariaChange}
+                            className={inputClass}
+                          >
+                            {buildOpcoesEmbalagemSelect(
+                              listaEmbalagens,
+                              formData.dadosProducao?.embalagemPrimaria
+                            ).map((op, idx) => (
+                              <option key={`emb-p-${idx}`} value={op.value}>
+                                {op.label}
+                              </option>
+                            ))}
+                          </select>
+                          <label className={`${labelClass} mt-3`}>Tara primária (kg)</label>
+                          <input
+                            type="number"
+                            step="any"
+                            min={0}
+                            name="taraPrimaria"
+                            placeholder="Preenchido pela embalagem; pode ajustar"
+                            value={
+                              formData.dadosProducao?.taraPrimaria != null &&
+                              formData.dadosProducao.taraPrimaria !== ''
+                                ? formData.dadosProducao.taraPrimaria
+                                : ''
+                            }
+                            onChange={handleProducaoChange}
+                            className={inputClass}
+                          />
                         </div>
                         <div className="flex flex-col justify-end">
-                          <label className={labelClass}>Embalagem Secundária</label>
-                          <input type="text" name="embalagemSecundaria" placeholder="Ex: Caixa de Papelão 25kg" value={formData.dadosProducao?.embalagemSecundaria || ''} onChange={handleProducaoChange} className={inputClass} />
+                          <label className={labelClass}>Embalagem secundária</label>
+                          <select
+                            name="embalagemSecundaria"
+                            value={String(formData.dadosProducao?.embalagemSecundaria ?? '')}
+                            onChange={handleEmbalagemSecundariaChange}
+                            className={inputClass}
+                          >
+                            {buildOpcoesEmbalagemSelect(
+                              listaEmbalagens,
+                              formData.dadosProducao?.embalagemSecundaria
+                            ).map((op, idx) => (
+                              <option key={`emb-s-${idx}`} value={op.value}>
+                                {op.label}
+                              </option>
+                            ))}
+                          </select>
+                          <label className={`${labelClass} mt-3`}>Tara secundária (kg)</label>
+                          <input
+                            type="number"
+                            step="any"
+                            min={0}
+                            name="taraSecundaria"
+                            placeholder="Preenchido pela embalagem; pode ajustar"
+                            value={
+                              formData.dadosProducao?.taraSecundaria != null &&
+                              formData.dadosProducao.taraSecundaria !== ''
+                                ? formData.dadosProducao.taraSecundaria
+                                : ''
+                            }
+                            onChange={handleProducaoChange}
+                            className={inputClass}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* BLOCO: Rotulagem — ingredientes, alérgenos, tabela nutricional (JSON) */}
+                    <div className="bg-[#0b1324]/70 border border-white/10 rounded-2xl p-6 border-l-4 border-l-rose-500/80">
+                      <div className="flex items-center gap-2 mb-4 text-rose-300">
+                        <ClipboardList className="w-5 h-5" />
+                        <h3 className="font-bold text-lg text-white">Rotulagem e informação ao consumidor</h3>
+                      </div>
+                      <p className="text-slate-400 text-sm mb-5">
+                        Textos para rótulo e legislação. A tabela nutricional pode ser colada em JSON válido (ex.: chaves por porção).
+                      </p>
+                      <div className="grid grid-cols-1 gap-5">
+                        <div>
+                          <label className={labelClass}>Ingredientes</label>
+                          <textarea
+                            name="ingredientes"
+                            rows={5}
+                            value={formData.dadosProducao?.ingredientes || ''}
+                            onChange={handleProducaoChange}
+                            className={`${inputClass} min-h-[120px] font-sans text-sm leading-relaxed resize-y`}
+                            placeholder="Liste os ingredientes na ordem decrescente de quantidade..."
+                          />
+                        </div>
+                        <div>
+                          <label className={labelClass}>Alérgenicos</label>
+                          <textarea
+                            name="alergenicos"
+                            rows={3}
+                            value={formData.dadosProducao?.alergenicos || ''}
+                            onChange={handleProducaoChange}
+                            className={`${inputClass} min-h-[80px] font-sans text-sm leading-relaxed resize-y`}
+                            placeholder="Ex.: Contém glúten. Pode conter traços de amendoim."
+                          />
+                        </div>
+                        <div>
+                          <label className={labelClass}>Informação nutricional (JSON)</label>
+                          <textarea
+                            name="informacaoNutricional"
+                            rows={8}
+                            value={
+                              typeof formData.dadosProducao?.informacaoNutricional === 'string'
+                                ? formData.dadosProducao.informacaoNutricional
+                                : formData.dadosProducao?.informacaoNutricional
+                                  ? JSON.stringify(formData.dadosProducao.informacaoNutricional, null, 2)
+                                  : ''
+                            }
+                            onChange={handleProducaoChange}
+                            className={`${inputClass} min-h-[180px] font-mono text-xs leading-relaxed resize-y`}
+                            placeholder={`{\n  "porcao": "100g",\n  "energiaKcal": 250,\n  "proteinasG": 26\n}`}
+                          />
+                          <p className="text-[11px] text-slate-500 mt-2">
+                            JSON inválido será salvo como texto estruturado no servidor; prefira um objeto JSON válido.
+                          </p>
                         </div>
                       </div>
                     </div>

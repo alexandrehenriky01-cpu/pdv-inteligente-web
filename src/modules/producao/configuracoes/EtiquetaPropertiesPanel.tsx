@@ -1,6 +1,7 @@
 // src/pages/configuracoes/components/layout-etiquetas/EtiquetaPropertiesPanel.tsx
 
-import React from 'react';
+import React, { useRef } from 'react';
+import { Bold, Italic, AlignLeft, AlignCenter, AlignRight } from 'lucide-react';
 import {
   LayoutElemento,
   LayoutTextElement,
@@ -8,22 +9,118 @@ import {
   LayoutQrCodeElement,
   LayoutLineElement,
   LayoutRectangleElement,
+  LayoutImageElement,
   RotationType,
-  FontWeightType,
   TextAlign,
   BarcodeType,
   ValueMode,
-} from '../../producao/types/etiquetas';
+  barcodeExibirNumeracao,
+  qrcodeExibirLegenda,
+} from '../types/etiquetas';
+import {
+  placeholderParaVariavelId,
+  variavelIdParaPlaceholder,
+  VARIAVEIS_ETIQUETA_SECOES,
+} from '../types/variaveisEtiqueta';
+import {
+  type CodigoSimbologiaUi,
+  barcodeParaQrCode,
+  qrCodeParaBarcode,
+  simbologiaUiDoElemento,
+} from './etiquetaElementMorph';
+
+const MAX_IMAGEM_BYTES = 2_500_000;
+
+const IDS_VARIAVEL_CATALOGO = new Set(
+  VARIAVEIS_ETIQUETA_SECOES.flatMap((s) => s.itens.map((i) => i.id)),
+);
+
+interface FonteDadosSelectProps {
+  elemento: LayoutTextElement | LayoutBarcodeElement | LayoutQrCodeElement;
+  onUpdate: (updates: Partial<LayoutElemento>) => void;
+  inputClass: string;
+  labelClass: string;
+}
+
+function FonteDadosSelect({
+  elemento,
+  onUpdate,
+  inputClass,
+  labelClass,
+}: FonteDadosSelectProps) {
+  if (elemento.type === 'text') return null;
+  if (
+    (elemento.type === 'barcode' || elemento.type === 'qrcode') &&
+    elemento.valueMode !== 'dynamic'
+  ) {
+    return null;
+  }
+
+  const placeholderStr = elemento.placeholder;
+  const variavelAtual =
+    elemento.variavel ?? placeholderParaVariavelId(placeholderStr.trim()) ?? '';
+
+  const valorSelect =
+    variavelAtual && IDS_VARIAVEL_CATALOGO.has(variavelAtual) ? variavelAtual : '';
+
+  return (
+    <div className="mt-3 rounded-xl border border-violet-500/15 bg-[#0d1528]/90 p-3">
+      <h5 className="text-[11px] font-bold uppercase tracking-wider text-violet-400/90 mb-2">
+        Fonte de dados
+      </h5>
+      <label className={labelClass}>Variável dinâmica</label>
+      <select
+        className={inputClass}
+        value={valorSelect}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (!v) {
+            onUpdate({ variavel: undefined } as Partial<LayoutElemento>);
+            return;
+          }
+          onUpdate({
+            variavel: v,
+            placeholder: variavelIdParaPlaceholder(v),
+          } as Partial<LayoutElemento>);
+        }}
+      >
+        <option value="">— Outro (placeholder manual) —</option>
+        {VARIAVEIS_ETIQUETA_SECOES.map((sec) => (
+          <optgroup key={sec.id} label={sec.titulo}>
+            {sec.itens.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+const OPCOES_SIMBOLOGIA: { value: CodigoSimbologiaUi; label: string }[] = [
+  { value: 'EAN13', label: 'EAN-13' },
+  { value: 'EAN8', label: 'EAN-8' },
+  { value: 'CODE128', label: 'Code 128' },
+  { value: 'ITF14', label: 'ITF-14' },
+  { value: 'EAN14', label: 'EAN-14' },
+  { value: 'CODE39', label: 'Code 39' },
+  { value: 'QRCODE', label: 'QR Code' },
+];
 
 interface Props {
   selectedElement: LayoutElemento | null;
   onUpdateElement: (id: string, updates: Partial<LayoutElemento>) => void;
+  onReplaceElement?: (id: string, next: LayoutElemento) => void;
 }
 
 const EtiquetaPropertiesPanel: React.FC<Props> = ({
   selectedElement,
   onUpdateElement,
+  onReplaceElement,
 }) => {
+  const imagemInputRef = useRef<HTMLInputElement>(null);
   if (!selectedElement) {
     return (
       <div className="text-gray-500 text-center mt-10">
@@ -81,6 +178,12 @@ const EtiquetaPropertiesPanel: React.FC<Props> = ({
     return element.type === 'rectangle';
   };
 
+  const isImageElement = (
+    element: LayoutElemento,
+  ): element is LayoutImageElement => {
+    return element.type === 'image';
+  };
+
   return (
     <div className="space-y-5">
       <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-800 pb-2">
@@ -133,7 +236,7 @@ const EtiquetaPropertiesPanel: React.FC<Props> = ({
       {/* CONTROLE GERAL */}
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className={labelClass}>Rotação</label>
+          <label className={labelClass}>Rotação (°)</label>
           <select
             value={selectedElement.rotation ?? 0}
             onChange={(e) =>
@@ -187,11 +290,34 @@ const EtiquetaPropertiesPanel: React.FC<Props> = ({
             Bloqueado
           </label>
         </div>
+
+        {(isLineElement(selectedElement) ||
+          isRectangleElement(selectedElement) ||
+          isBarcodeElement(selectedElement) ||
+          isQrCodeElement(selectedElement)) && (
+          <div className="col-span-2 flex items-center gap-2 pt-2">
+            <input
+              id="inverted-geral"
+              type="checkbox"
+              checked={selectedElement.inverted === true}
+              onChange={(e) => handleChange({ inverted: e.target.checked })}
+              className="rounded border-gray-700 bg-[#131b2f]"
+            />
+            <label htmlFor="inverted-geral" className="text-sm text-gray-300">
+              Negativo (fundo preto / primeiro plano claro)
+            </label>
+          </div>
+        )}
       </div>
 
       {/* TEXTO / DYNAMIC_TEXT */}
       {isTextElement(selectedElement) && (
         <>
+          <div className="border-b border-gray-800 pb-2 mb-1">
+            <h4 className="text-xs font-bold text-violet-400/90 uppercase tracking-wider">Texto</h4>
+            <p className="text-[11px] text-gray-500 mt-1">Hierarquia visual e leitura do rótulo</p>
+          </div>
+
           {/* ✅ NOVO: Alternador de Tipo de Texto (Fixo vs Dinâmico) */}
           <div className="mb-3">
             <label className={labelClass}>Tipo de Texto</label>
@@ -201,8 +327,18 @@ const EtiquetaPropertiesPanel: React.FC<Props> = ({
                 const newType = e.target.value as 'text' | 'dynamic_text';
                 handleChange(
                   newType === 'text'
-                    ? ({ type: newType, text: 'Novo Texto', placeholder: undefined } as Partial<LayoutTextElement>)
-                    : ({ type: newType, placeholder: '{{produto}}', text: undefined } as Partial<LayoutTextElement>)
+                    ? ({
+                        type: newType,
+                        text: 'Novo Texto',
+                        placeholder: undefined,
+                        variavel: undefined,
+                      } as Partial<LayoutTextElement>)
+                    : ({
+                        type: newType,
+                        placeholder: '{{produto}}',
+                        text: undefined,
+                        variavel: 'produto',
+                      } as Partial<LayoutTextElement>),
                 );
               }}
               className={inputClass}
@@ -232,20 +368,36 @@ const EtiquetaPropertiesPanel: React.FC<Props> = ({
               <input
                 type="text"
                 value={selectedElement.placeholder}
-                onChange={(e) =>
-                  handleChange({ placeholder: e.target.value } as Partial<LayoutTextElement>)
-                }
+                onChange={(e) => {
+                  const ph = e.target.value;
+                  const vid = placeholderParaVariavelId(ph.trim());
+                  handleChange({
+                    placeholder: ph,
+                    variavel: vid,
+                  } as Partial<LayoutTextElement>);
+                }}
                 className={inputClass}
                 placeholder="{{produto}}"
               />
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3 mt-3">
+          {selectedElement.type === 'dynamic_text' && (
+            <FonteDadosSelect
+              elemento={selectedElement}
+              onUpdate={handleChange}
+              inputClass={inputClass}
+              labelClass={labelClass}
+            />
+          )}
+
+          <div className="space-y-3 mt-3">
             <div>
-              <label className={labelClass}>Tamanho da Fonte (px)</label>
+              <label className={labelClass}>Tamanho da fonte (px)</label>
               <input
                 type="number"
+                min={6}
+                max={200}
                 value={selectedElement.fontSize || 24}
                 onChange={(e) => {
                   const numberValue =
@@ -259,40 +411,81 @@ const EtiquetaPropertiesPanel: React.FC<Props> = ({
             </div>
 
             <div>
-              <label className={labelClass}>Peso da Fonte</label>
-              <select
-                value={selectedElement.fontWeight || 'normal'}
-                onChange={(e) =>
-                  handleChange({
-                    fontWeight: e.target.value as FontWeightType,
-                  } as Partial<LayoutTextElement>)
-                }
-                className={inputClass}
-              >
-                <option value="normal">Normal</option>
-                <option value="bold">Negrito</option>
-              </select>
+              <label className={labelClass}>Estilo</label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  title="Negrito"
+                  onClick={() =>
+                    handleChange({
+                      fontWeight:
+                        selectedElement.fontWeight === 'bold' ? 'normal' : 'bold',
+                    } as Partial<LayoutTextElement>)
+                  }
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border text-sm font-bold transition-colors ${
+                    selectedElement.fontWeight === 'bold'
+                      ? 'bg-violet-600 border-violet-400 text-white shadow-inner'
+                      : 'bg-[#131b2f] border-gray-600 text-gray-300 hover:border-gray-500'
+                  }`}
+                >
+                  <Bold size={16} strokeWidth={2.5} />
+                  B
+                </button>
+                <button
+                  type="button"
+                  title="Itálico"
+                  onClick={() =>
+                    handleChange({
+                      fontStyle:
+                        selectedElement.fontStyle === 'italic' ? 'normal' : 'italic',
+                    } as Partial<LayoutTextElement>)
+                  }
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border text-sm italic transition-colors ${
+                    selectedElement.fontStyle === 'italic'
+                      ? 'bg-violet-600 border-violet-400 text-white shadow-inner'
+                      : 'bg-[#131b2f] border-gray-600 text-gray-300 hover:border-gray-500'
+                  }`}
+                >
+                  <Italic size={16} strokeWidth={2.5} />
+                  I
+                </button>
+              </div>
             </div>
 
             <div>
               <label className={labelClass}>Alinhamento</label>
-              <select
-                value={selectedElement.textAlign || 'left'}
-                onChange={(e) =>
-                  handleChange({
-                    textAlign: e.target.value as TextAlign,
-                  } as Partial<LayoutTextElement>)
-                }
-                className={inputClass}
-              >
-                <option value="left">Esquerda</option>
-                <option value="center">Centro</option>
-                <option value="right">Direita</option>
-              </select>
+              <div className="grid grid-cols-3 gap-2">
+                {(
+                  [
+                    { v: 'left' as const, icon: AlignLeft, label: 'Esq' },
+                    { v: 'center' as const, icon: AlignCenter, label: 'Centro' },
+                    { v: 'right' as const, icon: AlignRight, label: 'Dir' },
+                  ] as const
+                ).map(({ v, icon: Icon, label }) => {
+                  const ativo = (selectedElement.textAlign || 'left') === v;
+                  return (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() =>
+                        handleChange({ textAlign: v } as Partial<LayoutTextElement>)
+                      }
+                      className={`flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border text-[11px] transition-colors ${
+                        ativo
+                          ? 'bg-violet-600 border-violet-400 text-white'
+                          : 'bg-[#131b2f] border-gray-600 text-gray-400 hover:border-gray-500 hover:text-gray-200'
+                      }`}
+                    >
+                      <Icon size={16} strokeWidth={2} />
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div>
-              <label className={labelClass}>Fonte</label>
+              <label className={labelClass}>Família da fonte</label>
               <input
                 type="text"
                 value={selectedElement.fontFamily || 'Arial'}
@@ -305,12 +498,53 @@ const EtiquetaPropertiesPanel: React.FC<Props> = ({
               />
             </div>
           </div>
+
+          <div className="flex items-center gap-2 mt-3">
+            <input
+              id="inverted-texto"
+              type="checkbox"
+              checked={selectedElement.inverted === true}
+              onChange={(e) =>
+                handleChange({ inverted: e.target.checked } as Partial<LayoutTextElement>)
+              }
+              className="rounded border-gray-700 bg-[#131b2f]"
+            />
+            <label htmlFor="inverted-texto" className="text-sm text-gray-300">
+              Inverter cores (fundo preto)
+            </label>
+          </div>
         </>
       )}
 
       {/* BARCODE */}
       {isBarcodeElement(selectedElement) && (
         <>
+          <div className="rounded-xl border border-violet-500/25 bg-gradient-to-br from-violet-950/40 to-[#131b2f] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                id="showBarcodeNumeracao"
+                type="checkbox"
+                checked={barcodeExibirNumeracao(selectedElement)}
+                onChange={(e) => {
+                  const ligado = e.target.checked;
+                  handleChange({
+                    showText: ligado,
+                    showHumanReadable: ligado,
+                  } as Partial<LayoutBarcodeElement>);
+                }}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-600 bg-[#131b2f] text-violet-500 focus:ring-violet-500 focus:ring-offset-0 focus:ring-offset-transparent"
+              />
+              <span>
+                <span className="block text-sm font-semibold text-white">
+                  Mostrar numeração (texto legível)
+                </span>
+                <span className="mt-1 block text-[11px] leading-snug text-gray-400">
+                  Desligue para ocultar os números abaixo das barras no canvas e na impressão (ZPL).
+                </span>
+              </span>
+            </label>
+          </div>
+
           {/* BLINDAGEM 2: Separação estrita de Fixed e Dynamic para Barcode */}
           {selectedElement.valueMode === 'fixed' && (
             <div>
@@ -331,31 +565,55 @@ const EtiquetaPropertiesPanel: React.FC<Props> = ({
               <input
                 type="text"
                 value={selectedElement.placeholder}
-                onChange={(e) =>
-                  handleChange({ placeholder: e.target.value } as Partial<LayoutBarcodeElement>)
-                }
+                onChange={(e) => {
+                  const ph = e.target.value;
+                  const vid = placeholderParaVariavelId(ph.trim());
+                  handleChange({
+                    placeholder: ph,
+                    variavel: vid,
+                  } as Partial<LayoutBarcodeElement>);
+                }}
                 className={inputClass}
                 placeholder="{{codigoBarras}}"
               />
             </div>
           )}
 
+          {selectedElement.valueMode === 'dynamic' && (
+            <FonteDadosSelect
+              elemento={selectedElement}
+              onUpdate={handleChange}
+              inputClass={inputClass}
+              labelClass={labelClass}
+            />
+          )}
+
           <div className="grid grid-cols-2 gap-3 mt-3">
-            <div>
-              <label className={labelClass}>Tipo de Código</label>
+            <div className="col-span-2">
+              <label className={labelClass}>Padrão do código</label>
               <select
-                value={selectedElement.barcodeType}
-                onChange={(e) =>
+                value={simbologiaUiDoElemento(selectedElement)}
+                onChange={(e) => {
+                  const v = e.target.value as CodigoSimbologiaUi;
+                  if (v === 'QRCODE') {
+                    if (!onReplaceElement) {
+                      alert('Não foi possível converter para QR Code. Recarregue o editor.');
+                      return;
+                    }
+                    onReplaceElement(selectedElement.id, barcodeParaQrCode(selectedElement));
+                    return;
+                  }
                   handleChange({
-                    barcodeType: e.target.value as BarcodeType,
-                  } as Partial<LayoutBarcodeElement>)
-                }
+                    barcodeType: v as BarcodeType,
+                  } as Partial<LayoutBarcodeElement>);
+                }}
                 className={inputClass}
               >
-                <option value="CODE128">CODE128</option>
-                <option value="EAN13">EAN13</option>
-                <option value="EAN14">EAN14</option>
-                <option value="CODE39">CODE39</option>
+                {OPCOES_SIMBOLOGIA.map((op) => (
+                  <option key={op.value} value={op.value}>
+                    {op.label}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -368,8 +626,18 @@ const EtiquetaPropertiesPanel: React.FC<Props> = ({
                   // BLINDAGEM 6: Limpa o campo oposto ao trocar o modo
                   handleChange(
                     mode === 'fixed'
-                      ? ({ valueMode: mode, text: '', placeholder: undefined } as Partial<LayoutBarcodeElement>)
-                      : ({ valueMode: mode, placeholder: '{{codigoBarras}}', text: undefined } as Partial<LayoutBarcodeElement>)
+                      ? ({
+                          valueMode: mode,
+                          text: '',
+                          placeholder: undefined,
+                          variavel: undefined,
+                        } as Partial<LayoutBarcodeElement>)
+                      : ({
+                          valueMode: mode,
+                          placeholder: '{{codigoBarras}}',
+                          text: undefined,
+                          variavel: 'codigoBarras',
+                        } as Partial<LayoutBarcodeElement>),
                   );
                 }}
                 className={inputClass}
@@ -378,26 +646,6 @@ const EtiquetaPropertiesPanel: React.FC<Props> = ({
                 <option value="dynamic">Dinâmico</option>
               </select>
             </div>
-
-            <div className="col-span-2 flex items-center gap-2 pt-2">
-              <input
-                id="showHumanReadable"
-                type="checkbox"
-                checked={selectedElement.showHumanReadable ?? true}
-                onChange={(e) =>
-                  handleChange({
-                    showHumanReadable: e.target.checked,
-                  } as Partial<LayoutBarcodeElement>)
-                }
-                className="rounded border-gray-700 bg-[#131b2f]"
-              />
-              <label
-                htmlFor="showHumanReadable"
-                className="text-sm text-gray-300"
-              >
-                Mostrar valor legível abaixo do código
-              </label>
-            </div>
           </div>
         </>
       )}
@@ -405,6 +653,30 @@ const EtiquetaPropertiesPanel: React.FC<Props> = ({
       {/* QRCODE */}
       {isQrCodeElement(selectedElement) && (
         <>
+          <div className="rounded-xl border border-violet-500/25 bg-gradient-to-br from-violet-950/40 to-[#131b2f] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                id="showQrLegenda"
+                type="checkbox"
+                checked={qrcodeExibirLegenda(selectedElement)}
+                onChange={(e) => {
+                  const ligado = e.target.checked;
+                  handleChange({ showText: ligado } as Partial<LayoutQrCodeElement>);
+                }}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-600 bg-[#131b2f] text-violet-500 focus:ring-violet-500 focus:ring-offset-0 focus:ring-offset-transparent"
+              />
+              <span>
+                <span className="block text-sm font-semibold text-white">
+                  Mostrar numeração (texto legível)
+                </span>
+                <span className="mt-1 block text-[11px] leading-snug text-gray-400">
+                  Desligue para ocultar a legenda abaixo do QR no canvas. No ZPL (^BQ) não há legenda
+                  automática; o valor impresso é só o símbolo.
+                </span>
+              </span>
+            </label>
+          </div>
+
           {/* BLINDAGEM 3: Separação estrita de Fixed e Dynamic para QRCode */}
           {selectedElement.valueMode === 'fixed' && (
             <div>
@@ -425,13 +697,27 @@ const EtiquetaPropertiesPanel: React.FC<Props> = ({
               <input
                 type="text"
                 value={selectedElement.placeholder}
-                onChange={(e) =>
-                  handleChange({ placeholder: e.target.value } as Partial<LayoutQrCodeElement>)
-                }
+                onChange={(e) => {
+                  const ph = e.target.value;
+                  const vid = placeholderParaVariavelId(ph.trim());
+                  handleChange({
+                    placeholder: ph,
+                    variavel: vid,
+                  } as Partial<LayoutQrCodeElement>);
+                }}
                 className={inputClass}
                 placeholder="{{codigoBarras}}"
               />
             </div>
+          )}
+
+          {selectedElement.valueMode === 'dynamic' && (
+            <FonteDadosSelect
+              elemento={selectedElement}
+              onUpdate={handleChange}
+              inputClass={inputClass}
+              labelClass={labelClass}
+            />
           )}
 
           <div className="mt-3">
@@ -443,14 +729,51 @@ const EtiquetaPropertiesPanel: React.FC<Props> = ({
                 // BLINDAGEM 6: Limpa o campo oposto ao trocar o modo
                 handleChange(
                   mode === 'fixed'
-                    ? ({ valueMode: mode, text: '', placeholder: undefined } as Partial<LayoutQrCodeElement>)
-                    : ({ valueMode: mode, placeholder: '{{codigoBarras}}', text: undefined } as Partial<LayoutQrCodeElement>)
+                    ? ({
+                        valueMode: mode,
+                        text: '',
+                        placeholder: undefined,
+                        variavel: undefined,
+                      } as Partial<LayoutQrCodeElement>)
+                    : ({
+                        valueMode: mode,
+                        placeholder: '{{codigoBarras}}',
+                        text: undefined,
+                        variavel: 'codigoBarras',
+                      } as Partial<LayoutQrCodeElement>),
                 );
               }}
               className={inputClass}
             >
               <option value="fixed">Fixo</option>
               <option value="dynamic">Dinâmico</option>
+            </select>
+          </div>
+
+          <div className="mt-3">
+            <label className={labelClass}>Trocar para código linear</label>
+            <select
+              value="QRCODE"
+              onChange={(e) => {
+                const v = e.target.value as CodigoSimbologiaUi;
+                if (v === 'QRCODE') return;
+                if (!onReplaceElement) {
+                  alert('Conversão indisponível.');
+                  return;
+                }
+                onReplaceElement(
+                  selectedElement.id,
+                  qrCodeParaBarcode(selectedElement, v as BarcodeType),
+                );
+              }}
+              className={inputClass}
+            >
+              <option value="QRCODE">QR Code (atual)</option>
+              {OPCOES_SIMBOLOGIA.filter((o) => o.value !== 'QRCODE').map((op) => (
+                <option key={op.value} value={op.value}>
+                  {op.label}
+                </option>
+              ))}
             </select>
           </div>
         </>
@@ -489,6 +812,90 @@ const EtiquetaPropertiesPanel: React.FC<Props> = ({
             }}
             className={inputClass}
           />
+        </div>
+      )}
+
+      {/* IMAGE */}
+      {isImageElement(selectedElement) && (
+        <div className="space-y-3">
+          <div>
+            <label className={labelClass}>Imagem (PNG/JPG/WebP)</label>
+            <input
+              ref={imagemInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                if (file.size > MAX_IMAGEM_BYTES) {
+                  alert('Imagem muito grande. Máximo ~2,5 MB.');
+                  e.target.value = '';
+                  return;
+                }
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const data = typeof reader.result === 'string' ? reader.result : '';
+                  handleChange({ src: data } as Partial<LayoutImageElement>);
+                };
+                reader.readAsDataURL(file);
+                e.target.value = '';
+              }}
+            />
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => imagemInputRef.current?.click()}
+                className="px-3 py-2 rounded-lg bg-violet-600/80 hover:bg-violet-600 text-white text-sm font-medium"
+              >
+                Enviar arquivo…
+              </button>
+              {selectedElement.src ? (
+                <button
+                  type="button"
+                  onClick={() => handleChange({ src: '' } as Partial<LayoutImageElement>)}
+                  className="px-3 py-2 rounded-lg border border-gray-600 text-gray-300 text-sm hover:bg-white/5"
+                >
+                  Remover
+                </button>
+              ) : null}
+            </div>
+            <p className="text-[11px] text-gray-500 mt-1">
+              A imagem é armazenada em base64 no layout (selo SIM, logomarca). Impressão ZPL gráfica ainda não
+              converte automaticamente este elemento.
+            </p>
+          </div>
+          <div>
+            <label className={labelClass}>Ajuste (object-fit)</label>
+            <select
+              value={selectedElement.objectFit || 'contain'}
+              onChange={(e) =>
+                handleChange({
+                  objectFit: e.target.value as LayoutImageElement['objectFit'],
+                } as Partial<LayoutImageElement>)
+              }
+              className={inputClass}
+            >
+              <option value="contain">Contain</option>
+              <option value="cover">Cover</option>
+              <option value="fill">Fill</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelClass}>Raio da borda (px — use alto p/ selo circular)</label>
+            <input
+              type="number"
+              min={0}
+              value={selectedElement.borderRadius ?? 0}
+              onChange={(e) => {
+                const n = e.target.value === '' ? 0 : Number(e.target.value);
+                handleChange({
+                  borderRadius: Number.isFinite(n) ? n : 0,
+                } as Partial<LayoutImageElement>);
+              }}
+              className={inputClass}
+            />
+          </div>
         </div>
       )}
     </div>

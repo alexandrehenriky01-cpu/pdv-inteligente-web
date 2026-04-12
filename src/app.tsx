@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 
 // Rotas Públicas e Dashboard
 import { Login } from './pages/Login';
@@ -7,6 +7,7 @@ import { Dashboard } from './pages/Dashboard';
 // Cadastros Base
 import { Categorias } from './pages/cadastros/Categorias'; 
 import { Produtos } from './pages/cadastros/produtos'; 
+import { Embalagens } from './pages/cadastros/embalagens';
 import { CadastroPessoa } from './pages/cadastros/CadastroPessoa';
 
 // Operacional e Vendas
@@ -42,6 +43,8 @@ import { AprovacaoSolicitacaoCompra } from './modules/compras/pages/AprovacaoSol
 import { CotacoesPage } from './modules/compras/pages/CotacoesPage';
 import { GerenciarCotacoes } from './modules/compras/pages/GerenciarCotacoes';
 import { PedidosCompraPage } from './modules/compras/pages/PedidosCompraPage';
+import { AcompanhamentoComprasPage } from './modules/compras/pages/AcompanhamentoComprasPage';
+import { RecebimentoMercadoriaPage } from './modules/compras/pages/RecebimentoMercadoriaPage';
 import { DivergenciasPage } from './modules/compras/pages/DivergenciasPage';
 import { AnaliseAuryaComprasPage } from './modules/compras/pages/AnaliseAuryaComprasPage';
 import PainelComprasIA from "./modules/compras/pages/PainelComprasIA";
@@ -80,6 +83,7 @@ import BalancasPage from './modules/producao/configuracoes/BalancasPage';
 
 // IMPORTAÇÃO DO GUARDIÃO DE ROTAS TIPADO
 import { PrivateRoute } from './components/PrivateRoute';
+import { AuthProvider } from './contexts/AuthContext';
 
 // 🥩 MÓDULO DE PRODUÇÃO (AÇOUGUE / INDÚSTRIA)
 import { OrdemProducao } from './modules/producao/desossa/OrdemProducao';
@@ -87,7 +91,8 @@ import { PesagemProducao } from './modules/producao/desossa/PesagemProducao';
 
 function App() {
   return (
-    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <AuthProvider>
       <Routes>
         
         {/* 🔓 ROTAS PÚBLICAS */}
@@ -95,7 +100,7 @@ function App() {
         <Route path="/login" element={<Login />} />
         
         {/* 👑 ROTAS SAAS (ACESSO RESTRITO AO SUPER_ADMIN) */}
-        <Route element={<PrivateRoute rolesPermitidas={['SUPER_ADMIN']} />}>
+        <Route element={<PrivateRoute rolesPermitidas={['SUPER_ADMIN', 'SUPORTE_MASTER']} />}>
           <Route path="/admin/clientes" element={<AdminClientesPage />} />
         </Route>
 
@@ -113,6 +118,7 @@ function App() {
           
           {/* 🏢 Cadastros Base */}
           <Route path="/categorias" element={<Categorias />} />
+          <Route path="/embalagens" element={<Embalagens />} />
           <Route path="/produtos" element={<Produtos />} />
           <Route path="/pessoas" element={<CadastroPessoa />} />
           <Route path="/pessoas/novo" element={<CadastroPessoa />} />
@@ -162,6 +168,8 @@ function App() {
           <Route path="/compras/cotacoes" element={<CotacoesPage />} />
           <Route path="/compras/gerenciar-cotacoes" element={<GerenciarCotacoes />} />
           <Route path="/compras/pedidos" element={<PedidosCompraPage />} />
+          <Route path="/compras/acompanhamento" element={<AcompanhamentoComprasPage />} />
+          <Route path="/compras/recebimento-mercadorias" element={<RecebimentoMercadoriaPage />} />
           {/* ✅ NOVO: Rota para a tela de Pedidos de Recebimento */}
           <Route path="/compras/pedidos-recebimento" element={<PedidoRecebimentoPage />} />
           <Route path="/compras/divergencias" element={<DivergenciasPage />} />
@@ -189,7 +197,8 @@ function App() {
 
         </Route>
       </Routes>
-    </BrowserRouter>
+      </AuthProvider>
+    </HashRouter>
   );
 }
 

@@ -1,14 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Layout } from '../../components/Layout';
 import { api } from '../../services/api';
+import { TefPinpadModal } from './TefPinpadModal';
 import { 
   Search, Plus, Trash2, BrainCircuit, Sparkles, 
   TrendingUp, Flame, Star, QrCode, CreditCard, 
   Banknote, ArrowRight, ShieldCheck, AlertTriangle, ExternalLink,
   Loader2, Lock, Clock, ListOrdered, PauseCircle, PlayCircle, X, ShieldAlert, Key, Keyboard, Power
 } from 'lucide-react';
-import { AxiosError } from 'axios'; 
-import { IUsuario } from '../../types/auth'; 
+import { AxiosError } from 'axios';
+import { toast } from 'react-toastify';
+import { IUsuario } from '../../types/auth';
+import { useHardwareAgent } from '../../hooks/useHardwareAgent';
+import { getHardwareAgent } from '../../services/hardwareAgent';
+import { montarCupomTextoPlano } from './cupomPdvTexto'; 
 
 export interface IProdutoPDV {
   id: string;
@@ -60,6 +65,7 @@ export interface IPayloadVendaPDV {
   pagamentos: Array<{
     tipoPagamento: string;
     valor: number;
+    transacaoTefId?: string;
   }>;
   tipoPagamento: string;
   formaPagamento: string;
@@ -79,6 +85,14 @@ export interface ISessaoCaixa {
   saldoAbertura: number;
   dataAbertura: string;
 }
+
+export type FormaPagamentoPDV =
+  | 'PIX'
+  | 'CARTAO_DEBITO'
+  | 'DINHEIRO'
+  | 'CREDIARIO'
+  | 'CARTAO_CREDITO_TEF'
+  | 'CARTAO_DEBITO_TEF';
 
 export interface IVendaPendente {
   id: string;
@@ -100,7 +114,12 @@ export function FrenteCaixa() {
   const [produtosFiltrados, setProdutosFiltrados] = useState<IProdutoPDV[]>([]);
   const [carrinho, setCarrinho] = useState<IItemCarrinho[]>([]);
   
-  const [formaPagamento, setFormaPagamento] = useState<'PIX' | 'CARTAO_DEBITO' | 'DINHEIRO' | 'CREDIARIO'>('PIX');
+  const [formaPagamento, setFormaPagamento] = useState<FormaPagamentoPDV>('PIX');
+  const [transacaoTefId, setTransacaoTefId] = useState<string | null>(null);
+  const [modalPinpadTef, setModalPinpadTef] = useState(false);
+  const [tefCarregando, setTefCarregando] = useState(false);
+  const [tefErroModal, setTefErroModal] = useState<string | null>(null);
+  const [tefStatusMensagem, setTefStatusMensagem] = useState<string | null>(null);
   const [valorRecebido, setValorRecebido] = useState<string>('');
   const [finalizando, setFinalizando] = useState(false);
   const [descontoVenda, setDescontoVenda] = useState<number>(0); 
@@ -137,15 +156,22 @@ export function FrenteCaixa() {
 
   const buscaInputRef = useRef<HTMLInputElement>(null);
   const senhaSupervisorRef = useRef<HTMLInputElement>(null);
+  const tefWsUnsubRef = useRef<(() => void) | null>(null);
 
-  let regimeLoja = 'LUCRO_PRESUMIDO'; 
+  const { connected: hardwareConectado, send: enviarHardware } = useHardwareAgent();
+
+  let regimeLoja = 'LUCRO_PRESUMIDO';
   let nomeOperador = 'Operador';
+  let nomeLojaPdV = 'Loja';
   try {
     const usuarioRaw = localStorage.getItem('@PDVUsuario');
     if (usuarioRaw) {
       const usuario = JSON.parse(usuarioRaw) as IUsuarioStorage;
       if (usuario.loja?.regimeTributario) regimeLoja = usuario.loja.regimeTributario;
       if (usuario.nome) nomeOperador = usuario.nome;
+      const lojaExtra = usuario.loja as Record<string, unknown> | undefined;
+      const nome = lojaExtra?.nome ?? lojaExtra?.razaoSocial;
+      if (typeof nome === 'string' && nome.trim()) nomeLojaPdV = nome.trim();
     }
   } catch (e) {
     console.error("Erro ao ler dados do usuário no PDV");
@@ -167,6 +193,13 @@ export function FrenteCaixa() {
     verificarCaixa(); 
     carregarClientes();
     carregarProdutosEstrategicos();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      tefWsUnsubRef.current?.();
+      tefWsUnsubRef.current = null;
+    };
   }, []);
 
   useEffect(() => {
@@ -558,6 +591,192 @@ export function FrenteCaixa() {
     return arrayParcelas;
   };
 
+  const resolveTipoPagamentoApi = (f: FormaPagamentoPDV): string => {
+    if (f === 'CARTAO_CREDITO_TEF') return 'CARTAO_CREDITO';
+    if (f === 'CARTAO_DEBITO_TEF') return 'CARTAO_DEBITO';
+    return f;
+  };
+
+  const selecionarFormaSemTef = async (
+    forma: Exclude<FormaPagamentoPDV, 'CARTAO_CREDITO_TEF' | 'CARTAO_DEBITO_TEF'>
+  ) => {
+    if (transacaoTefId) {
+      await api.post('/api/tef/cancelar', { transacaoTefId }).catch(() => undefined);
+      setTransacaoTefId(null);
+    }
+    setFormaPagamento(forma);
+    if (forma !== 'CREDIARIO') setQtdParcelas(1);
+  };
+
+  const solicitarTefPinpad = async (tipoCartao: 'CREDITO' | 'DEBITO') => {
+    if (carrinho.length === 0) return alert('Adicione itens ao carrinho antes do TEF.');
+    if (totais.totalVenda <= 0) return alert('Total da venda inválido para TEF.');
+
+    tefWsUnsubRef.current?.();
+    tefWsUnsubRef.current = null;
+
+    setModalPinpadTef(true);
+    setTefErroModal(null);
+    setTefStatusMensagem('Conectando ao agente local...');
+    setTefCarregando(true);
+
+    const agent = getHardwareAgent();
+    agent.connect();
+
+    if (!agent.isConnected) {
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    if (!agent.isConnected) {
+      setTefErroModal(
+        'Hardware local offline. Inicie o AuryaHardwareAgent (dotnet run) neste PC e verifique ws://localhost:8080.'
+      );
+      setTefStatusMensagem(null);
+      setTefCarregando(false);
+      return;
+    }
+
+    try {
+      if (transacaoTefId) {
+        await api.post('/api/tef/cancelar', { transacaoTefId }).catch(() => undefined);
+        setTransacaoTefId(null);
+      }
+    } catch {
+      /* segue */
+    }
+
+    let finalizado = false;
+    const unsub = agent.subscribe(async (msg) => {
+      if (finalizado) return;
+      if (msg.tipo !== 'RESPOSTA_TEF') return;
+
+      const status = String(msg.status ?? '');
+
+      if (status === 'AGUARDANDO_SENHA') {
+        setTefStatusMensagem('Aguardando senha ou cartão no PinPad...');
+        return;
+      }
+      if (status === 'PROCESSANDO') {
+        setTefStatusMensagem(
+          msg.mensagem != null && String(msg.mensagem).trim() !== ''
+            ? String(msg.mensagem)
+            : 'Processando na adquirente…'
+        );
+        return;
+      }
+
+      if (status === 'APROVADO') {
+        finalizado = true;
+        unsub();
+        if (tefWsUnsubRef.current === unsub) tefWsUnsubRef.current = null;
+
+        const nsu = msg.nsu != null ? String(msg.nsu) : '';
+        const codigoAutorizacao =
+          msg.codigoAutorizacao != null ? String(msg.codigoAutorizacao) : undefined;
+        const bandeiraCartao = msg.bandeira != null ? String(msg.bandeira) : undefined;
+        const comprovanteLinhas = [
+          '--- COMPROVANTE TEF (HARDWARE LOCAL) ---',
+          nsu ? `NSU: ${nsu}` : '',
+          codigoAutorizacao ? `AUTORIZACAO: ${codigoAutorizacao}` : '',
+          bandeiraCartao ? `BANDEIRA: ${bandeiraCartao}` : '',
+          `VALOR: R$ ${totais.totalVenda.toFixed(2)}`,
+          `TIPO: ${tipoCartao}`,
+          msg.mensagem != null ? String(msg.mensagem) : '',
+        ]
+          .filter(Boolean)
+          .join('\n');
+
+        try {
+          const res = await api.post<{
+            sucesso: boolean;
+            dados?: { transacaoTefId: string };
+            erro?: string;
+          }>('/api/tef/registrar-hardware', {
+            valor: totais.totalVenda,
+            tipoCartao,
+            terminal: terminalAtivo,
+            nsu: nsu || `HW-${Date.now()}`,
+            codigoAutorizacao,
+            bandeiraCartao,
+            comprovanteImpressao: comprovanteLinhas,
+          });
+          if (res.status !== 200) {
+            throw new Error(`HTTP ${res.status}: falha ao registrar TEF.`);
+          }
+          const { data } = res;
+          if (!data.sucesso || !data.dados?.transacaoTefId) {
+            throw new Error(data.erro || 'Falha ao registrar TEF no servidor.');
+          }
+          // Efetiva confirmação no SiTef somente após persistência no ERP (HTTP 200 + sucesso).
+          getHardwareAgent().send({ acao: 'FINALIZAR_SITEF', confirmar: true });
+          setTransacaoTefId(data.dados.transacaoTefId);
+          setFormaPagamento(tipoCartao === 'CREDITO' ? 'CARTAO_CREDITO_TEF' : 'CARTAO_DEBITO_TEF');
+          setModalPinpadTef(false);
+          setTefStatusMensagem(null);
+          toast.success('PinPad: transação aprovada e confirmada no SiTef.');
+        } catch (err) {
+          getHardwareAgent().send({ acao: 'FINALIZAR_SITEF', confirmar: false });
+          const ax = err as AxiosError<{ erro?: string; error?: string }>;
+          setTefErroModal(
+            ax.response?.data?.erro ||
+              ax.response?.data?.error ||
+              (err instanceof Error ? err.message : 'Falha ao registrar TEF.')
+          );
+        } finally {
+          setTefCarregando(false);
+        }
+        return;
+      }
+
+      if (status === 'ERRO' || status === 'NEGADO' || status === 'CANCELADO') {
+        finalizado = true;
+        unsub();
+        tefWsUnsubRef.current = null;
+        setTefErroModal(
+          String(msg.mensagem ?? msg.erro ?? `Status: ${status}`)
+        );
+        setTefStatusMensagem(null);
+        setTefCarregando(false);
+      }
+    });
+
+    tefWsUnsubRef.current = unsub;
+    setTefStatusMensagem('Enviando comando ao PinPad...');
+
+    const enviado = agent.send({
+      acao: 'INICIAR_TEF',
+      valor: totais.totalVenda,
+      tipo: tipoCartao,
+      parcelas: 1,
+    });
+
+    if (!enviado) {
+      finalizado = true;
+      unsub();
+      tefWsUnsubRef.current = null;
+      setTefErroModal('Não foi possível enviar o comando TEF ao agente local.');
+      setTefStatusMensagem(null);
+      setTefCarregando(false);
+    }
+  };
+
+  const imprimirComprovantesTef = (textos: string[]) => {
+    if (textos.length === 0) return;
+    const janela = window.open('', '_blank');
+    if (!janela) {
+      console.warn('Popup bloqueado — comprovante TEF disponível no console.');
+      console.log(textos.join('\n---\n'));
+      return;
+    }
+    const pre = janela.document.createElement('pre');
+    pre.style.whiteSpace = 'pre-wrap';
+    pre.style.fontFamily = 'monospace';
+    pre.style.padding = '16px';
+    pre.textContent = textos.join('\n---\n');
+    janela.document.body.appendChild(pre);
+    janela.focus();
+    janela.print();
+  };
+
   const finalizarVenda = async () => {
     if (carrinho.length === 0) return alert("O carrinho está vazio!");
     if (!sessaoCaixa) return alert("Caixa não está aberto!");
@@ -569,11 +788,26 @@ export function FrenteCaixa() {
       }
     }
 
+    if (formaPagamento === 'CARTAO_CREDITO_TEF' || formaPagamento === 'CARTAO_DEBITO_TEF') {
+      if (!transacaoTefId) {
+        return alert('Conclua a autorização no PinPad (TEF) antes de finalizar a venda.');
+      }
+    }
+
     setFinalizando(true);
     try {
       let parcelasPayload = undefined;
       if (formaPagamento === 'CREDIARIO' && qtdParcelas > 0) {
         parcelasPayload = gerarParcelas(totais.totalVenda, qtdParcelas);
+      }
+
+      const tipoApi = resolveTipoPagamentoApi(formaPagamento);
+      const pagamentoLinha: IPayloadVendaPDV['pagamentos'][0] = {
+        tipoPagamento: tipoApi,
+        valor: totais.totalVenda,
+      };
+      if (formaPagamento === 'CARTAO_CREDITO_TEF' || formaPagamento === 'CARTAO_DEBITO_TEF') {
+        pagamentoLinha.transacaoTefId = transacaoTefId ?? undefined;
       }
 
       const payload: IPayloadVendaPDV = {
@@ -585,18 +819,64 @@ export function FrenteCaixa() {
           quantidade: item.quantidade,
           valorUnitario: Number(item.precoVenda) 
         })),
-        pagamentos: [{ tipoPagamento: formaPagamento, valor: totais.totalVenda }],
-        tipoPagamento: formaPagamento,
-        formaPagamento: formaPagamento, 
+        pagamentos: [pagamentoLinha],
+        tipoPagamento: tipoApi,
+        formaPagamento: tipoApi, 
         valorTotal: totais.totalVenda,
         valorDesconto: descontoVenda, 
         modeloNota,
         parcelas: parcelasPayload
       };
 
-      await api.post<{message?: string, vendaId?: string}>('/api/vendas', payload);
-      
-      alert("✅ Venda finalizada, estoque baixado e nota enviada para a SEFAZ com sucesso!");
+      const resVenda = await api.post<{
+        mensagem?: string;
+        venda?: { id: string };
+        comprovantesTef?: string[];
+        auryaCorrecoesTributarias?: { nomeProduto: string; cstAnterior: string; csosnNovo: string }[];
+      }>('/api/vendas', payload);
+
+      const correcoes = resVenda.data.auryaCorrecoesTributarias ?? [];
+      for (const c of correcoes) {
+        toast.success(
+          `Aurya: CST do produto ${c.nomeProduto} corrigido automaticamente para Simples Nacional`,
+          { autoClose: 4500 }
+        );
+      }
+
+      const vendaId = resVenda.data.venda?.id ?? '—';
+      const comps = resVenda.data.comprovantesTef ?? [];
+      const textoCupom = montarCupomTextoPlano({
+        nomeLoja: nomeLojaPdV,
+        terminal: terminalAtivo,
+        operador: nomeOperador,
+        vendaId,
+        modeloNota,
+        formaPagamento: tipoApi,
+        itens: carrinho,
+        subtotal: totaisBrutos.totalVenda,
+        desconto: descontoVenda,
+        total: totais.totalVenda,
+        comprovantesTef: comps.length > 0 ? comps : undefined,
+      });
+
+      const cupomEnviado = enviarHardware({
+        acao: 'IMPRIMIR_CUPOM',
+        formato: 'texto',
+        payload: textoCupom,
+      });
+      if (cupomEnviado) {
+        toast.success(
+          'Venda finalizada. Cupom enviado à impressora (agente local). NFC-e em processamento na SEFAZ.'
+        );
+      } else {
+        if (comps.length > 0) {
+          imprimirComprovantesTef(comps);
+          toast.success('Venda finalizada. Comprovante aberto no navegador (agente local offline). NFC-e em processamento.');
+        } else {
+          toast.success('Venda finalizada. NFC-e em processamento na SEFAZ.');
+          toast.info('Hardware local offline — cupom não impresso. Inicie o AuryaHardwareAgent.');
+        }
+      }
       
       setCarrinho([]);
       setValorRecebido('');
@@ -604,6 +884,7 @@ export function FrenteCaixa() {
       setClienteSelecionado('');
       setModeloNota('65');
       setFormaPagamento('PIX');
+      setTransacaoTefId(null);
       setQtdParcelas(1);
       setDescontoVenda(0);
       setValorDescontoInput('');
@@ -627,7 +908,14 @@ export function FrenteCaixa() {
     focarBusca: () => buscaInputRef.current?.focus()
   });
 
-  const statesRef = useRef({ modalSupervisor, modalCaixaAberto, modalVendasEspera, modalFechamento });
+  const statesRef = useRef({
+    modalSupervisor,
+    modalCaixaAberto,
+    modalVendasEspera,
+    modalFechamento,
+    modalPinpadTef,
+    tefCarregando,
+  });
 
   useEffect(() => {
     actionsRef.current = {
@@ -638,7 +926,14 @@ export function FrenteCaixa() {
       solicitarFechamentoCaixa,
       focarBusca: () => buscaInputRef.current?.focus()
     };
-    statesRef.current = { modalSupervisor, modalCaixaAberto, modalVendasEspera, modalFechamento };
+    statesRef.current = {
+      modalSupervisor,
+      modalCaixaAberto,
+      modalVendasEspera,
+      modalFechamento,
+      modalPinpadTef,
+      tefCarregando,
+    };
   });
 
   useEffect(() => {
@@ -649,10 +944,18 @@ export function FrenteCaixa() {
         if (modalSupervisor) { setModalSupervisor(false); setAcaoPendente(null); }
         if (modalVendasEspera) setModalVendasEspera(false);
         if (modalFechamento) setModalFechamento(false);
+        if (statesRef.current.modalPinpadTef) {
+          tefWsUnsubRef.current?.();
+          tefWsUnsubRef.current = null;
+          setModalPinpadTef(false);
+          setTefErroModal(null);
+          setTefStatusMensagem(null);
+          setTefCarregando(false);
+        }
         return;
       }
 
-      if (modalSupervisor || modalCaixaAberto || modalVendasEspera || modalFechamento) return;
+      if (modalSupervisor || modalCaixaAberto || modalVendasEspera || modalFechamento || statesRef.current.modalPinpadTef) return;
 
       switch(e.key) {
         case 'F2':
@@ -688,6 +991,22 @@ export function FrenteCaixa() {
 
   return (
     <Layout>
+      <TefPinpadModal
+        aberto={modalPinpadTef}
+        carregando={tefCarregando}
+        mensagemErro={tefErroModal}
+        mensagemStatus={tefStatusMensagem}
+        titulo="PinPad — autorização TEF"
+        subtitulo="Siga as instruções no terminal Gertec. Agente local (WebSocket)."
+        onFechar={() => {
+          tefWsUnsubRef.current?.();
+          tefWsUnsubRef.current = null;
+          setModalPinpadTef(false);
+          setTefErroModal(null);
+          setTefStatusMensagem(null);
+          setTefCarregando(false);
+        }}
+      />
       <style>{`
         @keyframes glow { 0% { box-shadow: 0 0 15px rgba(16, 185, 129, 0.4); } 50% { box-shadow: 0 0 30px rgba(16, 185, 129, 0.8); } 100% { box-shadow: 0 0 15px rgba(16, 185, 129, 0.4); } }
         .btn-glow { animation: glow 2s infinite; }
@@ -1106,12 +1425,13 @@ export function FrenteCaixa() {
               </div>
             </div>
 
-            <div className="mb-2">
+            <div className="mb-2 space-y-2">
               <div className="grid grid-cols-4 gap-2">
-                {(['PIX', 'CARTAO_DEBITO', 'DINHEIRO', 'CREDIARIO'] as const).map(forma => (
+                {(['PIX', 'CARTAO_DEBITO', 'DINHEIRO', 'CREDIARIO'] as const).map((forma) => (
                   <button
                     key={forma}
-                    onClick={() => { setFormaPagamento(forma); if (forma !== 'CREDIARIO') setQtdParcelas(1); }}
+                    type="button"
+                    onClick={() => void selecionarFormaSemTef(forma)}
                     className={`py-2 rounded-lg flex flex-col items-center gap-1 font-black text-[9px] uppercase tracking-wider border-2 transition-all ${
                       formaPagamento === forma ? 'bg-violet-500/15 border-violet-500/40 text-violet-300 shadow-[0_0_10px_rgba(139,92,246,0.25)]' : 'bg-[#08101f] border-white/10 text-slate-500'
                     }`}
@@ -1124,6 +1444,40 @@ export function FrenteCaixa() {
                   </button>
                 ))}
               </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => void solicitarTefPinpad('CREDITO')}
+                  disabled={carrinho.length === 0 || bloqueioFiscal}
+                  className={`py-2.5 rounded-lg flex flex-col items-center gap-1 font-black text-[9px] uppercase tracking-wider border-2 transition-all disabled:opacity-40 ${
+                    formaPagamento === 'CARTAO_CREDITO_TEF'
+                      ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300'
+                      : 'bg-[#08101f] border-cyan-500/25 text-cyan-400/90 hover:border-cyan-500/45'
+                  }`}
+                >
+                  <CreditCard className="w-4 h-4" />
+                  Crédito (TEF)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void solicitarTefPinpad('DEBITO')}
+                  disabled={carrinho.length === 0 || bloqueioFiscal}
+                  className={`py-2.5 rounded-lg flex flex-col items-center gap-1 font-black text-[9px] uppercase tracking-wider border-2 transition-all disabled:opacity-40 ${
+                    formaPagamento === 'CARTAO_DEBITO_TEF'
+                      ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300'
+                      : 'bg-[#08101f] border-cyan-500/25 text-cyan-400/90 hover:border-cyan-500/45'
+                  }`}
+                >
+                  <CreditCard className="w-4 h-4" />
+                  Débito (TEF)
+                </button>
+              </div>
+              {(formaPagamento === 'CARTAO_CREDITO_TEF' || formaPagamento === 'CARTAO_DEBITO_TEF') &&
+                transacaoTefId && (
+                  <p className="text-[10px] text-emerald-400/90 font-bold text-center">
+                    PinPad OK — NSU vinculado. Finalize a venda (F10).
+                  </p>
+                )}
             </div>
 
             {formaPagamento === 'CREDIARIO' && (
@@ -1162,7 +1516,14 @@ export function FrenteCaixa() {
 
             <button 
               onClick={finalizarVenda}
-              disabled={carrinho.length === 0 || finalizando || bloqueioFiscal || !sessaoCaixa}
+              disabled={
+                carrinho.length === 0 ||
+                finalizando ||
+                bloqueioFiscal ||
+                !sessaoCaixa ||
+                ((formaPagamento === 'CARTAO_CREDITO_TEF' || formaPagamento === 'CARTAO_DEBITO_TEF') &&
+                  !transacaoTefId)
+              }
               className={`w-full py-3 rounded-xl font-black text-sm flex flex-col items-center justify-center transition-all ${
                 carrinho.length > 0 && !bloqueioFiscal && sessaoCaixa
                   ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white btn-glow transform hover:-translate-y-0.5' 
@@ -1189,7 +1550,25 @@ export function FrenteCaixa() {
       </div>
       
       {/* 🚀 RODAPÉ DE LEGENDA DOS ATALHOS */}
-      <div className="text-center mt-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center justify-center gap-4">
+      <div className="text-center mt-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center justify-center gap-4 flex-wrap">
+        <span
+          className="flex items-center gap-1.5"
+          title={
+            hardwareConectado
+              ? 'AuryaHardwareAgent conectado (impressora / PinPad)'
+              : 'Agente local offline — execute dotnet run no AuryaHardwareAgent'
+          }
+        >
+          <span
+            className={`w-2 h-2 rounded-full shrink-0 ${
+              hardwareConectado
+                ? 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.85)]'
+                : 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.5)]'
+            }`}
+            aria-hidden
+          />
+          <span className="normal-case tracking-normal text-slate-400">Hardware local</span>
+        </span>
         <span className="flex items-center gap-1"><Keyboard className="w-3.5 h-3.5"/> Atalhos:</span>
         <span><strong className="text-slate-400">F2</strong> Busca</span>
         <span><strong className="text-slate-400">F4</strong> Desconto</span>

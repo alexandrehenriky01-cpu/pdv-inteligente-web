@@ -61,7 +61,8 @@ export interface Balanca {
 
   protocolo: ProtocoloBalanca;
   unidadePeso: UnidadePesoBalanca;
-  
+  casasDecimais?: number;
+
   timeoutLeitura?: number | null;
   tolerancia?: number | null;
 

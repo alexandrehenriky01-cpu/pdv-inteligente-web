@@ -8,7 +8,11 @@ import {
   Sparkles, TrendingUp, DollarSign, Activity, BrainCircuit, ShieldAlert, Clock,
   Eye, Zap, ShieldCheck, FileText, Search, Loader2, FileX
 } from 'lucide-react';
-import { AxiosError } from 'axios'; 
+import { AxiosError } from 'axios';
+import {
+  isFiscalRejeicaoOuErroEmissao,
+  rotuloStatusFiscalBadge,
+} from './fiscalStatusUtils';
 
 // 🛡️ INTERFACES DE TIPAGEM ESTRITA
 export interface IPessoaFiscal {
@@ -100,6 +104,8 @@ export interface IVendaFiscalCompleta {
   municipio?: string;
   estado?: string;
   uf?: string;
+  /** Motivo persistido pelo backend (SEFAZ / Focus / validação). */
+  mensagemErroFiscal?: string | null;
 }
 
 export function GestaoNotas() {
@@ -215,15 +221,26 @@ export function GestaoNotas() {
     if (riscoFiscalFilter) {
       result = result.filter(venda => {
         const status = String(venda.statusFiscal || 'PROCESSANDO').toUpperCase();
-        return status.includes('REJEITAD') || status.includes('ERRO') || (!status.includes('AUTORIZAD') && !status.includes('EMITIDA') && !status.includes('CANCELAD'));
+        return (
+          isFiscalRejeicaoOuErroEmissao(status) ||
+          (!status.includes('AUTORIZAD') &&
+            !status.includes('EMITIDA') &&
+            !status.includes('CANCELAD'))
+        );
       });
     } else if (statusFilter !== 'TODOS') {
       result = result.filter(venda => {
         const status = String(venda.statusFiscal || 'PROCESSANDO').toUpperCase();
         if (statusFilter === 'AUTORIZAD') return status.includes('AUTORIZAD') || status.includes('EMITIDA');
-        if (statusFilter === 'REJEITAD') return status.includes('REJEITAD') || status.includes('ERRO');
+        if (statusFilter === 'REJEITAD') return isFiscalRejeicaoOuErroEmissao(status);
         if (statusFilter === 'CANCELAD') return status.includes('CANCELAD') || status.includes('INUTILIZAD');
-        if (statusFilter === 'PROCESSANDO') return !status.includes('AUTORIZAD') && !status.includes('EMITIDA') && !status.includes('REJEITAD') && !status.includes('ERRO') && !status.includes('CANCELAD');
+        if (statusFilter === 'PROCESSANDO')
+          return (
+            !status.includes('AUTORIZAD') &&
+            !status.includes('EMITIDA') &&
+            !isFiscalRejeicaoOuErroEmissao(status) &&
+            !status.includes('CANCELAD')
+          );
         return status.includes(statusFilter);
       });
     }
@@ -276,9 +293,10 @@ export function GestaoNotas() {
   const getStatusColor = (status: string) => {
     const s = String(status || '').toUpperCase();
     if (s.includes('AUTORIZAD') || s.includes('EMITIDA')) return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
-    if (s.includes('REJEITAD') || s.includes('ERRO')) return 'text-red-400 bg-red-500/10 border-red-500/20 shadow-[0_0_10px_rgba(239,68,68,0.2)]';
+    if (isFiscalRejeicaoOuErroEmissao(s))
+      return 'text-red-400 bg-red-500/10 border-red-500/40 shadow-[0_0_14px_rgba(239,68,68,0.25)] ring-1 ring-red-500/30';
     if (s.includes('CANCELAD') || s.includes('INUTILIZAD')) return 'text-slate-400 bg-slate-800 border-white/10 line-through';
-    return 'text-amber-400 bg-amber-500/10 border-amber-500/20'; 
+    return 'text-amber-400 bg-amber-500/10 border-amber-500/20';
   };
 
   const formatarData = (dataStr?: string | Date) => {
@@ -401,10 +419,20 @@ export function GestaoNotas() {
           console.error(error);
           alert(`⚠️ Falha na análise da Aurya: ${error.response?.data?.error || 'A rota de IA ainda não está disponível no backend.'}`);
         }
-      } else {
-        const response = await api.get<{status: string, mensagem_sefaz?: string}>(`/api/vendas/${id}/fiscal?modelo=${modelo}`);
-        if (action === 'consultar') alert(`Status na Sefaz: ${response.data.status}\n\nMensagem: ${response.data.mensagem_sefaz || 'Processando'}`);
-        else if (action === 'verErro') alert(`❌ Motivo da Rejeição:\n\n${response.data.mensagem_sefaz || 'Erro desconhecido. Consulte o status.'}`);
+      } else if (action === 'verErro' && venda.mensagemErroFiscal?.trim()) {
+        alert(`❌ Motivo da rejeição / erro de emissão:\n\n${venda.mensagemErroFiscal}`);
+      } else if (action === 'consultar' || action === 'verErro') {
+        const response = await api.get<{ status: string; mensagem_sefaz?: string }>(
+          `/api/vendas/${id}/fiscal?modelo=${modelo}`
+        );
+        if (action === 'consultar')
+          alert(
+            `Status na Sefaz: ${response.data.status}\n\nMensagem: ${response.data.mensagem_sefaz || 'Processando'}`
+          );
+        else if (action === 'verErro')
+          alert(
+            `❌ Motivo da Rejeição:\n\n${response.data.mensagem_sefaz || 'Erro desconhecido. Consulte o status.'}`
+          );
       }
     } catch (err) { 
       const error = err as AxiosError<{error?: string}>;
@@ -452,7 +480,9 @@ export function GestaoNotas() {
 
   const total = vendas.length;
   const autorizadas = vendas.filter(v => String(v.statusFiscal || '').toUpperCase().includes('AUTORIZAD') || String(v.statusFiscal || '').toUpperCase().includes('EMITIDA')).length;
-  const rejeitadas = vendas.filter(v => String(v.statusFiscal || '').toUpperCase().includes('REJEITAD')).length;
+  const rejeitadas = vendas.filter(v =>
+    isFiscalRejeicaoOuErroEmissao(v.statusFiscal)
+  ).length;
   const canceladas = vendas.filter(v => String(v.statusFiscal || '').toUpperCase().includes('CANCELAD')).length;
   const pendentes = total - autorizadas - rejeitadas - canceladas;
 
@@ -646,7 +676,7 @@ export function GestaoNotas() {
                 <p className="text-lg font-bold text-slate-300">Nenhuma nota encontrada com este filtro.</p>
               </div>
             ) : (
-              <div className="divide-y divide-white/5">
+              <div>
                 {filteredVendas.map(venda => {
                   const chaveAcesso = venda.chaveAcesso || venda.chave_acesso || venda.chaveAcessoNfe || venda.chaveNfce || venda.chave_nfe || venda.chave || '';
                   const numeroDaNota = venda.numeroNota || venda.numero_nfe || venda.numero_nfce || venda.numero || '';
@@ -654,15 +684,21 @@ export function GestaoNotas() {
                   const temCliente = venda.cpfCnpjCliente || venda.pessoa?.cnpjCpf;
                   const modeloNota = venda.modeloNota || venda.modelo || (temCliente ? '55' : '65');
                   const statusCru = String(venda.statusFiscal || '');
+                  const statusUp = statusCru.toUpperCase();
 
-                  const isAutorizada = statusCru.toUpperCase().includes('AUTORIZAD') || statusCru.toUpperCase().includes('EMITIDA');
-                  const isRejeitada = statusCru.toUpperCase().includes('REJEITAD') || statusCru.toUpperCase().includes('ERRO');
-                  const isCancelada = statusCru.toUpperCase().includes('CANCELAD') || statusCru.toUpperCase().includes('INUTILIZAD');
+                  const isAutorizada =
+                    statusUp.includes('AUTORIZAD') || statusUp.includes('EMITIDA');
+                  const isRejeitada = isFiscalRejeicaoOuErroEmissao(statusCru);
+                  const isCancelada =
+                    statusUp.includes('CANCELAD') || statusUp.includes('INUTILIZAD');
                   const isPendente = !isAutorizada && !isRejeitada && !isCancelada;
+                  const labelStatusBadge = rotuloStatusFiscalBadge(statusCru);
+                  const mostrarCalloutErro =
+                    isRejeitada && Boolean(venda.mensagemErroFiscal?.trim());
 
                   return (
+                    <div key={venda.id} className="border-b border-white/5 last:border-b-0">
                     <div
-                      key={venda.id}
                       className="group cursor-pointer p-5 transition-colors hover:bg-white/5"
                       onDoubleClick={() => handleDoubleClick(venda)}
                       title="Dê um duplo clique para ver os itens"
@@ -742,10 +778,16 @@ export function GestaoNotas() {
                               {isRejeitada && <AlertTriangle className="h-4 w-4" />}
                               {isCancelada && <Ban className="h-4 w-4" />}
                               {isPendente && <Clock className="h-4 w-4" />}
-                              {isAutorizada ? 'AUTORIZADA' : isRejeitada ? 'REJEITADA' : isCancelada ? 'CANCELADA' : 'PENDENTE'}
+                              {labelStatusBadge}
                             </span>
                             <span className="mt-1 text-[9px] font-medium uppercase tracking-widest opacity-80">
-                              {isAutorizada ? '✔️ Sem inconsistências' : isRejeitada ? '❌ Inconsistência SEFAZ' : isCancelada ? '🚫 Inutilizada' : '⚠️ Aguardando SEFAZ'}
+                              {isAutorizada
+                                ? '✔️ Sem inconsistências'
+                                : isRejeitada
+                                  ? '❌ Rejeição SEFAZ ou erro de emissão'
+                                  : isCancelada
+                                    ? '🚫 Inutilizada'
+                                    : '⚠️ Aguardando SEFAZ'}
                             </span>
                           </div>
                         </div>
@@ -812,7 +854,11 @@ export function GestaoNotas() {
                               </button>
                               <button
                                 onClick={() => handleAction(venda, 'retransmitir')}
-                                className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-2.5 text-blue-400 shadow-sm transition-colors hover:bg-blue-500/20"
+                                className={`rounded-xl p-2.5 shadow-sm transition-all ${
+                                  isRejeitada
+                                    ? 'border-2 border-amber-400/70 bg-amber-500/20 text-amber-200 ring-2 ring-amber-400/40 hover:bg-amber-500/30 animate-pulse'
+                                    : 'border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20'
+                                }`}
                                 title="Retransmitir Nota"
                               >
                                 <RefreshCw className="h-4 w-4" />
@@ -832,6 +878,19 @@ export function GestaoNotas() {
                         </div>
                       </div>
                     </div>
+
+                    {mostrarCalloutErro && (
+                      <div className="border-t border-red-500/25 bg-red-950/35 px-5 py-4 mx-4 mb-4 rounded-xl border border-red-500/20">
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-red-400 mb-2 flex items-center gap-2">
+                          <ShieldAlert className="h-4 w-4 shrink-0" />
+                          Motivo informado pela SEFAZ / emissão
+                        </p>
+                        <p className="text-sm font-medium text-red-100/95 whitespace-pre-wrap break-words leading-relaxed">
+                          {venda.mensagemErroFiscal}
+                        </p>
+                      </div>
+                    )}
+                    </div>
                   );
                 })}
               </div>
@@ -846,13 +905,38 @@ export function GestaoNotas() {
               <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 to-cyan-500"></div>
               
               <div className="bg-[#0b1324]/50 p-6 sm:p-8 border-b border-white/10 flex justify-between items-center">
-                <h2 className="text-xl font-black text-white flex items-center gap-3">
-                  <ListChecks className="w-6 h-6 text-indigo-400" /> Itens da Nota #{vendaVisualizacao.numeroNota || vendaVisualizacao.numero_nfe || vendaVisualizacao.numero || 'S/N'}
-                </h2>
-                <button onClick={() => setModalVisualizarItens(false)} className="text-slate-400 hover:text-white bg-slate-800 hover:bg-white/10 p-2 rounded-full transition-colors">
+                <div className="min-w-0 flex-1 pr-4">
+                  <h2 className="text-xl font-black text-white flex items-center gap-3 flex-wrap">
+                    <ListChecks className="w-6 h-6 text-indigo-400 shrink-0" /> Detalhe — Nota #
+                    {vendaVisualizacao.numeroNota || vendaVisualizacao.numero_nfe || vendaVisualizacao.numero || 'S/N'}
+                  </h2>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span
+                      className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[10px] font-black uppercase tracking-wider ${getStatusColor(String(vendaVisualizacao.statusFiscal || ''))}`}
+                    >
+                      {isFiscalRejeicaoOuErroEmissao(vendaVisualizacao.statusFiscal) && (
+                        <AlertTriangle className="h-3.5 w-3.5" />
+                      )}
+                      {rotuloStatusFiscalBadge(vendaVisualizacao.statusFiscal)}
+                    </span>
+                  </div>
+                </div>
+                <button onClick={() => setModalVisualizarItens(false)} className="text-slate-400 hover:text-white bg-slate-800 hover:bg-white/10 p-2 rounded-full transition-colors shrink-0">
                   <X className="w-5 h-5" />
                 </button>
               </div>
+
+              {isFiscalRejeicaoOuErroEmissao(vendaVisualizacao.statusFiscal) &&
+                vendaVisualizacao.mensagemErroFiscal?.trim() && (
+                  <div className="mx-6 mt-4 rounded-2xl border border-red-500/35 bg-red-950/40 px-4 py-3">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-red-400 mb-1.5">
+                      Motivo da rejeição / erro de emissão
+                    </p>
+                    <p className="text-sm font-medium text-red-100 whitespace-pre-wrap break-words">
+                      {vendaVisualizacao.mensagemErroFiscal}
+                    </p>
+                  </div>
+                )}
               
               <div className="p-6 sm:p-8 max-h-[60vh] overflow-y-auto custom-scrollbar">
                 <div className="space-y-4">
@@ -881,8 +965,24 @@ export function GestaoNotas() {
                 </div>
               </div>
               
-              <div className="p-6 bg-[#0b1324]/80 border-t border-white/10 flex justify-end shrink-0">
-                <button onClick={() => setModalVisualizarItens(false)} className="bg-slate-800 hover:bg-white/10 text-white px-8 py-3.5 rounded-xl font-black transition-colors w-full sm:w-auto">
+              <div className="p-6 bg-[#0b1324]/80 border-t border-white/10 flex flex-col sm:flex-row justify-end gap-3 shrink-0">
+                {isFiscalRejeicaoOuErroEmissao(vendaVisualizacao.statusFiscal) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModalVisualizarItens(false);
+                      void handleAction(vendaVisualizacao, 'retransmitir');
+                    }}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-amber-400/70 bg-amber-500/20 px-6 py-3.5 font-black text-amber-100 shadow-[0_0_20px_rgba(245,158,11,0.25)] transition-all hover:bg-amber-500/30 w-full sm:w-auto order-first sm:order-none"
+                  >
+                    <RefreshCw className="h-5 w-5" />
+                    Retransmitir nota
+                  </button>
+                )}
+                <button
+                  onClick={() => setModalVisualizarItens(false)}
+                  className="bg-slate-800 hover:bg-white/10 text-white px-8 py-3.5 rounded-xl font-black transition-colors w-full sm:w-auto"
+                >
                   Fechar
                 </button>
               </div>
@@ -951,6 +1051,16 @@ export function GestaoNotas() {
                     <AlertTriangle className="w-7 h-7 text-amber-500" /> Correção Fiscal da Nota #{String(vendaEmCorrecao.numeroNota || vendaEmCorrecao.numero_nfe || vendaEmCorrecao.numero || vendaEmCorrecao.id.split('-')[0])}
                   </h2>
                   <p className="text-slate-400 font-medium mt-1">Ajuste os dados incorretos antes de retransmitir para a SEFAZ. Pressione F2 nos campos para buscar.</p>
+                  {vendaEmCorrecao.mensagemErroFiscal?.trim() && (
+                    <div className="mt-4 rounded-xl border border-red-500/35 bg-red-950/35 px-4 py-3">
+                      <p className="text-[10px] font-black uppercase tracking-wider text-red-400 mb-1">
+                        Último erro SEFAZ / emissão
+                      </p>
+                      <p className="text-sm text-red-100/95 whitespace-pre-wrap break-words">
+                        {vendaEmCorrecao.mensagemErroFiscal}
+                      </p>
+                    </div>
+                  )}
                 </div>
                 <button onClick={() => setModalCorrecaoAberto(false)} className="text-slate-400 hover:text-white bg-slate-800 hover:bg-white/10 p-2 rounded-full transition-colors">
                   <X className="w-6 h-6" />

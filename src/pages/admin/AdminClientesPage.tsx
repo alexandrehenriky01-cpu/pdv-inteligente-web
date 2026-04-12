@@ -41,6 +41,8 @@ export function AdminClientesPage() {
   const [isGerenciarModalOpen, setIsGerenciarModalOpen] = useState(false);
   const [lojaSelecionada, setLojaSelecionada] = useState<ILojaAdmin | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  /** Redefinição de senha do dono (Master / suporte) — não persiste em `lojaSelecionada`. */
+  const [novaSenhaDono, setNovaSenhaDono] = useState('');
 
   const [formData, setFormData] = useState<IFormDataNovoCliente>({
     nomeLoja: '',
@@ -123,7 +125,13 @@ export function AdminClientesPage() {
   // 🚀 FUNÇÕES PARA GERENCIAR CLIENTE
   const abrirModalGerenciar = (loja: ILojaAdmin) => {
     setLojaSelecionada({ ...loja }); // Cria uma cópia para não alterar a tabela antes de salvar
+    setNovaSenhaDono('');
     setIsGerenciarModalOpen(true);
+  };
+
+  const fecharModalGerenciar = () => {
+    setNovaSenhaDono('');
+    setIsGerenciarModalOpen(false);
   };
 
   const handleEditChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -142,20 +150,34 @@ export function AdminClientesPage() {
   const handleUpdateCliente = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!lojaSelecionada) return;
-    
+
+    const senhaTrim = novaSenhaDono.trim();
+    if (senhaTrim.length > 0 && senhaTrim.length < 6) {
+      alert('A nova senha do dono deve ter no mínimo 6 caracteres ou ficar em branco.');
+      return;
+    }
+
     setSavingEdit(true);
     try {
-      // Faz a requisição PUT para atualizar a loja no backend
-      await api.put(`/api/admin/lojas/${lojaSelecionada.id}`, {
+      const payload: Record<string, unknown> = {
         nome: lojaSelecionada.nome,
         plano: lojaSelecionada.plano,
         statusLicenca: lojaSelecionada.statusLicenca,
         modulosAtivos: lojaSelecionada.modulosAtivos,
-        limiteUsuarios: Number(lojaSelecionada.limiteUsuarios)
-      });
+        limiteUsuarios: Number(lojaSelecionada.limiteUsuarios ?? 3),
+      };
+      if (senhaTrim.length >= 6) {
+        payload.novaSenhaDono = senhaTrim;
+      }
 
-      alert('✅ Cliente atualizado com sucesso!');
-      setIsGerenciarModalOpen(false);
+      await api.put(`/api/admin/lojas/${lojaSelecionada.id}`, payload);
+
+      alert(
+        senhaTrim.length >= 6
+          ? '✅ Cliente atualizado e senha do dono redefinida com sucesso!'
+          : '✅ Cliente atualizado com sucesso!'
+      );
+      fecharModalGerenciar();
       carregarClientes(); // Recarrega a tabela com os novos dados
     } catch (err) {
       const error = err as AxiosError<{ error?: string }>;
@@ -552,7 +574,8 @@ export function AdminClientesPage() {
                   <p className="mt-1 text-sm text-slate-400">Altere o plano, status da licença e módulos de <strong className="text-white">{lojaSelecionada.nome}</strong>.</p>
                 </div>
                 <button
-                  onClick={() => setIsGerenciarModalOpen(false)}
+                  type="button"
+                  onClick={fecharModalGerenciar}
                   className="rounded-full bg-white/5 p-2 text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
                 >
                   <X className="w-6 h-6" />
@@ -634,6 +657,26 @@ export function AdminClientesPage() {
                             />
                           </div>
                         </div>
+
+                        <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
+                          <label className={labelClass}>Redefinir senha do dono</label>
+                          <div className="relative mt-1">
+                            <Key className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-amber-500/80" />
+                            <input
+                              type="password"
+                              name="novaSenhaDono"
+                              value={novaSenhaDono}
+                              onChange={(e) => setNovaSenhaDono(e.target.value)}
+                              autoComplete="new-password"
+                              placeholder="Deixe em branco para não alterar"
+                              className={`${inputClass} pl-12`}
+                            />
+                          </div>
+                          <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+                            Preencha apenas se precisar redefinir a senha de acesso do dono desta loja para suporte.
+                            Mínimo 6 caracteres.
+                          </p>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -701,7 +744,7 @@ export function AdminClientesPage() {
                 <div className="mt-8 flex shrink-0 flex-col justify-end gap-4 border-t border-white/10 pt-6 sm:flex-row">
                   <button
                     type="button"
-                    onClick={() => setIsGerenciarModalOpen(false)}
+                    onClick={fecharModalGerenciar}
                     className="w-full rounded-xl border border-white/10 bg-white/5 px-8 py-3.5 font-bold text-slate-300 transition-colors hover:bg-white/10 hover:text-white sm:w-auto"
                   >
                     Cancelar

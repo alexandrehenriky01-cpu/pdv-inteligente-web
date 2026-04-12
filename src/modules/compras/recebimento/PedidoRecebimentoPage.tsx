@@ -20,8 +20,8 @@ export const PedidoRecebimentoPage = () => {
   const carregarPedidos = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/api/recebimento/pedidos', {
-        params: { status: statusFiltro || undefined }
+      const response = await api.get('/api/compras/pedidos-recebimento', {
+        params: { status: statusFiltro || undefined },
       });
       setPedidos(response.data);
     } catch (error) {
@@ -107,8 +107,10 @@ export const PedidoRecebimentoPage = () => {
                     return (
                       <tr key={pedido.id} className="transition-colors hover:bg-[#131b2f]">
                         <td className="p-4">
-                          <div className="font-bold text-gray-200">{pedido.fornecedor?.nomeRazao || 'Desconhecido'}</div>
-                          <div className="text-xs text-gray-500">CNPJ: {pedido.fornecedor?.cpfCnpj}</div>
+                          <div className="font-bold text-gray-200">
+                            {pedido.fornecedor?.nomeFantasia || pedido.fornecedor?.razaoSocial || 'Desconhecido'}
+                          </div>
+                          <div className="text-xs text-gray-500">CNPJ: {pedido.fornecedor?.cnpjCpf ?? '—'}</div>
                         </td>
                         <td className="p-4 text-gray-300">
                           {format(new Date(pedido.dataPrevista), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}

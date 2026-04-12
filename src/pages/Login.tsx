@@ -10,6 +10,8 @@ import {
 } from 'lucide-react';
 import { AxiosError } from 'axios';
 import { ILoginResponse, IAuthError } from '../types/auth';
+import { useAuth } from '../contexts/AuthContext';
+import { AUTH_TOKEN_KEY, AUTH_USER_KEY } from '../services/authStorage';
 
 export function Login() {
   const [email, setEmail] = useState<string>('');
@@ -25,12 +27,14 @@ export function Login() {
   const [portalText, setPortalText] = useState('Inicializando ambiente Aurya...');
 
   const navigate = useNavigate();
+  const { signInFromApiResponse } = useAuth();
 
   // 🚀 O CÉREBRO DO ROTEAMENTO (RBAC) - Agora aceita string ou undefined (Resolve o erro do TS)
   const redirecionarPorCargo = (role?: string) => {
     switch (role) {
       case 'SUPER_ADMIN':
-        navigate('/admin/clientes'); // Dono do SaaS
+      case 'SUPORTE_MASTER':
+        navigate('/admin/clientes'); // Dono do SaaS / suporte (break-glass)
         break;
       case 'CAIXA':
       case 'VENDEDOR':
@@ -46,16 +50,16 @@ export function Login() {
 
   // 🚀 AUTO-LOGIN: Se já tem token, manda pra tela certa direto sem precisar logar de novo
   useEffect(() => {
-    const token = localStorage.getItem('@PDVToken');
-    const userStr = localStorage.getItem('@PDVUsuario');
-    
+    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+    const userStr = localStorage.getItem(AUTH_USER_KEY);
+
     if (token && userStr) {
       try {
-        const usuario = JSON.parse(userStr);
+        const usuario = JSON.parse(userStr) as { role?: string };
         redirecionarPorCargo(usuario.role);
-      } catch (e) {
-        localStorage.removeItem('@PDVToken');
-        localStorage.removeItem('@PDVUsuario');
+      } catch {
+        localStorage.removeItem(AUTH_TOKEN_KEY);
+        localStorage.removeItem(AUTH_USER_KEY);
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -84,15 +88,21 @@ export function Login() {
     setLoading(true);
 
     try {
+      const loginValor = email.trim();
       const response = await api.post<ILoginResponse>('/api/login', {
-        email,
+        login: loginValor,
+        identificacao: loginValor,
         senha,
       });
 
-      const { token, usuario } = response.data;
+      const persisted = signInFromApiResponse(response.data);
+      if (!persisted.ok) {
+        setErro(persisted.reason);
+        setLoading(false);
+        return;
+      }
 
-      localStorage.setItem('@PDVToken', token);
-      localStorage.setItem('@PDVUsuario', JSON.stringify(usuario));
+      const usuario = persisted.usuario;
 
       setPortalText('Conectando ao ecossistema Aurya...');
       setEnteringPortal(true);
@@ -103,7 +113,7 @@ export function Login() {
 
       window.setTimeout(() => {
         // 🚀 ROTEAMENTO DINÂMICO APÓS A ANIMAÇÃO DO PORTAL
-        redirecionarPorCargo(usuario.role);
+        redirecionarPorCargo(String(usuario.role ?? ''));
       }, 1400);
     } catch (err) {
       const error = err as AxiosError<IAuthError>;
@@ -328,16 +338,17 @@ export function Login() {
                 <form onSubmit={handleLogin} className="space-y-4 sm:space-y-5">
                   <div className="space-y-2">
                     <label className="block text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 sm:text-[11px] sm:tracking-[0.16em]">
-                      E-mail
+                      E-mail ou Nome de Usuário
                     </label>
 
                     <div className="relative">
                       <Mail className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                       <input
-                        type="email"
+                        type="text"
+                        autoComplete="username"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        placeholder="seu@email.com"
+                        placeholder="seu@email.com ou joao.silva"
                         disabled={loading || enteringPortal}
                         required
                         className="w-full rounded-2xl border border-white/10 bg-[#0d182d] py-3.5 pl-11 pr-4 text-sm text-white placeholder:text-slate-500 outline-none shadow-inner transition-all focus:border-violet-400/40 focus:ring-2 focus:ring-violet-500/20 disabled:cursor-not-allowed disabled:opacity-60 sm:py-4"

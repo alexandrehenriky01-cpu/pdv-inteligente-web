@@ -27,6 +27,8 @@ export interface ICfopResumo {
 }
 
 export interface IItemNotaManual {
+  /** UUID, código interno, EAN ou código de barras (obrigatório para NF-e avulsa). */
+  produtoId: string;
   nome: string;
   quantidade: number | string;
   valorUnitario: number | string;
@@ -63,6 +65,7 @@ export interface IPayloadNotaManual {
   tipoDocumento: string;
   finalidadeEmissao: string;
   chaveReferenciada: string;
+  pessoaId?: string;
   cliente: IClienteNota;
   transporte: ITransporteNota;
   observacao: string;
@@ -71,26 +74,58 @@ export interface IPayloadNotaManual {
       quantidade: number;
       valorUnitario: number;
       aliquotaIcms: number;
+      produtoId: string;
     }
   >;
+}
+
+interface IPessoaLista {
+  id: string;
+  razaoSocial: string;
+  /** API `/api/pessoas` expõe como cpfCnpj (espelho de cnpjCpf). */
+  cpfCnpj: string;
+  logradouro?: string;
+  numero?: string;
+  cidade?: string;
+  uf?: string;
+  cep?: string;
 }
 
 export function EmissaoNotaManual() {
   const navigate = useNavigate();
   const [salvando, setSalvando] = useState(false);
   const [cfops, setCfops] = useState<ICfopResumo[]>([]);
+  const [listaPessoas, setListaPessoas] = useState<IPessoaLista[]>([]);
 
   useEffect(() => {
     const carregarCfops = async () => {
       try {
-        const response = await api.get<ICfopResumo[]>('/api/cfops');
-        setCfops(response.data);
+        const response = await api.get<{ sucesso?: boolean; dados?: ICfopResumo[] } | ICfopResumo[]>(
+          '/api/cfops',
+        );
+        const raw = response.data;
+        setCfops(Array.isArray(raw) ? raw : raw?.dados ?? []);
       } catch (err) {
         const error = err as AxiosError<{ error?: string }>;
         console.log('Erro ao carregar CFOPs:', error.response?.data || error.message);
       }
     };
     carregarCfops();
+  }, []);
+
+  useEffect(() => {
+    const carregarClientes = async () => {
+      try {
+        const response = await api.get<IPessoaLista[]>('/api/pessoas', {
+          params: { tipo: 'CLIENTE' },
+        });
+        setListaPessoas(Array.isArray(response.data) ? response.data : []);
+      } catch (err) {
+        const error = err as AxiosError<{ error?: string }>;
+        console.log('Erro ao carregar clientes:', error.response?.data || error.message);
+      }
+    };
+    carregarClientes();
   }, []);
 
   const [dadosGerais, setDadosGerais] = useState<IDadosGeraisNota>({
@@ -116,6 +151,7 @@ export function EmissaoNotaManual() {
 
   const [itens, setItens] = useState<IItemNotaManual[]>([
     {
+      produtoId: '',
       nome: '',
       quantidade: 1,
       valorUnitario: 0,
@@ -131,6 +167,7 @@ export function EmissaoNotaManual() {
     setItens([
       ...itens,
       {
+        produtoId: '',
         nome: '',
         quantidade: 1,
         valorUnitario: 0,
@@ -164,8 +201,14 @@ export function EmissaoNotaManual() {
     );
 
   const emitirNota = async () => {
+    if (!cliente.id?.trim()) {
+      return alert(
+        'Selecione um cliente cadastrado (com endereço principal completo). A NF-e avulsa não pode ser emitida só com nome/CPF digitados.'
+      );
+    }
+
     if (!cliente.nome || !cliente.cnpjCpf) {
-      return alert('Preencha os dados do cliente (Nome e CPF/CNPJ).');
+      return alert('Cliente sem nome ou CPF/CNPJ. Selecione novamente na lista.');
     }
 
     if (
@@ -175,6 +218,10 @@ export function EmissaoNotaManual() {
       return alert(
         'Para notas de devolução, você deve informar a Chave de Acesso Referenciada (44 dígitos) da nota original.'
       );
+    }
+
+    if (itens.some(i => !String(i.produtoId || '').trim())) {
+      return alert('Cada item deve ter o Produto (ID, código, EAN ou código de barras) informado.');
     }
 
     if (itens.some(i => !i.nome || !i.cfop || !i.cstCsosn || !i.ncm)) {
@@ -192,8 +239,10 @@ export function EmissaoNotaManual() {
         cliente,
         transporte,
         observacao,
+        pessoaId: cliente.id,
         itens: itens.map(i => ({
           ...i,
+          produtoId: String(i.produtoId).trim(),
           quantidade: Number(i.quantidade),
           valorUnitario: Number(i.valorUnitario),
           aliquotaIcms: Number(i.aliquotaIcms),
@@ -360,12 +409,46 @@ export function EmissaoNotaManual() {
 
               <div className="space-y-4">
                 <div>
+                  <label className={labelClass}>Cliente cadastrado (obrigatório)</label>
+                  <select
+                    value={cliente.id}
+                    onChange={e => {
+                      const id = e.target.value;
+                      if (!id) {
+                        setCliente({ id: '', nome: '', cnpjCpf: '' });
+                        return;
+                      }
+                      const p = listaPessoas.find(x => x.id === id);
+                      if (p) {
+                        setCliente({
+                          id: p.id,
+                          nome: p.razaoSocial || '',
+                          cnpjCpf: p.cpfCnpj || '',
+                        });
+                      }
+                    }}
+                    className={inputClass}
+                  >
+                    <option value="">Selecione um cliente com endereço principal…</option>
+                    {listaPessoas.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.razaoSocial} — {p.cpfCnpj}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-2 text-[11px] text-slate-500">
+                    A NF-e modelo 55 exige pessoa cadastrada com endereço principal (logradouro, número,
+                    cidade, UF, CEP).
+                  </p>
+                </div>
+
+                <div>
                   <label className={labelClass}>Nome / Razão Social</label>
                   <input
                     type="text"
                     value={cliente.nome}
-                    onChange={e => setCliente({ ...cliente, nome: e.target.value })}
-                    className={inputClass}
+                    readOnly
+                    className={`${inputClass} opacity-80`}
                   />
                 </div>
 
@@ -374,11 +457,9 @@ export function EmissaoNotaManual() {
                   <input
                     type="text"
                     value={cliente.cnpjCpf}
-                    onChange={e =>
-                      setCliente({ ...cliente, cnpjCpf: e.target.value.replace(/\D/g, '') })
-                    }
-                    className={`${inputClass} font-mono`}
-                    placeholder="Apenas números"
+                    readOnly
+                    className={`${inputClass} font-mono opacity-80`}
+                    placeholder="Preenchido pelo cadastro"
                   />
                 </div>
               </div>
@@ -454,7 +535,8 @@ export function EmissaoNotaManual() {
 
             <div className="overflow-hidden rounded-[24px] border border-white/10 bg-[#0b1324]/70">
               <div className="grid grid-cols-12 gap-2 border-b border-white/10 bg-black/10 px-4 py-3 text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">
-                <div className="col-span-4">Produto</div>
+                <div className="col-span-2">Produto (ref.)</div>
+                <div className="col-span-2">Descrição</div>
                 <div className="col-span-1 text-center">Qtd</div>
                 <div className="col-span-2 text-right">Vlr Unit</div>
                 <div className="col-span-1">CFOP</div>
@@ -470,13 +552,22 @@ export function EmissaoNotaManual() {
                     key={index}
                     className="grid grid-cols-12 gap-2 border-b border-white/5 px-4 py-3 transition-colors hover:bg-white/5"
                   >
-                    <div className="col-span-12 xl:col-span-4">
+                    <div className="col-span-12 xl:col-span-2">
+                      <input
+                        type="text"
+                        value={item.produtoId}
+                        onChange={e => handleItemChange(index, 'produtoId', e.target.value)}
+                        className="w-full rounded-xl border border-white/10 bg-[#08101f] px-3 py-2.5 font-mono text-sm text-white placeholder:text-slate-500 outline-none transition-all focus:border-violet-400/30 focus:ring-2 focus:ring-violet-500/15"
+                        placeholder="UUID, código, EAN"
+                      />
+                    </div>
+                    <div className="col-span-12 xl:col-span-2">
                       <input
                         type="text"
                         value={item.nome}
                         onChange={e => handleItemChange(index, 'nome', e.target.value)}
                         className="w-full rounded-xl border border-white/10 bg-[#08101f] px-3 py-2.5 text-sm text-white placeholder:text-slate-500 outline-none transition-all focus:border-violet-400/30 focus:ring-2 focus:ring-violet-500/15"
-                        placeholder="Nome exato do item"
+                        placeholder="Descrição na nota"
                       />
                     </div>
 

@@ -7,7 +7,7 @@ import {
   AlertTriangle, Inbox, FileText, BrainCircuit, Receipt, FileUp,
   Wallet, TrendingUp, CheckSquare, Landmark, CreditCard, BookOpen,
   ScanSearch, Smartphone, LogOut, Sparkles, ShieldCheck, Building2, UtensilsCrossed,
-  ListOrdered, Network
+  ListOrdered, Network, Box, Radar, PackageCheck
 } from 'lucide-react';
 
 import { IUsuario } from '../types/auth';
@@ -120,7 +120,7 @@ export function Layout({ children }: LayoutProps) {
 
   // 🚀 LÓGICA DE PERMISSÃO DE MÓDULOS
   const temPermissao = (modulo: string) => {
-    if (usuario?.role === 'SUPER_ADMIN') return true;
+    if (usuario?.role === 'SUPER_ADMIN' || usuario?.role === 'SUPORTE_MASTER') return true;
 
     const modulosLoja = (usuario?.loja?.modulosAtivos as string[]) || [];
     const permissoesUser = usuario?.permissoes || [];
@@ -140,7 +140,8 @@ export function Layout({ children }: LayoutProps) {
   console.log("👀 Cargo atual do usuário:", role);
 
   const isGestor = 
-    role === 'SUPER_ADMIN' || 
+    role === 'SUPER_ADMIN' ||
+    role === 'SUPORTE_MASTER' ||
     role === 'ADMIN' || 
     role ==='ADMIN_LOJA' ||
     role === 'GERENTE' || 
@@ -170,7 +171,7 @@ export function Layout({ children }: LayoutProps) {
     setMenusAbertos(prev => ({
       ...prev,
       centralAurya: prev.centralAurya || path.includes('/aurya'),
-      estruturaNegocio: prev.estruturaNegocio || path.includes('/produtos') || path.includes('/categorias') || path.includes('/pessoas') || path.includes('/equipe') || path.includes('/permissoes') || path.includes('/configuracoes-loja'),
+      estruturaNegocio: prev.estruturaNegocio || path.includes('/produtos') || path.includes('/categorias') || path.includes('/embalagens') || path.includes('/pessoas') || path.includes('/equipe') || path.includes('/permissoes') || path.includes('/configuracoes-loja'),
       operacaoVendas: prev.operacaoVendas || path.includes('/frente-caixa') || path.includes('/pdv-food'),
       comprasSuprimentos: prev.comprasSuprimentos || path.includes('/compras') || path.includes('/entrada-notas') || path.includes('/ListarNfe'),
       fiscalInteligente: prev.fiscalInteligente || path.includes('/notas') || path.includes('/notas-fiscais') || path.includes('/regras-fiscais') || path.includes('/cadastrocfop'),
@@ -250,6 +251,7 @@ export function Layout({ children }: LayoutProps) {
                 <div className={`space-y-1 mt-1 mb-2 ${sidebarCollapsed ? 'p-1' : 'pl-1'} animate-in slide-in-from-top-2 fade-in duration-200`}>
                   <MenuItem to="/produtos" icon={Package} label="Produtos" isActive={location.pathname === '/produtos'} collapsed={sidebarCollapsed} />
                   <MenuItem to="/categorias" icon={Tags} label="Categorias" isActive={location.pathname === '/categorias'} collapsed={sidebarCollapsed} />
+                  <MenuItem to="/embalagens" icon={Box} label="Embalagens (BOM)" isActive={location.pathname === '/embalagens'} collapsed={sidebarCollapsed} />
                   <MenuItem to="/pessoas" icon={Users} label="Pessoas" isActive={location.pathname === '/pessoas'} collapsed={sidebarCollapsed} />
                   
                   {/* 🚀 AQUI A MÁGICA ACONTECE: Agora isGestor inclui 'DONO' */}
@@ -287,6 +289,8 @@ export function Layout({ children }: LayoutProps) {
                   <MenuItem to="/compras/cotacoes" icon={Scale} label="Cotações" isActive={location.pathname === '/compras/cotacoes'} collapsed={sidebarCollapsed} />
                   <MenuItem to="/compras/AprovacaoSolicitacaoCompra" icon={ShoppingCart} label="Aprovação de Compras" isActive={location.pathname === '/compras/AprovacaoCompra'} collapsed={sidebarCollapsed} />
                   <MenuItem to="/compras/pedidos" icon={ShoppingCart} label="Pedidos" isActive={location.pathname === '/compras/pedidos'} collapsed={sidebarCollapsed} />
+                  <MenuItem to="/compras/recebimento-mercadorias" icon={PackageCheck} label="Recebimento mercadorias" isActive={location.pathname.includes('/compras/recebimento-mercadorias')} collapsed={sidebarCollapsed} />
+                  <MenuItem to="/compras/acompanhamento" icon={Radar} label="Acompanhamento P2P" isActive={location.pathname.includes('/compras/acompanhamento')} collapsed={sidebarCollapsed} />
                   <MenuItem to="/compras/divergencias" icon={AlertTriangle} label="Divergências" isActive={location.pathname === '/compras/divergencias'} collapsed={sidebarCollapsed} />
                   <MenuItem to="/entrada-notas" icon={Inbox} label="XML" isActive={location.pathname === '/entrada-notas'} collapsed={sidebarCollapsed} />
                   <MenuItem to="/ListarNfe" icon={FileText} label="Notas Entrada" isActive={location.pathname === '/ListarNfe'} collapsed={sidebarCollapsed} />
@@ -355,7 +359,7 @@ export function Layout({ children }: LayoutProps) {
             </>
           )}
 
-          {usuario?.role === 'SUPER_ADMIN' && (
+          {(usuario?.role === 'SUPER_ADMIN' || usuario?.role === 'SUPORTE_MASTER') && (
             <>
               <SectionHeader id="adminSaaS" title="Admin SaaS" icon={ShieldCheck} isOpen={menusAbertos.adminSaaS} collapsed={sidebarCollapsed} onToggle={toggleMenu} />
               {menusAbertos.adminSaaS && (

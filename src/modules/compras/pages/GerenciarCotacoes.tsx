@@ -1,9 +1,15 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { Layout } from '../../../components/Layout';
 import { 
   CheckCircle2, XCircle, Clock, Search, Filter, FileText, 
   Truck, Package, Loader2, Calendar, DollarSign, CircleDollarSign 
 } from 'lucide-react';
-import { api } from '../../../services/api'; 
+import { api } from '../../../services/api';
+import {
+  AnaliseCotacaoPrecosModal,
+  AnalisePrecosResponse,
+} from '../components/AnaliseCotacaoPrecosModal';
 
 interface Fornecedor {
   id: string;
@@ -21,17 +27,18 @@ interface ItemCotacao {
   id: string;
   quantidadeCotada: number;
   valorUnitario: number;
+  fornecedorId?: string;
   produto?: Produto;
   fornecedor?: Fornecedor;
-  // 🚀 Fallback para caso o Prisma envie como 'quantidade'
-  quantidade?: number; 
+  quantidade?: number;
 }
 
 interface CotacaoCompra {
   id: string;
   createdAt: string;
   observacao: string;
-  status: string; 
+  status: string;
+  solicitacaoCompraId?: string | null;
   itens: ItemCotacao[];
 }
 
@@ -45,6 +52,11 @@ export const GerenciarCotacoes: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+
+  const [analiseOpen, setAnaliseOpen] = useState(false);
+  const [analiseDados, setAnaliseDados] = useState<AnalisePrecosResponse | null>(null);
+  const [analiseSolicitacaoId, setAnaliseSolicitacaoId] = useState('');
+  const [analiseCarregando, setAnaliseCarregando] = useState(false);
 
   // Filtros
   const [filtroStatus, setFiltroStatus] = useState<string>('');
@@ -80,6 +92,29 @@ export const GerenciarCotacoes: React.FC = () => {
     }
     setCotacoesFiltradas(result);
   }, [cotacoes, filtroStatus, filtroData, filtroFornecedor]);
+
+  const abrirAnalisePrecos = async () => {
+    const sid = cotacaoSelecionada?.solicitacaoCompraId;
+    if (!sid) {
+      alert('Esta cotação não possui vínculo com solicitação de compra. Registre cotações a partir da tela de Cotações.');
+      return;
+    }
+    setAnaliseCarregando(true);
+    try {
+      const r = await api.get<AnalisePrecosResponse>(
+        `/api/compras/solicitacoes/${sid}/analise-precos`,
+      );
+      setAnaliseDados(r.data);
+      setAnaliseSolicitacaoId(sid);
+      setAnaliseOpen(true);
+    } catch {
+      alert(
+        'Não foi possível carregar a análise. É necessário ao menos uma cotação vinculada à solicitação (status aberta ou finalizada) com preços por item.',
+      );
+    } finally {
+      setAnaliseCarregando(false);
+    }
+  };
 
   const handleSelecionar = (cot: CotacaoCompra) => {
     setCotacaoSelecionada(cot);
@@ -124,9 +159,11 @@ export const GerenciarCotacoes: React.FC = () => {
   };
 
   const getStatusColor = (status: string) => {
+    if (status === 'ABERTA') return 'bg-sky-500/20 text-sky-300 border-sky-500/30';
     if (status === 'FINALIZADA') return 'bg-amber-500/20 text-amber-400 border-amber-500/30';
     if (status === 'APROVADA') return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
-    return 'bg-red-500/20 text-red-400 border-red-500/30';
+    if (status === 'CANCELADA' || status === 'REPROVADA') return 'bg-red-500/20 text-red-400 border-red-500/30';
+    return 'bg-slate-500/20 text-slate-400 border-slate-500/30';
   };
 
   // 🚀 TIPAGEM FORÇADA: O Typescript agora sabe que isso retorna um NUMBER
@@ -143,15 +180,34 @@ export const GerenciarCotacoes: React.FC = () => {
 
   if (loading && cotacoes.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-96 text-violet-500">
-        <Loader2 className="w-10 h-10 animate-spin mb-4" />
-        <p className="text-white font-bold">Carregando cotações...</p>
-      </div>
+      <Layout>
+        <div className="flex h-96 flex-col items-center justify-center text-violet-500">
+          <Loader2 className="mb-4 h-10 w-10 animate-spin" />
+          <p className="font-bold text-white">Carregando cotações...</p>
+        </div>
+      </Layout>
     );
   }
 
   return (
-    <div className="w-full space-y-6">
+    <Layout>
+    <div className="w-full space-y-6 pb-10">
+      <div className="flex flex-col justify-between gap-4 rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4 backdrop-blur-xl sm:flex-row sm:items-center">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-amber-200">Cérebro da economia</p>
+          <p className="mt-1 text-sm text-amber-100/90">
+            Selecione uma cotação vinculada a uma solicitação e abra a <strong>Análise de cotação</strong> para ver a
+            matriz de preços, troféus 🏆 por item e gerar pedidos (global ou fatiado).
+          </p>
+        </div>
+        <Link
+          to="/compras/cotacoes"
+          className="shrink-0 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-center text-xs font-black uppercase tracking-wide text-white hover:bg-white/15"
+        >
+          Ir para nova cotação
+        </Link>
+      </div>
+
       <div className="rounded-2xl border border-white/10 bg-[#08101f]/40 p-6 backdrop-blur-xl shadow-lg flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-3">
@@ -282,7 +338,23 @@ export const GerenciarCotacoes: React.FC = () => {
                 </div>
               </div>
 
-              <div className="p-6 border-t border-white/10 bg-black/20 flex justify-end gap-3 rounded-b-2xl">
+              <div className="p-6 border-t border-white/10 bg-black/20 flex flex-wrap justify-end gap-3 rounded-b-2xl">
+                {cotacaoSelecionada.solicitacaoCompraId &&
+                  ['ABERTA', 'FINALIZADA'].includes(cotacaoSelecionada.status) && (
+                  <button
+                    type="button"
+                    onClick={() => void abrirAnalisePrecos()}
+                    disabled={analiseCarregando || actionLoading}
+                    className="px-6 py-2.5 rounded-xl font-bold text-sm text-amber-200 hover:bg-amber-500/10 border border-amber-500/30 transition-all flex items-center gap-2"
+                  >
+                    {analiseCarregando ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <span className="text-lg">🏆</span>
+                    )}
+                    Análise de cotação (matriz)
+                  </button>
+                )}
                 {cotacaoSelecionada.status !== 'REPROVADA' && (
                   <button onClick={() => handleAvaliarCotacao(cotacaoSelecionada.id, 'REPROVADA')} disabled={actionLoading} className="px-6 py-2.5 rounded-xl font-bold text-sm text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/30 transition-all flex items-center gap-2">
                     <XCircle className="w-4 h-4" /> Reprovar Valores
@@ -306,6 +378,18 @@ export const GerenciarCotacoes: React.FC = () => {
         </div>
 
       </div>
+
+      <AnaliseCotacaoPrecosModal
+        open={analiseOpen}
+        dados={analiseDados}
+        solicitacaoId={analiseSolicitacaoId}
+        onClose={() => {
+          setAnaliseOpen(false);
+          setAnaliseDados(null);
+        }}
+        onGerouPedidos={() => void buscarCotacoes()}
+      />
     </div>
+    </Layout>
   );
 };

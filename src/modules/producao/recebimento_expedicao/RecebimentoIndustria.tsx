@@ -62,7 +62,7 @@ export function RecebimentoIndustria() {
     sifCispi: "SIF 1234" // Mock visual
   });
 
-  const lojaId = 1; // Deve vir do contexto do usuário logado
+  // lojaId e usuarioId vêm do JWT no backend (AuthMiddleware); não enviar valores mock.
 
   // ==========================================
   // CARREGAR ESTAÇÃO DE TRABALHO
@@ -75,8 +75,17 @@ export function RecebimentoIndustria() {
         return;
       }
       try {
-        const res = await api.get<IEstacaoTrabalho>(`/api/estacoes-trabalho/${estacaoId}`);
-        setEstacaoAtual(res.data);
+        const res = await api.get(`/api/estacoes-trabalho/${estacaoId}`);
+        const raw = res.data as unknown;
+        const est: IEstacaoTrabalho =
+          raw &&
+          typeof raw === 'object' &&
+          raw !== null &&
+          'data' in raw &&
+          typeof (raw as { data: IEstacaoTrabalho }).data === 'object'
+            ? (raw as { data: IEstacaoTrabalho }).data
+            : (raw as IEstacaoTrabalho);
+        setEstacaoAtual(est);
       } catch (error) {
         console.error('Erro ao carregar estação', error);
       } finally {
@@ -169,26 +178,39 @@ export function RecebimentoIndustria() {
       toast.error("Informe a quantidade de peças/caixas no palete.");
       return;
     }
+    if (!estacaoAtual?.id) {
+      toast.error('Estação de trabalho não configurada neste terminal.');
+      return;
+    }
 
     setSalvando(true);
     try {
-      // Payload enriquecido com os novos campos
+      // Contrato unificado com o backend: sempre `workstationId` (UUID da estação).
       const payload = {
-        lojaId,
         itemPedidoId: itemAtual.id,
         pesoBruto: pesoBrutoAtual,
         tara: taraAtual,
         quantidadePecas: Number(quantidadePecas),
+        workstationId: estacaoAtual.id,
         dataAbate: dataAbate ? new Date(dataAbate).toISOString() : null,
         dataProducao: dataProducao ? new Date(dataProducao).toISOString() : null,
         validade: validade ? new Date(validade).toISOString() : null,
-        estacaoTrabalhoId: Number(estacaoAtual?.id)
       };
 
-      const response = await api.post('/api/recebimento/registrar', payload);
-      
-      const pesoRegistrado = response.data.dados.pesoLiquidoCalculado;
-      const loteGerado = response.data.dados.lote; // Assumindo que a API retorna o Lote gerado
+      const response = await api.post<{
+        sucesso: boolean;
+        dados?: { lote: string; pesoLiquido: number; impresso: boolean };
+        erro?: string;
+      }>('/api/wms/recebimento', payload);
+
+      const body = response.data;
+      if (!body.sucesso || !body.dados) {
+        toast.error(body.erro || 'Falha ao registrar recebimento.');
+        return;
+      }
+
+      const pesoRegistrado = body.dados.pesoLiquido;
+      const loteGerado = body.dados.lote;
 
       toast.success(`Palete recebido (Lote: ${loteGerado})!`);
 
@@ -208,8 +230,9 @@ export function RecebimentoIndustria() {
       if (modoEntrada === 'MANUAL') setPesoManual('');
       setQuantidadePecas('1');
 
-    } catch (error: any) {
-      toast.error(error.response?.data?.erro || "Erro ao registrar recebimento.");
+    } catch (error: unknown) {
+      const axiosErr = error as { response?: { data?: { erro?: string } } };
+      toast.error(axiosErr.response?.data?.erro || 'Erro ao registrar recebimento.');
     } finally {
       setSalvando(false);
     }

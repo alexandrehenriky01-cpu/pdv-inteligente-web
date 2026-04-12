@@ -16,6 +16,10 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { AxiosError } from 'axios';
+import {
+  isFiscalRejeicaoOuErroEmissao,
+  rotuloStatusFiscalBadge,
+} from './fiscalStatusUtils';
 
 // 🛡️ INTERFACES DE TIPAGEM ESTRITA
 export interface IClienteResumo {
@@ -38,6 +42,7 @@ export interface IVendaFiscal {
   // 🚀 NOVO: Status reais de integração vindos do backend
   statusEstoque?: boolean;
   statusContabil?: boolean;
+  mensagemErroFiscal?: string | null;
 }
 
 // Interface para cobrir os dois formatos possíveis de retorno da API
@@ -71,6 +76,8 @@ export function NotasFiscais() {
           status.includes('AUTORIZAD') ||
           status.includes('EMITIDA') ||
           status.includes('REJEITAD') ||
+          status.includes('ERRO_EMISSAO') ||
+          status === 'ERRO' ||
           status.includes('PROCESSANDO') ||
           status.includes('PENDENTE')
         );
@@ -103,11 +110,13 @@ export function NotasFiscais() {
       );
     }
 
-    if (s.includes('REJEITAD') || s.includes('ERRO')) {
+    if (isFiscalRejeicaoOuErroEmissao(s)) {
       return (
-        <span className="inline-flex w-full items-center justify-center gap-1 rounded-full border border-rose-400/20 bg-rose-500/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-rose-300 shadow-[0_0_10px_rgba(244,63,94,0.15)]">
-          <AlertTriangle className="h-3.5 w-3.5" />
-          Rejeitada
+        <span className="inline-flex w-full max-w-[200px] flex-col items-center justify-center gap-0.5 rounded-full border border-rose-400/35 bg-rose-500/15 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-rose-200 shadow-[0_0_12px_rgba(244,63,94,0.2)] ring-1 ring-rose-500/30">
+          <span className="flex items-center gap-1">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            {rotuloStatusFiscalBadge(s)}
+          </span>
         </span>
       );
     }
@@ -165,6 +174,17 @@ export function NotasFiscais() {
       style: 'currency',
       currency: 'BRL'
     }).format(Number(valor));
+  };
+
+  const retransmitirNota = async (venda: IVendaFiscal) => {
+    try {
+      await api.post(`/api/vendas/${venda.id}/retransmitir`, {});
+      alert('✅ Nota enviada para reprocessamento na SEFAZ.');
+      await carregarNotas();
+    } catch (err) {
+      const error = err as AxiosError<{ error?: string }>;
+      alert(`❌ ${error.response?.data?.error || error.message || 'Falha ao retransmitir.'}`);
+    }
   };
 
   const formatarCnpjCpf = (doc?: string) => {
@@ -301,10 +321,13 @@ export function NotasFiscais() {
                       const isAutorizada =
                         String(venda.statusFiscal || '').toUpperCase().includes('AUTORIZAD') ||
                         String(venda.statusFiscal || '').toUpperCase().includes('EMITIDA');
+                      const isFalhaFiscal = isFiscalRejeicaoOuErroEmissao(venda.statusFiscal);
+                      const mostrarMsgErro =
+                        isFalhaFiscal && Boolean(venda.mensagemErroFiscal?.trim());
 
                       return (
+                        <React.Fragment key={venda.id}>
                         <tr
-                          key={venda.id}
                           className="transition-colors hover:bg-white/5"
                         >
                           <td className="p-5 font-bold text-slate-300">
@@ -374,7 +397,18 @@ export function NotasFiscais() {
                           </td>
 
                           <td className="p-5 text-center">
-                            <div className="flex items-center justify-center gap-2">
+                            <div className="flex flex-wrap items-center justify-center gap-2">
+                              {isFalhaFiscal && (
+                                <button
+                                  type="button"
+                                  onClick={() => retransmitirNota(venda)}
+                                  className="inline-flex items-center gap-1.5 rounded-2xl border-2 border-amber-400/60 bg-amber-500/20 px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-amber-100 shadow-[0_0_14px_rgba(245,158,11,0.2)] transition-all hover:bg-amber-500/30 ring-1 ring-amber-400/40"
+                                  title="Retransmitir nota para a SEFAZ"
+                                >
+                                  <RefreshCcw className="h-3.5 w-3.5" />
+                                  Retransmitir
+                                </button>
+                              )}
                               <button
                                 disabled={!isAutorizada}
                                 onClick={() => baixarDocumento(venda, 'pdf')}
@@ -397,6 +431,22 @@ export function NotasFiscais() {
                             </div>
                           </td>
                         </tr>
+                        {mostrarMsgErro && (
+                          <tr className="bg-red-950/25">
+                            <td colSpan={6} className="px-5 pb-4 pt-0">
+                              <div className="rounded-xl border border-red-500/30 bg-red-950/40 px-4 py-3">
+                                <p className="text-[10px] font-black uppercase tracking-[0.18em] text-red-400 mb-1.5 flex items-center gap-2">
+                                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                                  Motivo SEFAZ / erro de emissão
+                                </p>
+                                <p className="text-sm font-medium text-red-100/95 whitespace-pre-wrap break-words">
+                                  {venda.mensagemErroFiscal}
+                                </p>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </React.Fragment>
                       );
                     })}
                   </tbody>

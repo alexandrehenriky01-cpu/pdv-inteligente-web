@@ -75,7 +75,7 @@ const EstacoesTrabalhoPage: React.FC = () => {
 
     try {
       // Ajuste a rota conforme o seu backend
-      const response = await api.get('/producao/configuracoes/estacoes-trabalho', {
+      const response = await api.get('/api/producao/configuracoes/estacoes-trabalho', {
         params: debouncedFilters,
       });
 
@@ -116,7 +116,7 @@ const EstacoesTrabalhoPage: React.FC = () => {
     setIsDeleting(true);
 
     try {
-      await api.delete(`/producao/configuracoes/estacoes-trabalho/${confirmDeleteId}`);
+      await api.delete(`/api/producao/configuracoes/estacoes-trabalho/${confirmDeleteId}`);
       setToast('Estação excluída com sucesso!');
       setConfirmDeleteId(null);
       fetchEstacoes();
@@ -275,10 +275,28 @@ const EstacoesTrabalhoPage: React.FC = () => {
                           </div>
                         )}
 
-                        {row.layoutEtiqueta && (
+                        {row.layoutPesagem && (
                           <div className="flex items-center gap-1.5 bg-fuchsia-500/5 border border-fuchsia-500/10 px-2.5 py-1 rounded-lg text-xs font-medium text-fuchsia-300">
                             <Printer size={14} />
-                            {row.layoutEtiqueta.nome}
+                            Pesagem: {row.layoutPesagem.nome}
+                          </div>
+                        )}
+                        {row.layoutInterna && (
+                          <div className="flex items-center gap-1.5 bg-violet-500/5 border border-violet-500/10 px-2.5 py-1 rounded-lg text-xs font-medium text-violet-300">
+                            <Printer size={14} />
+                            Interna: {row.layoutInterna.nome}
+                          </div>
+                        )}
+                        {row.layoutRecebimento && (
+                          <div className="flex items-center gap-1.5 bg-amber-500/5 border border-amber-500/10 px-2.5 py-1 rounded-lg text-xs font-medium text-amber-200">
+                            <Printer size={14} />
+                            Receb.: {row.layoutRecebimento.nome}
+                          </div>
+                        )}
+                        {row.layoutExpedicao && (
+                          <div className="flex items-center gap-1.5 bg-orange-500/5 border border-orange-500/10 px-2.5 py-1 rounded-lg text-xs font-medium text-orange-200">
+                            <Printer size={14} />
+                            Exped.: {row.layoutExpedicao.nome}
                           </div>
                         )}
                       </div>

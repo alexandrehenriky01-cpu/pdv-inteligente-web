@@ -5,6 +5,9 @@ import {
   Tags,
   Plus,
   Trash2,
+  Edit2,
+  Check,
+  X,
   Loader2,
   AlertCircle,
   Sparkles,
@@ -20,6 +23,7 @@ import {
   Hash 
 } from 'lucide-react';
 import { AxiosError } from 'axios';
+import { transformarParaMaiusculas } from '../../utils/formatters';
 
 // 🚀 1. Interface atualizada
 export interface Categoria {
@@ -42,6 +46,11 @@ export function Categorias() {
   const [novoCodigo, setNovoCodigo] = useState(''); 
   const [loading, setLoading] = useState(false);
   const [loadingList, setLoadingList] = useState(true);
+
+  const [editandoId, setEditandoId] = useState<string | null>(null);
+  const [editNome, setEditNome] = useState('');
+  const [editCodigo, setEditCodigo] = useState('');
+  const [salvandoEdicao, setSalvandoEdicao] = useState(false);
 
   const carregarCategorias = async () => {
     setLoadingList(true);
@@ -66,11 +75,11 @@ export function Categorias() {
 
     setLoading(true);
     try {
-      await api.post<Categoria>('/api/categorias', { 
+      const payload = transformarParaMaiusculas({
         nome: novaCategoria.trim(),
-        // Se vier vazio, o backend gera o sequencial (1, 2, 3...)
-        codigo: novoCodigo ? novoCodigo.trim().toUpperCase() : ''
-      });
+        codigo: novoCodigo ? novoCodigo.trim() : '',
+      }) as { nome: string; codigo: string };
+      await api.post<Categoria>('/api/categorias', payload);
 
       setNovaCategoria('');
       setNovoCodigo('');
@@ -81,6 +90,41 @@ export function Categorias() {
       alert(error.response?.data?.error || 'Erro ao criar categoria. Verifique se o código já existe.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const iniciarEdicao = (c: Categoria) => {
+    setEditandoId(c.id);
+    setEditNome(c.nome);
+    setEditCodigo(c.codigo);
+  };
+
+  const cancelarEdicao = () => {
+    setEditandoId(null);
+    setEditNome('');
+    setEditCodigo('');
+  };
+
+  const handleSalvarEdicao = async () => {
+    if (!editandoId || !editNome.trim()) {
+      alert('⚠️ O nome da categoria é obrigatório.');
+      return;
+    }
+    setSalvandoEdicao(true);
+    try {
+      const payload = transformarParaMaiusculas({
+        nome: editNome.trim(),
+        codigo: editCodigo.trim(),
+      }) as { nome: string; codigo: string };
+      await api.put<Categoria>(`/api/categorias/${editandoId}`, payload);
+      cancelarEdicao();
+      carregarCategorias();
+    } catch (err) {
+      const error = err as AxiosError<{ error?: string }>;
+      console.error('Erro ao atualizar categoria:', error);
+      alert(error.response?.data?.error || 'Erro ao atualizar categoria.');
+    } finally {
+      setSalvandoEdicao(false);
     }
   };
 
@@ -273,52 +317,117 @@ export function Categorias() {
                   categorias.map((categoria) => {
                     const meta = getCategoriaMeta(categoria.nome);
                     const Icon = meta.icon;
+                    const emEdicao = editandoId === categoria.id;
 
                     return (
                       <div
                         key={categoria.id}
-                        className="group flex items-center justify-between gap-4 rounded-xl border border-transparent p-4 transition hover:border-white/10 hover:bg-white/5"
+                        className="group flex flex-col gap-4 rounded-xl border border-transparent p-4 transition hover:border-white/10 hover:bg-white/5 sm:flex-row sm:items-center sm:justify-between"
                       >
-                        <div className="min-w-0 flex items-center gap-4">
+                        <div className="min-w-0 flex flex-1 items-start gap-4 sm:items-center">
                           <div
                             className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border ${meta.pillClass}`}
                           >
                             <Icon className="h-5 w-5" />
                           </div>
 
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-3">
-                              {/* 🚀 Exibindo o Código com destaque visual */}
-                              <span className="inline-flex items-center rounded-md border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[11px] font-mono font-black text-violet-300">
-                                {categoria.codigo || 'SEM-CODIGO'}
-                              </span>
-                              
-                              <span className="flex items-center gap-3 text-base font-bold tracking-wide text-white transition group-hover:text-violet-300">
-                                <span className="truncate">{categoria.nome}</span>
-                              </span>
-                            </div>
-
-                            <div className="mt-2 flex flex-wrap items-center gap-2">
-                              <span
-                                className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.14em] ${meta.badgeClass}`}
-                              >
-                                {meta.hint}
-                              </span>
-
-                              <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
-                                Categoria ativa
-                              </span>
-                            </div>
+                          <div className="min-w-0 flex-1">
+                            {emEdicao ? (
+                              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                                <div className="flex-1">
+                                  <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                    Código
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={editCodigo}
+                                    onChange={(e) => setEditCodigo(e.target.value.toUpperCase())}
+                                    className="w-full rounded-xl border border-violet-500/30 bg-[#0d182d] px-3 py-2.5 font-mono text-sm text-white outline-none focus:border-violet-400/50"
+                                  />
+                                </div>
+                                <div className="flex-[2]">
+                                  <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                    Nome
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={editNome}
+                                    onChange={(e) => setEditNome(e.target.value)}
+                                    className="w-full rounded-xl border border-white/10 bg-[#0d182d] px-3 py-2.5 text-sm text-white outline-none focus:border-violet-400/40"
+                                  />
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="flex flex-wrap items-center gap-3">
+                                  <span className="inline-flex items-center rounded-md border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[11px] font-mono font-black text-violet-300">
+                                    {categoria.codigo || 'SEM-CODIGO'}
+                                  </span>
+                                  <span className="text-base font-bold tracking-wide text-white transition group-hover:text-violet-300">
+                                    <span className="truncate">{categoria.nome}</span>
+                                  </span>
+                                </div>
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                  <span
+                                    className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.14em] ${meta.badgeClass}`}
+                                  >
+                                    {meta.hint}
+                                  </span>
+                                  <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">
+                                    Categoria ativa
+                                  </span>
+                                </div>
+                              </>
+                            )}
                           </div>
                         </div>
 
-                        <button
-                          onClick={() => handleExcluir(categoria.id)}
-                          className="rounded-lg p-2 text-slate-500 opacity-0 transition-colors hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
-                          title="Excluir Categoria"
-                        >
-                          <Trash2 className="h-5 w-5" />
-                        </button>
+                        <div className="flex shrink-0 items-center justify-end gap-1 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100">
+                          {emEdicao ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={handleSalvarEdicao}
+                                disabled={salvandoEdicao || !editNome.trim()}
+                                className="rounded-lg p-2 text-emerald-400 transition-colors hover:bg-emerald-500/10 disabled:opacity-40"
+                                title="Salvar"
+                              >
+                                {salvandoEdicao ? (
+                                  <Loader2 className="h-5 w-5 animate-spin" />
+                                ) : (
+                                  <Check className="h-5 w-5" />
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={cancelarEdicao}
+                                disabled={salvandoEdicao}
+                                className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-white/10"
+                                title="Cancelar"
+                              >
+                                <X className="h-5 w-5" />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => iniciarEdicao(categoria)}
+                                className="rounded-lg p-2 text-slate-500 transition-colors hover:bg-violet-500/10 hover:text-violet-300"
+                                title="Editar categoria"
+                              >
+                                <Edit2 className="h-5 w-5" />
+                              </button>
+                              <button
+                                onClick={() => handleExcluir(categoria.id)}
+                                className="rounded-lg p-2 text-slate-500 transition-colors hover:bg-red-500/10 hover:text-red-400"
+                                title="Excluir Categoria"
+                              >
+                                <Trash2 className="h-5 w-5" />
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </div>
                     );
                   })

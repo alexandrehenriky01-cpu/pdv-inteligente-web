@@ -12,11 +12,14 @@ export type TipoEtiquetaLayout =
   | 'CAIXA'
   | 'GENERICA';
 
+export type TipoAplicacaoEtiqueta = 'INTERNA' | 'ROTULO' | 'TESTEIRA';
+
 export interface LayoutEtiqueta {
   id?: string;
   nome: string;
   descricao?: string | null;
   tipoEtiqueta: TipoEtiquetaLayout;
+  tipoAplicacao: TipoAplicacaoEtiqueta;
   ativo?: boolean;
   larguraMm?: number | null;
   alturaMm?: number | null;
@@ -50,6 +53,7 @@ const LayoutEtiquetaFormModal: React.FC<Props> = ({
     nome: '',
     descricao: '',
     tipoEtiqueta: 'PRODUTO',
+    tipoAplicacao: 'ROTULO',
     ativo: true,
     larguraMm: null,
     alturaMm: null,
@@ -66,6 +70,7 @@ const LayoutEtiquetaFormModal: React.FC<Props> = ({
     if (layout) {
       setFormData({
         ...layout,
+        tipoAplicacao: layout.tipoAplicacao ?? 'ROTULO',
         // Garante que nulls virem strings vazias para os inputs controlados
         descricao: layout.descricao || '',
         observacao: layout.observacao || '',
@@ -102,7 +107,12 @@ const LayoutEtiquetaFormModal: React.FC<Props> = ({
     }
 
     if (!formData.tipoEtiqueta) {
-      setError('O tipo de etiqueta é obrigatório.');
+      setError('A categoria do layout é obrigatória.');
+      return;
+    }
+
+    if (!formData.tipoAplicacao) {
+      setError('O tipo do layout é obrigatório.');
       return;
     }
 
@@ -110,12 +120,19 @@ const LayoutEtiquetaFormModal: React.FC<Props> = ({
 
     try {
       const isEditing = !!layout?.id;
+
+      const payload = {
+        ...formData,
+        nome: String(formData.nome ?? '')
+          .trim()
+          .toUpperCase(),
+      };
       
       // ✅ CORREÇÃO: Adicionado o /api nas rotas e mantendo a instância 'api'
       if (isEditing) {
-        await api.put(`/api/layout-etiquetas/${layout.id}`, formData);
+        await api.put(`/api/layout-etiquetas/${layout.id}`, payload);
       } else {
-        await api.post(`/api/layout-etiquetas`, formData);
+        await api.post(`/api/layout-etiquetas`, payload);
       }
 
       await onSuccess();
@@ -172,22 +189,38 @@ const LayoutEtiquetaFormModal: React.FC<Props> = ({
 
           <form id="layout-form" onSubmit={handleSubmit} className="space-y-6">
             
-            {/* LINHA 1: Nome e Tipo */}
+            {/* LINHA 1: Nome */}
+            <div>
+              <label className={labelClass}>Nome do Layout *</label>
+              <input
+                type="text"
+                name="nome"
+                value={formData.nome || ''}
+                onChange={handleChange}
+                className={inputClass}
+                placeholder="Ex: Etiqueta Gôndola Padrão"
+                required
+              />
+            </div>
+
+            {/* LINHA 2: Tipo (físico) e Categoria operacional */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div>
-                <label className={labelClass}>Nome do Layout *</label>
-                <input
-                  type="text"
-                  name="nome"
-                  value={formData.nome || ''}
+                <label className={labelClass}>Tipo *</label>
+                <select
+                  name="tipoAplicacao"
+                  value={formData.tipoAplicacao ?? 'ROTULO'}
                   onChange={handleChange}
                   className={inputClass}
-                  placeholder="Ex: Etiqueta Gôndola Padrão"
                   required
-                />
+                >
+                  <option value="INTERNA">INTERNA</option>
+                  <option value="ROTULO">RÓTULO</option>
+                  <option value="TESTEIRA">TESTEIRA</option>
+                </select>
               </div>
               <div>
-                <label className={labelClass}>Tipo de Etiqueta *</label>
+                <label className={labelClass}>Categoria *</label>
                 <select
                   name="tipoEtiqueta"
                   value={formData.tipoEtiqueta}

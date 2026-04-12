@@ -111,8 +111,17 @@ export function PesagemProducao() {
         return;
       }
       try {
-        const res = await api.get<IEstacaoTrabalho>(`/api/estacoes-trabalho/${estacaoId}`);
-        setEstacaoAtual(res.data);
+        const res = await api.get(`/api/estacoes-trabalho/${estacaoId}`);
+        const raw = res.data as unknown;
+        const est: IEstacaoTrabalho =
+          raw &&
+          typeof raw === 'object' &&
+          raw !== null &&
+          'data' in raw &&
+          typeof (raw as { data: IEstacaoTrabalho }).data === 'object'
+            ? (raw as { data: IEstacaoTrabalho }).data
+            : (raw as IEstacaoTrabalho);
+        setEstacaoAtual(est);
       } catch (error) {
         console.error('Erro ao carregar estação de trabalho configurada', error);
       } finally {
