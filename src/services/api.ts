@@ -3,7 +3,7 @@ import axios, { InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'ax
 import { AUTH_TOKEN_KEY, clearStoredAuth } from './authStorage';
 
 export function resolveApiBaseUrl(): string {
-  const fallback = 'https://pdv-inteligente-api.onrender.com';
+  const fallback = 'https://pdv-inteligente-api.onrender.com';              
   const raw = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
   let base = raw && raw.length > 0 ? raw : fallback;
   base = base.replace(/\/+$/, '');
