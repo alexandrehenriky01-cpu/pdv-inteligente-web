@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../../services/api';
 import { Layout } from '../../components/Layout';
 import { Settings2, Plus, Edit2, ShieldAlert, CheckCircle2, XCircle } from 'lucide-react';
@@ -54,7 +54,7 @@ export function RegrasFiscais() {
 
   useEffect(() => { carregarRegras(); }, []);
 
-  const salvarRegra = async (e: React.FormEvent) => {
+  const salvarRegra = async (e: FormEvent) => {
     e.preventDefault();
     try {
       setLoading(true);

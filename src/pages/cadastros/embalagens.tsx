@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Layout } from '../../components/Layout';
 import { api } from '../../services/api';
 import { AxiosError } from 'axios';
@@ -132,7 +132,7 @@ export function Embalagens() {
   const carregarProdutos = useCallback(async () => {
     setLoadingProdutos(true);
     try {
-      const res = await api.get<IProdutoOpcao[]>('/api/produtos');
+      const res = await api.get<IProdutoOpcao[]>('/api/cadastros/produtos');
       setProdutos(Array.isArray(res.data) ? res.data : []);
     } catch (e) {
       console.error(e);
@@ -210,7 +210,7 @@ export function Embalagens() {
     );
   };
 
-  const handleSalvar = async (e: React.FormEvent) => {
+  const handleSalvar = async (e: FormEvent) => {
     e.preventDefault();
     if (!codigo.trim() || !nome.trim()) {
       alert('Código e nome são obrigatórios.');

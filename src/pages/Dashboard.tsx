@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Layout } from '../components/Layout';
 import { Link } from 'react-router-dom';
 import { api } from '../services/api';
@@ -18,9 +18,11 @@ import {
   BrainCircuit,
   BarChart2,
   CheckCircle2,
-  Info
+  Info,
+  Pizza
 } from 'lucide-react';
 import { AxiosError } from 'axios';
+import { auryaBrandMark } from '../assets/branding';
 
 interface ResumoDashboard {
   vendasHoje: number;
@@ -212,7 +214,14 @@ export function Dashboard() {
               </div>
             </div>
 
-            <div className="w-full md:w-auto">
+            <div className="flex w-full flex-col gap-2 md:w-auto md:items-end">
+              <Link
+                to="/dashboard-food"
+                className="group/btn relative flex w-full items-center justify-center gap-3 overflow-hidden rounded-2xl border border-orange-400/25 bg-gradient-to-r from-orange-600/90 to-violet-600/90 px-7 py-3.5 font-black text-white shadow-[0_0_24px_rgba(249,115,22,0.22)] transition-all hover:scale-[1.02] hover:brightness-110 md:w-auto"
+              >
+                <Pizza className="h-5 w-5 group-hover/btn:rotate-12 transition-transform" />
+                <span>BI Food Service</span>
+              </Link>
               <Link
                 to="/frente-caixa"
                 className="group/btn relative flex w-full items-center justify-center gap-3 overflow-hidden rounded-2xl border border-violet-400/20 bg-gradient-to-r from-violet-600 to-fuchsia-600 px-7 py-4 font-black text-white shadow-[0_0_30px_rgba(139,92,246,0.28)] transition-all hover:scale-[1.02] hover:brightness-110 md:w-auto"
@@ -235,7 +244,7 @@ export function Dashboard() {
 
             <div className="relative shrink-0">
               <img
-                src="/Aurya.jpeg"
+                src={auryaBrandMark}
                 alt="Aurya IA"
                 className={`h-20 w-20 rounded-full border-2 object-cover shadow-lg ${configAtual.border}`}
               />

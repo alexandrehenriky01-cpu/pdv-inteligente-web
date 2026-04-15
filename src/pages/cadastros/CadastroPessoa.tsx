@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Layout } from '../../components/Layout';
 import { api } from '../../services/api';
 import { AxiosError } from 'axios';
@@ -17,6 +17,7 @@ import {
   IndicadorIE,
 } from '../../types/pessoa';
 import { transformarParaMaiusculas } from '../../utils/formatters';
+import { auryaBrandMark } from '../../assets/branding';
 
 interface IContaPlanoResumo {
   id: string;
@@ -177,7 +178,7 @@ export function CadastroPessoa() {
     let cancelado = false;
     (async () => {
       try {
-        const res = await api.get<IContaPlanoResumo[]>('/api/contas-contabeis', {
+        const res = await api.get<IContaPlanoResumo[]>('/api/contabilidade/contas-contabeis', {
           params: { tipoConta: 'ANALITICA', limit: 2000 },
         });
         if (!cancelado) setContasAnaliticas(Array.isArray(res.data) ? res.data : []);
@@ -199,7 +200,7 @@ export function CadastroPessoa() {
   const carregarDados = async () => {
     setLoading(true);
     try {
-      const response = await api.get<IPessoa[]>('/api/pessoas', { 
+      const response = await api.get<IPessoa[]>('/api/cadastros/pessoas', { 
         params: { busca: termoBusca || undefined, tipo: tipoFiltro || undefined }
       });
       setPessoas(response.data);
@@ -369,9 +370,9 @@ export function CadastroPessoa() {
       console.log('Payload Pessoa:', payloadFinal);
 
       if (formData.id?.trim()) {
-        await api.put(`/api/pessoas/${formData.id}`, payloadFinal);
+        await api.put(`/api/cadastros/pessoas/${formData.id}`, payloadFinal);
       } else {
-        await api.post('/api/pessoas', payloadFinal);
+        await api.post('/api/cadastros/pessoas', payloadFinal);
       }
 
       alert(`✅ Parceiro salvo com sucesso!`);
@@ -413,7 +414,7 @@ export function CadastroPessoa() {
   const excluirPessoa = async (id: string) => {
     if(!window.confirm("Deseja realmente excluir este parceiro?")) return;
     try {
-      await api.delete(`/api/pessoas/${id}`);
+      await api.delete(`/api/cadastros/pessoas/${id}`);
       carregarDados();
     } catch (err) {
       const error = err as AxiosError<IApiError>;
@@ -496,7 +497,7 @@ export function CadastroPessoa() {
           </div>
         ) : pessoas.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center bg-[#08101f]/60 rounded-[30px] border border-white/10 border-dashed relative overflow-hidden group">
-            <img src="/Aurya.jpeg" alt="Aurya IA" className="w-24 h-24 rounded-full border-4 border-[#08101f] shadow-[0_0_30px_rgba(139,92,246,0.35)] mb-6" />
+            <img src={auryaBrandMark} alt="Aurya IA" className="w-24 h-24 rounded-full border-4 border-[#08101f] shadow-[0_0_30px_rgba(139,92,246,0.35)] mb-6" />
             <h3 className="text-3xl font-black text-white mb-2 tracking-tight">Vamos cadastrar seus parceiros com inteligência?</h3>
             <p className="text-slate-400 max-w-lg mb-8 text-lg">A Aurya analisa o CNPJ, preenche os dados fiscais e sugere limites de crédito automaticamente.</p>
             <button onClick={abrirModalNovo} className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white px-8 py-4 rounded-2xl font-black transition-all flex items-center gap-3 shadow-[0_0_20px_rgba(139,92,246,0.30)] hover:scale-[1.02]">

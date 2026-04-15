@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../../services/api';
 import { Layout } from '../../components/Layout';
@@ -196,7 +196,7 @@ export function EntradaNotas() {
     void (async () => {
       setCarregandoContasPlano(true);
       try {
-        const res = await api.get<IContaPlanoResumoNfe[]>('/api/contas-contabeis', {
+        const res = await api.get<IContaPlanoResumoNfe[]>('/api/contabilidade/contas-contabeis', {
           params: { tipoConta: 'ANALITICA', limit: 2000 },
         });
         if (!cancelado) setContasAnaliticasPlano(Array.isArray(res.data) ? res.data : []);
@@ -273,13 +273,13 @@ export function EntradaNotas() {
     }
   };
 
-  const handleUploadXml = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadXml = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     void processarArquivoXml(file);
   };
 
-  const handleDropXml = (e: React.DragEvent) => {
+  const handleDropXml = (e: DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setArrastandoXml(false);

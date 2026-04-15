@@ -1,5 +1,5 @@
-import React from 'react';
 
+import { type Dispatch, type SetStateAction } from 'react';
 export type TipoPessoa = 'FISICA' | 'JURIDICA' | 'CLIENTE' | 'FORNECEDOR' | 'AMBOS' | 'FUNCIONARIO';
 export type RegimeTributario = 'SIMPLES_NACIONAL' | 'LUCRO_PRESUMIDO' | 'LUCRO_REAL' | '';
 
@@ -97,7 +97,7 @@ export interface IApiError {
 
 export interface IFormPessoaProps {
   formData: IPessoa;
-  setFormData: React.Dispatch<React.SetStateAction<IPessoa>>;
+  setFormData: Dispatch<SetStateAction<IPessoa>>;
   inputClass: string;
   labelClass: string;
 }

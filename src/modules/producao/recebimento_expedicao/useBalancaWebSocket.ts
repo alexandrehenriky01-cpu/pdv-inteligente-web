@@ -1,5 +1,5 @@
+import { useEffect, useState } from 'react';
 // src/hooks/useBalancaWebSocket.ts
-import { useState, useEffect } from 'react';
 
 export function useBalancaWebSocket(url: string = 'ws://localhost:8080/balanca') {
   const [pesoBruto, setPesoBruto] = useState<number>(0);

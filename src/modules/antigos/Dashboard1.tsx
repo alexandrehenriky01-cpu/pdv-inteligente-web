@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Layout } from '../../components/Layout';
 import { Link } from 'react-router-dom';
 import { api } from '../../services/api';
@@ -20,7 +20,8 @@ import {
   CheckCircle2,
   Info
 } from 'lucide-react';
-import { AxiosError } from 'axios'; 
+import { AxiosError } from 'axios';
+import { auryaBrandMark } from '../../assets/branding';
 
 // 🛡️ INTERFACES DE TIPAGEM ESTRITA
 interface ResumoDashboard {
@@ -224,7 +225,7 @@ export function Dashboard() {
             </div>
             
             <div className="relative shrink-0">
-              <img src="/Aurya.jpeg" alt="Aurya IA" className={`w-20 h-20 rounded-full object-cover border-2 shadow-lg ${configAtual.border}`} />
+              <img src={auryaBrandMark} alt="Aurya IA" className={`w-20 h-20 rounded-full object-cover border-2 shadow-lg ${configAtual.border}`} />
               <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-green-500 rounded-full border-4 border-slate-900 animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.8)]"></div>
             </div>
 

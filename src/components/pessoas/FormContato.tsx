@@ -1,15 +1,15 @@
-import React from 'react';
+import { type ChangeEvent, type FC } from 'react';
 import { Phone, Mail, User, FileText } from 'lucide-react';
 import { IFormPessoaProps } from '../../types/pessoa';
 
-export const FormContato: React.FC<IFormPessoaProps> = ({
+export const FormContato: FC<IFormPessoaProps> = ({
   formData,
   setFormData,
   inputClass,
   labelClass,
 }) => {
   // 💡 MÁSCARA INTELIGENTE
-  const handleTelefoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleTelefoneChange = (e: ChangeEvent<HTMLInputElement>) => {
     let value = e.target.value.replace(/\D/g, '');
 
     if (value.length > 11) value = value.slice(0, 11);

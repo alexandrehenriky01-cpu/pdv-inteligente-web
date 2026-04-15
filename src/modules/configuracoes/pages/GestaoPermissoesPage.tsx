@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Layout } from '../../../components/Layout';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -102,7 +102,7 @@ export function GestaoPermissoesPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const { data } = await api.get<MatrizPermissoesResponse>('/api/permissoes/matriz');
+      const { data } = await api.get<MatrizPermissoesResponse>('/api/usuarios/matriz-permissoes');
       setModulos(data.modulos);
       setCargos(data.cargos);
       setPermissoes(data.permissoesPorCargo);
@@ -136,7 +136,7 @@ export function GestaoPermissoesPage() {
   const salvarPermissoes = async () => {
     setSaving(true);
     try {
-      await api.put('/api/configuracoes/permissoes', { permissoes });
+      await api.put('/api/usuarios/permissoes', { permissoes });
       alert('✅ Matriz de permissões atualizada com sucesso!');
       await carregarMatriz();
     } catch (error) {

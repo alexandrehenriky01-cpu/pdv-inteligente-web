@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { api } from '../services/api';
 import { Layout } from '../components/Layout';
 import { 
@@ -11,6 +11,7 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { AxiosError } from 'axios';
+import { auryaBrandMark } from '../assets/branding';
 
 // 🛡️ INTERFACE DE TIPAGEM ESTRITA PARA A RESPOSTA DA IA
 export interface IAnaliseIAResponse {
@@ -68,7 +69,7 @@ export function ConsultorIA() {
           <div className="flex flex-col md:flex-row items-center gap-6 relative z-10">
             
             <div className="relative shrink-0">
-              <img src="/Aurya.jpeg" className="w-24 h-24 rounded-full border border-violet-500/30 shadow-[0_0_30px_rgba(139,92,246,0.6)]" />
+              <img src={auryaBrandMark} className="w-24 h-24 rounded-full border border-violet-500/30 shadow-[0_0_30px_rgba(139,92,246,0.6)]" />
               
               <div className="absolute -bottom-1 -right-1 w-7 h-7 bg-emerald-500 rounded-full border-4 border-[#0b1020] flex items-center justify-center shadow-lg">
                 <Sparkles className="w-3 h-3 text-white" />

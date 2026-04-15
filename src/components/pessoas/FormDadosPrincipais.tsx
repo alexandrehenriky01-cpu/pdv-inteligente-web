@@ -1,3 +1,4 @@
+import { type FC } from 'react';
 import React, { useState } from 'react'; // 🚀 1. IMPORTAMOS O useState
 import {
   Sparkles,
@@ -13,6 +14,7 @@ import {
   IIASugestoes,
   TipoPessoa
 } from '../../types/pessoa';
+import { auryaBrandMark } from '../../assets/branding';
 
 interface IProps extends IFormPessoaProps {
   iaLoading: boolean;
@@ -20,7 +22,7 @@ interface IProps extends IFormPessoaProps {
   iaSugestoes: IIASugestoes | null;
 }
 
-export const FormDadosPrincipais: React.FC<IProps> = ({
+export const FormDadosPrincipais: FC<IProps> = ({
   formData,
   setFormData,
   inputClass,
@@ -51,7 +53,7 @@ export const FormDadosPrincipais: React.FC<IProps> = ({
 
               <div className="relative shrink-0 hidden sm:block">
                 <img
-                  src="/Aurya.jpeg"
+                  src={auryaBrandMark}
                   alt="Aurya"
                   className="w-14 h-14 rounded-full border-2 border-violet-500 shadow-[0_0_25px_rgba(139,92,246,0.5)]"
                 />

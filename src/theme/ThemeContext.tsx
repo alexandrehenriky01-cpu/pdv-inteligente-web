@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { getAuryaTheme, ThemeMode } from './themeTokens';
 
 interface ThemeContextValue {
@@ -20,7 +20,7 @@ function getInitialMode(): ThemeMode {
   return prefersDark ? 'dark' : 'light';
 }
 
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
+export function ThemeProvider({ children }: { children: ReactNode }) {
   const [mode, setModeState] = useState<ThemeMode>(getInitialMode);
 
   useEffect(() => {

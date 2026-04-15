@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import {
@@ -12,6 +12,7 @@ import { AxiosError } from 'axios';
 import { ILoginResponse, IAuthError } from '../types/auth';
 import { useAuth } from '../contexts/AuthContext';
 import { AUTH_TOKEN_KEY, AUTH_USER_KEY } from '../services/authStorage';
+import { auryaBrandMark } from '../assets/branding';
 
 export function Login() {
   const [email, setEmail] = useState<string>('');
@@ -80,7 +81,7 @@ export function Login() {
     return `scale(1.05) translate(${translateX}px, ${translateY}px)`;
   }, [mouseX, mouseY]);
 
-  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleLogin = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (loading || enteringPortal) return;
 
@@ -89,7 +90,7 @@ export function Login() {
 
     try {
       const loginValor = email.trim();
-      const response = await api.post<ILoginResponse>('/api/login', {
+      const response = await api.post<ILoginResponse>('/api/auth/login', {
         login: loginValor,
         identificacao: loginValor,
         senha,
@@ -160,7 +161,7 @@ export function Login() {
           <div className="relative block min-h-[330px] overflow-hidden border-b border-white/10 lg:hidden">
             <div className="absolute inset-0">
               <img
-                src="/Aurya.jpeg"
+                src={auryaBrandMark}
                 alt="Aurya"
                 className="absolute inset-0 h-full w-full object-cover object-[center_18%]"
               />
@@ -236,7 +237,7 @@ export function Login() {
           <div className="relative hidden min-h-[760px] overflow-hidden border-r border-white/10 lg:block">
             <div className="absolute inset-0">
               <img
-                src="/Aurya.jpeg"
+                src={auryaBrandMark}
                 alt="Aurya"
                 className="absolute inset-0 h-full w-full object-cover object-[center_20%] transition-transform duration-300 ease-out"
                 style={{ transform: imageTransform }}

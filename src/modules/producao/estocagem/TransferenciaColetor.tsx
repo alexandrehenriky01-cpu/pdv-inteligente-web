@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { ArrowRightLeft, MapPin, Package, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
 interface Notificacao {
@@ -27,7 +27,7 @@ export default function TransferenciaColetor() {
     }
   }, [notificacao]);
 
-  const handleSubmit = async (e?: React.FormEvent) => {
+  const handleSubmit = async (e?: FormEvent) => {
     if (e) e.preventDefault();
     
     if (!codigoLote || !codigoEnderecoDestino) {
@@ -84,7 +84,7 @@ export default function TransferenciaColetor() {
   };
 
   // UX de Coletor: Pula para o próximo campo ao bipar (o leitor envia Enter)
-  const handleLoteKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleLoteKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && codigoLote) {
       e.preventDefault();
       inputEnderecoRef.current?.focus();
@@ -92,7 +92,7 @@ export default function TransferenciaColetor() {
   };
 
   // UX de Coletor: Envia o formulário automaticamente ao bipar o endereço
-  const handleEnderecoKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleEnderecoKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && codigoLote && codigoEnderecoDestino) {
       e.preventDefault();
       handleSubmit();

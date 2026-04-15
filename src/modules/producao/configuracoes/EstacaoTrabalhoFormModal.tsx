@@ -1,3 +1,4 @@
+import { type FC } from 'react';
 // src/modules/producao/configuracoes/EstacaoTrabalhoFormModal.tsx
 
 import React, {
@@ -117,7 +118,7 @@ const getModoIcon = (modo: string) => {
   }
 };
 
-const EstacaoTrabalhoFormModal: React.FC<Props> = ({
+const EstacaoTrabalhoFormModal: FC<Props> = ({
   isOpen,
   onClose,
   estacao,

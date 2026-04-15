@@ -1,4 +1,4 @@
-import { ReactNode, useState, useEffect } from 'react';
+import { useEffect, useState, type ElementType, type ReactNode } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import {
   ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight,
@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 
 import { IUsuario } from '../../types/auth';
+import { auryaBrandMark } from '../../assets/branding';
 
 interface LayoutProps {
   children: ReactNode;
@@ -37,7 +38,7 @@ type MenuSectionId =
 
 interface MenuItemProps {
   to: string;
-  icon: React.ElementType;
+  icon: ElementType;
   label: string;
   target?: string;
   isAi?: boolean;
@@ -74,7 +75,7 @@ const MenuItem = ({ to, icon: Icon, label, target, isAi = false, isActive, colla
 interface SectionHeaderProps {
   id: MenuSectionId;
   title: string;
-  icon: React.ElementType;
+  icon: ElementType;
   isAi?: boolean;
   isOpen: boolean;
   collapsed: boolean;
@@ -168,7 +169,7 @@ export function Layout({ children }: LayoutProps) {
 
         <div className={`relative z-10 ${sidebarCollapsed ? 'px-3 py-5' : 'px-5 py-5'} border-b border-white/10 flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between gap-3'}`}>
           <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'gap-3'} min-w-0`}>
-            <img src="/Aurya.jpeg" alt="Aurya Logo" className="h-11 w-11 shrink-0 rounded-xl border border-violet-500/30 object-cover shadow-[0_0_20px_rgba(139,92,246,0.25)]" />
+            <img src={auryaBrandMark} alt="Aurya Logo" className="h-11 w-11 shrink-0 rounded-xl border border-violet-500/30 object-cover shadow-[0_0_20px_rgba(139,92,246,0.25)]" />
             {!sidebarCollapsed && (
               <div className="flex min-w-0 flex-col">
                 <span className="truncate bg-gradient-to-r from-violet-200 via-fuchsia-300 to-purple-400 bg-clip-text text-lg font-black tracking-[0.18em] text-transparent drop-shadow-[0_0_14px_rgba(139,92,246,0.35)]">AURYA</span>

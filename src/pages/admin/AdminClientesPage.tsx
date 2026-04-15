@@ -1,11 +1,120 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import { Layout } from '../../components/Layout';
 import { api } from '../../services/api';
 import {
   Building2, Plus, X, ShieldCheck, CheckCircle2,
-  User, Key, Mail, FileText, Loader2, Server, Settings, Save
+  User, Key, Mail, FileText, Loader2, Server, Settings, Save, ChevronDown, ChevronRight
 } from 'lucide-react';
 import { AxiosError } from 'axios';
+import { MODULES_CONFIG } from '../../config/permissions';
+
+interface SubModulo {
+  id: string;
+  nome: string;
+}
+
+interface ModuloHierarquico {
+  id: string;
+  nome: string;
+  subModulos?: SubModulo[];
+}
+
+const MODULOS_HIERARQUICOS: ModuloHierarquico[] = [
+  { id: 'ESTRUTURA', nome: 'Administrativo (Estrutura)', subModulos: [
+    { id: 'ESTRUTURA.PRODUTOS', nome: 'Produtos' },
+    { id: 'ESTRUTURA.CATEGORIAS', nome: 'Categorias' },
+    { id: 'ESTRUTURA.EMBALAGENS', nome: 'Embalagens (BOM)' },
+    { id: 'ESTRUTURA.PESSOAS', nome: 'Pessoas' },
+    { id: 'ESTRUTURA.EQUIPES', nome: 'Equipe' },
+    { id: 'ESTRUTURA.PERMISSOES', nome: 'Permissões' },
+    { id: 'ESTRUTURA.MINHA_LOJA', nome: 'Minha Loja' },
+    { id: 'ESTRUTURA.ETIQUETAS', nome: 'Layout Etiquetas' },
+    { id: 'ESTRUTURA.ESTACOES', nome: 'Estações de Trabalho' },
+    { id: 'ESTRUTURA.LOCAIS_COBRANCA', nome: 'Locais de Cobrança' },
+    { id: 'ESTRUTURA.CAIXAS_PDV', nome: 'Caixas PDV' },
+    { id: 'ESTRUTURA.TEF', nome: 'Gestão TEF' },
+    { id: 'ESTRUTURA.BALANCAS', nome: 'Balanças' },
+  ]},
+  { id: 'PDV', nome: 'Vendas PDV', subModulos: [
+    { id: 'PDV.VAREJO', nome: 'PDV Varejo' },
+    { id: 'PDV.AUTOATENDIMENTO', nome: 'Autoatendimento' },
+  ]},
+  { id: 'FOOD_SERVICE', nome: 'Food Service', subModulos: [
+    { id: 'FOOD_SERVICE.PDV', nome: 'PDV Food' },
+    { id: 'FOOD_SERVICE.AUTOATENDIMENTO', nome: 'Autoatendimento FOODS' },
+    { id: 'FOOD_SERVICE.CARDAPIOS', nome: 'Cadastro de Cardápio' },
+    { id: 'FOOD_SERVICE.KDS', nome: 'KDS (Cozinha)' },
+    { id: 'FOOD_SERVICE.DELIVERY', nome: 'Gestão Delivery/Pedidos' },
+    { id: 'FOOD_SERVICE.EXPEDICAO', nome: 'Gestão Food/Expedição' },
+    { id: 'FOOD_SERVICE.COMANDA_MOBILE', nome: 'Comanda Mobile' },
+    { id: 'FOOD_SERVICE.GARCOM', nome: 'Garçom (Mesas)' },
+    { id: 'FOOD_SERVICE.IFOOD', nome: 'Pedidos IFOOD' },
+  ]},
+  { id: 'COMERCIAL', nome: 'Comercial', subModulos: [
+    { id: 'COMERCIAL.CAMPANHAS', nome: 'Campanhas e Promoções' },
+    { id: 'COMERCIAL.LISTA_PRECO', nome: 'Listas de Preços' },
+    { id: 'COMERCIAL.CARGA_BALANCA', nome: 'Carga de Balanças' },
+  ]},
+  { id: 'COMPRAS', nome: 'Compras', subModulos: [
+    { id: 'COMPRAS.SOLICITACOES', nome: 'Solicitações' },
+    { id: 'COMPRAS.COTACOES', nome: 'Cotações' },
+    { id: 'COMPRAS.GER_COTACOES', nome: 'Gerenciar Cotações' },
+    { id: 'COMPRAS.APROVACAO', nome: 'Aprovação de Compras' },
+    { id: 'COMPRAS.PEDIDOS', nome: 'Pedidos' },
+    { id: 'COMPRAS.ACOMPANHAMENTO', nome: 'Acompanhamento P2P' },
+    { id: 'COMPRAS.PEDIDOS_RECEBIMENTO', nome: 'Pedidos de Recebimento' },
+    { id: 'COMPRAS.RECEBIMENTO', nome: 'Recebimento Mercadorias' },
+    { id: 'COMPRAS.DIVERGENCIAS', nome: 'Divergências' },
+    { id: 'COMPRAS.XML', nome: 'XML' },
+    { id: 'COMPRAS.NOTAS_ENTRADA', nome: 'Notas de Entrada' },
+    { id: 'COMPRAS.AURYA', nome: 'Análise Aurya' },
+  ]},
+  { id: 'ESTOQUE', nome: 'Estoque', subModulos: [
+    { id: 'ESTOQUE.AURYA', nome: 'Inteligência de Estoque' },
+    { id: 'ESTOQUE.GESTAO', nome: 'Gestão' },
+    { id: 'ESTOQUE.INVENTARIO', nome: 'Inventário' },
+    { id: 'ESTOQUE.BIPADOR', nome: 'Bipador' },
+    { id: 'ESTOQUE.LISTAS_PRECO', nome: 'Listas de Preços' },
+    { id: 'ESTOQUE.CARGA_BALANCAS', nome: 'Carga de Balanças' },
+  ]},
+  { id: 'WMS', nome: 'Logística WMS', subModulos: [
+    { id: 'WMS.RECEBIMENTO', nome: 'Recebimento (Doca)' },
+    { id: 'WMS.ARMAZENAGEM', nome: 'Armazenagem (Putaway)' },
+    { id: 'WMS.MAPA', nome: 'Mapa de Estoque' },
+    { id: 'WMS.CAMARAS', nome: 'Câmaras Frias & Áreas' },
+  ]},
+  { id: 'PRODUCAO', nome: 'Produção', subModulos: [
+    { id: 'PRODUCAO.ORDENS', nome: 'Ordens de Produção' },
+    { id: 'PRODUCAO.BALANCA', nome: 'Terminal de Balança' },
+  ]},
+  { id: 'FISCAL', nome: 'Fiscal', subModulos: [
+    { id: 'FISCAL.PDV', nome: 'Notas PDV' },
+    { id: 'FISCAL.NFE', nome: 'NF-e' },
+    { id: 'FISCAL.MOTOR', nome: 'Motor Fiscal' },
+    { id: 'FISCAL.CFOP', nome: 'CFOP' },
+  ]},
+  { id: 'FINANCEIRO', nome: 'Financeiro', subModulos: [
+    { id: 'FINANCEIRO.AURYA', nome: 'Aurya Análise Financeiro' },
+    { id: 'FINANCEIRO.TITULOS', nome: 'Títulos (Pagar/Receber)' },
+    { id: 'FINANCEIRO.CONTAS_CAIXAS', nome: 'Contas e Caixas' },
+    { id: 'FINANCEIRO.EXTRATO', nome: 'Extrato de Contas' },
+    { id: 'FINANCEIRO.CHEQUES', nome: 'Cheques' },
+  ]},
+  { id: 'CONTABIL', nome: 'Contabilidade', subModulos: [
+    { id: 'CONTABIL.AURYA', nome: 'Aurya Diagnóstico Contábil' },
+    { id: 'CONTABIL.DRE', nome: 'DRE' },
+    { id: 'CONTABIL.PLANO_CONTAS', nome: 'Plano de Contas' },
+    { id: 'CONTABIL.RAZAO', nome: 'Livro Razão' },
+    { id: 'CONTABIL.CONCILIACAO', nome: 'Conciliação' },
+    { id: 'CONTABIL.FECHAMENTO', nome: 'Fechamento Contábil' },
+  ]},
+  { id: 'IA', nome: 'Central Aurya', subModulos: [
+    { id: 'IA.INSIGHTS', nome: 'Insights' },
+    { id: 'IA.ALERTAS', nome: 'Alertas' },
+    { id: 'IA.OPORTUNIDADES', nome: 'Oportunidades' },
+  ]},
+  { id: 'DASHBOARD', nome: 'Dashboards' },
+];
 
 // 🛡️ INTERFACES DE TIPAGEM ESTRITA
 export interface ILojaAdmin {
@@ -13,9 +122,10 @@ export interface ILojaAdmin {
   nome: string;
   cnpj?: string;
   plano: string;
-  statusLicenca: 'ATIVA' | 'INATIVA' | 'BLOQUEADA' | string;
+  statusLicenca: 'ATIVA' | 'TRIAL' | 'INADIMPLENTE' | 'SUSPENSA' | 'CANCELADA';
   modulosAtivos: string[];
   limiteUsuarios: number;
+  limiteTerminais: number;
   _count?: {
     usuarios: number;
   };
@@ -29,6 +139,7 @@ export interface IFormDataNovoCliente {
   emailAdmin: string;
   senhaAdmin: string;
   modulosAtivos: string[];
+  limiteTerminais: number;
 }
 
 export function AdminClientesPage() {
@@ -41,6 +152,7 @@ export function AdminClientesPage() {
   const [isGerenciarModalOpen, setIsGerenciarModalOpen] = useState(false);
   const [lojaSelecionada, setLojaSelecionada] = useState<ILojaAdmin | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set());
   /** Redefinição de senha do dono (Master / suporte) — não persiste em `lojaSelecionada`. */
   const [novaSenhaDono, setNovaSenhaDono] = useState('');
 
@@ -51,18 +163,14 @@ export function AdminClientesPage() {
     nomeAdmin: '',
     emailAdmin: '',
     senhaAdmin: '',
-    modulosAtivos: ['PDV']
+    modulosAtivos: ['PDV'],
+    limiteTerminais: 1
   });
 
-  const modulosDisponiveis = [
-    { id: 'PDV', desc: 'Frente de Caixa e Vendas.' },
-    { id: 'FINANCEIRO', desc: 'Contas a Pagar, Receber e Caixas.' },
-    { id: 'CONTABIL', desc: 'DRE, Razão e Conciliação.' },
-    { id: 'ESTOQUE', desc: 'Inventário e Movimentações.' },
-    { id: 'COMPRAS', desc: 'Cotações, Pedidos e Auditoria de Doca.' },
-    { id: 'NFE', desc: 'Emissão de Notas Fiscais e XML.' },
-    { id: 'ESTRUTURA', desc: 'Cadastro de Produtos, Clientes e Fornecedores.' }
-  ];
+  const modulosDisponiveis = MODULES_CONFIG.map((m) => ({
+    id: m.id,
+    desc: m.label,
+  }));
 
   useEffect(() => {
     carregarClientes();
@@ -81,7 +189,7 @@ export function AdminClientesPage() {
     }
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleInputChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
@@ -94,7 +202,57 @@ export function AdminClientesPage() {
     });
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const toggleSubModulo = (subModuloId: string, moduloId: string) => {
+    setFormData(prev => {
+      const ativos = prev.modulosAtivos.includes(subModuloId)
+        ? prev.modulosAtivos.filter(m => m !== subModuloId)
+        : [...prev.modulosAtivos, subModuloId];
+      
+      if (!prev.modulosAtivos.includes(moduloId)) {
+        return { ...prev, modulosAtivos: [...ativos, moduloId] };
+      }
+      return { ...prev, modulosAtivos: ativos };
+    });
+  };
+
+  const toggleModuleExpansion = (moduloId: string) => {
+    setExpandedModules(prev => {
+      const next = new Set(prev);
+      if (next.has(moduloId)) {
+        next.delete(moduloId);
+      } else {
+        next.add(moduloId);
+      }
+      return next;
+    });
+  };
+
+  const isModuloActive = (moduloId: string, modulosAtivos: string[]) => modulosAtivos.includes(moduloId);
+
+  const isSubModuloActive = (subModuloId: string, modulosAtivos: string[]) => modulosAtivos.includes(subModuloId);
+
+  const isAllSubModulosActive = (modulo: ModuloHierarquico, modulosAtivos: string[]) => {
+    if (!modulo.subModulos || modulo.subModulos.length === 0) return false;
+    return modulo.subModulos.every(sm => modulosAtivos.includes(sm.id));
+  };
+
+  const toggleAllSubModulos = (modulo: ModuloHierarquico, setFunc: React.Dispatch<React.SetStateAction<IFormDataNovoCliente>>) => {
+    if (!modulo.subModulos) return;
+    setFunc(prev => {
+      const allActive = modulo.subModulos!.every(sm => prev.modulosAtivos.includes(sm.id));
+      let novos: string[];
+      if (allActive) {
+        novos = prev.modulosAtivos.filter(m => !modulo.subModulos!.map(sm => sm.id).includes(m));
+      } else {
+        const subs = modulo.subModulos.map(sm => sm.id);
+        const withoutParent = prev.modulosAtivos.filter(m => m !== modulo.id && !subs.includes(m));
+        novos = [...withoutParent, modulo.id, ...modulo.subModulos!.map(sm => sm.id)];
+      }
+      return { ...prev, modulosAtivos: novos };
+    });
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setSaving(true);
     try {
@@ -110,12 +268,14 @@ export function AdminClientesPage() {
         nomeAdmin: '',
         emailAdmin: '',
         senhaAdmin: '',
-        modulosAtivos: ['PDV']
+        modulosAtivos: ['PDV'],
+        limiteTerminais: 1
       });
 
       carregarClientes();
     } catch (err) {
       const error = err as AxiosError<{ error?: string }>;
+      console.error('Erro ao criar cliente:', error.response?.data || error.message);
       alert(`❌ Erro ao criar cliente: ${error.response?.data?.error || error.message}`);
     } finally {
       setSaving(false);
@@ -124,7 +284,10 @@ export function AdminClientesPage() {
 
   // 🚀 FUNÇÕES PARA GERENCIAR CLIENTE
   const abrirModalGerenciar = (loja: ILojaAdmin) => {
-    setLojaSelecionada({ ...loja }); // Cria uma cópia para não alterar a tabela antes de salvar
+    setLojaSelecionada({ 
+      ...loja, 
+      limiteTerminais: loja.limiteTerminais ?? 1 
+    }); // Cria uma cópia para não alterar a tabela antes de salvar
     setNovaSenhaDono('');
     setIsGerenciarModalOpen(true);
   };
@@ -134,9 +297,12 @@ export function AdminClientesPage() {
     setIsGerenciarModalOpen(false);
   };
 
-  const handleEditChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleEditChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     if (!lojaSelecionada) return;
-    setLojaSelecionada({ ...lojaSelecionada, [e.target.name]: e.target.value });
+    const value = e.target.name === 'limiteUsuarios' || e.target.name === 'limiteTerminais'
+      ? parseInt(e.target.value) || 0
+      : e.target.value;
+    setLojaSelecionada({ ...lojaSelecionada, [e.target.name]: value });
   };
 
   const toggleModuloEdit = (modulo: string) => {
@@ -147,7 +313,38 @@ export function AdminClientesPage() {
     setLojaSelecionada({ ...lojaSelecionada, modulosAtivos: ativos });
   };
 
-  const handleUpdateCliente = async (e: React.FormEvent) => {
+  const toggleSubModuloEdit = (subModuloId: string, moduloId: string) => {
+    if (!lojaSelecionada) return;
+    const ativos = lojaSelecionada.modulosAtivos.includes(subModuloId)
+      ? lojaSelecionada.modulosAtivos.filter(m => m !== subModuloId)
+      : [...lojaSelecionada.modulosAtivos, subModuloId];
+    
+    if (!lojaSelecionada.modulosAtivos.includes(moduloId)) {
+      setLojaSelecionada({ ...lojaSelecionada, modulosAtivos: [...ativos, moduloId] });
+    } else {
+      setLojaSelecionada({ ...lojaSelecionada, modulosAtivos: ativos });
+    }
+  };
+
+  const toggleAllSubModulosEdit = (modulo: ModuloHierarquico) => {
+    if (!modulo.subModulos || !lojaSelecionada) return;
+    const allActive = modulo.subModulos!.every(sm => lojaSelecionada.modulosAtivos.includes(sm.id));
+    setLojaSelecionada(prev => {
+      if (!prev) return prev;
+      const allActive = modulo.subModulos!.every(sm => prev.modulosAtivos.includes(sm.id));
+      let novos: string[];
+      if (allActive) {
+        novos = prev.modulosAtivos.filter(m => !modulo.subModulos!.map(sm => sm.id).includes(m));
+      } else {
+        const subs = modulo.subModulos.map(sm => sm.id);
+        const withoutParent = prev.modulosAtivos.filter(m => m !== modulo.id && !subs.includes(m));
+        novos = [...withoutParent, modulo.id, ...modulo.subModulos!.map(sm => sm.id)];
+      }
+      return { ...prev, modulosAtivos: novos };
+    });
+  };
+
+  const handleUpdateCliente = async (e: FormEvent) => {
     e.preventDefault();
     if (!lojaSelecionada) return;
 
@@ -159,12 +356,28 @@ export function AdminClientesPage() {
 
     setSavingEdit(true);
     try {
+      const modulosValidos = [
+        'PDV', 'FOOD_SERVICE', 'WMS', 'FINANCEIRO', 'CONTABIL', 'ESTOQUE',
+        'COMPRAS', 'NFE', 'ESTRUTURA', 'IA', 'FISCAL', 'COMERCIAL', 'PRODUCAO', 'DASHBOARD'
+      ];
+      
+      const isValidModule = (m: string): boolean => {
+        const upper = m.toUpperCase();
+        if (modulosValidos.includes(upper)) return true;
+        const parts = upper.split('.');
+        if (parts.length === 2 && modulosValidos.includes(parts[0])) return true;
+        return false;
+      };
+
+      const modulosAtivosFiltrados = (lojaSelecionada.modulosAtivos || []).filter(isValidModule);
+
       const payload: Record<string, unknown> = {
         nome: lojaSelecionada.nome,
         plano: lojaSelecionada.plano,
         statusLicenca: lojaSelecionada.statusLicenca,
-        modulosAtivos: lojaSelecionada.modulosAtivos,
-        limiteUsuarios: Number(lojaSelecionada.limiteUsuarios ?? 3),
+        modulosAtivos: modulosAtivosFiltrados.length > 0 ? modulosAtivosFiltrados : ['PDV', 'IA'],
+        limiteUsuarios: Number(lojaSelecionada.limiteUsuarios) || 3,
+        limiteTerminais: Number(lojaSelecionada.limiteTerminais) || 1,
       };
       if (senhaTrim.length >= 6) {
         payload.novaSenhaDono = senhaTrim;
@@ -181,6 +394,7 @@ export function AdminClientesPage() {
       carregarClientes(); // Recarrega a tabela com os novos dados
     } catch (err) {
       const error = err as AxiosError<{ error?: string }>;
+      console.error('Erro ao atualizar cliente:', error.response?.data || error.message);
       alert(`❌ Erro ao atualizar cliente: ${error.response?.data?.error || error.message}`);
     } finally {
       setSavingEdit(false);
@@ -290,6 +504,8 @@ export function AdminClientesPage() {
                               ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
                               : loja.statusLicenca === 'TRIAL'
                               ? 'bg-sky-500/10 text-sky-300 border-sky-500/20'
+                              : loja.statusLicenca === 'SUSPENSA'
+                              ? 'bg-slate-500/10 text-slate-300 border-slate-500/20'
                               : 'bg-red-500/10 text-red-300 border-red-500/20'
                           }`}>
                             {loja.statusLicenca}
@@ -415,6 +631,24 @@ export function AdminClientesPage() {
                             </select>
                           </div>
                         </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className={labelClass}>Qtd. de Estações (Terminais)</label>
+                            <div className="relative">
+                              <Server className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
+                              <input
+                                type="number"
+                                name="limiteTerminais"
+                                min={1}
+                                value={formData.limiteTerminais}
+                                onChange={(e) => setFormData({ ...formData, limiteTerminais: parseInt(e.target.value) || 1 })}
+                                className={`${inputClass} pl-12 font-mono`}
+                                placeholder="Ex: 5"
+                              />
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -487,48 +721,119 @@ export function AdminClientesPage() {
 
                     <div className="custom-scrollbar flex-1 overflow-y-auto pr-1">
                       <div className="grid grid-cols-1 gap-3">
-                        {modulosDisponiveis.map(modulo => {
-                          const isAtivo = formData.modulosAtivos.includes(modulo.id);
+                        {MODULOS_HIERARQUICOS.map(modulo => {
+                          const isAtivo = isModuloActive(modulo.id, formData.modulosAtivos);
+                          const isExpanded = expandedModules.has(modulo.id);
+                          const hasSubModulos = modulo.subModulos && modulo.subModulos.length > 0;
+                          const allSubActive = isAllSubModulosActive(modulo, formData.modulosAtivos);
 
                           return (
-                            <label
-                              key={modulo.id}
-                              className={`flex cursor-pointer items-center rounded-xl border p-4 transition-all ${
-                                isAtivo
-                                  ? 'border-violet-500/40 bg-violet-500/10 shadow-sm'
-                                  : 'border-white/10 bg-[#08101f] hover:border-white/20'
-                              }`}
-                            >
-                              <div
-                                className={`mr-4 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded border-2 transition-all ${
-                                  isAtivo
-                                    ? 'bg-violet-500 border-violet-300 shadow-[0_0_10px_rgba(139,92,246,0.35)]'
-                                    : 'border-white/10 bg-[#08101f]'
+                            <div key={modulo.id} className="rounded-xl border border-white/10 bg-[#08101f] overflow-hidden">
+                              <div 
+                                className={`flex cursor-pointer items-center p-4 transition-all ${
+                                  isAtivo ? 'bg-violet-500/10' : 'hover:bg-white/5'
                                 }`}
+                                onClick={() => hasSubModulos && toggleModuleExpansion(modulo.id)}
                               >
-                                {isAtivo && <CheckCircle2 className="h-4 w-4 text-white" />}
-                              </div>
+                                {hasSubModulos ? (
+                                  <button
+                                    type="button"
+                                    className="mr-3 flex h-6 w-6 items-center justify-center rounded border-2 border-white/10 bg-[#0b1324] transition-transform hover:border-violet-500/50"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleModuleExpansion(modulo.id);
+                                    }}
+                                  >
+                                    {isExpanded ? (
+                                      <ChevronDown className="h-4 w-4 text-violet-300" />
+                                    ) : (
+                                      <ChevronRight className="h-4 w-4 text-slate-400" />
+                                    )}
+                                  </button>
+                                ) : (
+                                  <div className="mr-3 w-6" />
+                                )}
 
-                              <div>
-                                <p
-                                  className={`text-sm font-black uppercase tracking-[0.16em] ${
-                                    isAtivo ? 'text-violet-300' : 'text-slate-300'
+                                <div
+                                  className={`mr-4 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded border-2 transition-all ${
+                                    isAtivo
+                                      ? 'bg-violet-500 border-violet-300 shadow-[0_0_10px_rgba(139,92,246,0.35)]'
+                                      : 'border-white/10 bg-[#08101f]'
                                   }`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (hasSubModulos) {
+                                      toggleAllSubModulos(modulo, setFormData);
+                                    } else {
+                                      toggleModulo(modulo.id);
+                                    }
+                                  }}
                                 >
-                                  Módulo {modulo.id}
-                                </p>
-                                <p className="mt-0.5 text-xs font-medium text-slate-400">
-                                  {modulo.desc}
-                                </p>
+                                  {isAtivo && <CheckCircle2 className="h-4 w-4 text-white" />}
+                                </div>
+
+                                <div className="flex-1">
+                                  <p
+                                    className={`text-sm font-black uppercase tracking-[0.16em] ${
+                                      isAtivo ? 'text-violet-300' : 'text-slate-300'
+                                    }`}
+                                  >
+                                    {modulo.nome}
+                                  </p>
+                                  {hasSubModulos && (
+                                    <p className="mt-0.5 text-xs font-medium text-slate-500">
+                                      {allSubActive ? 'Todos marcados' : 'Clique para expandir'}
+                                    </p>
+                                  )}
+                                </div>
+
+                                <input
+                                  type="checkbox"
+                                  className="hidden"
+                                  checked={isAtivo}
+                                  onChange={() => hasSubModulos ? toggleAllSubModulos(modulo, setFormData) : toggleModulo(modulo.id)}
+                                />
                               </div>
 
-                              <input
-                                type="checkbox"
-                                className="hidden"
-                                checked={isAtivo}
-                                onChange={() => toggleModulo(modulo.id)}
-                              />
-                            </label>
+                              {hasSubModulos && isExpanded && (
+                                <div className="border-t border-white/10 bg-[#0b1324]/50 p-3 pl-10">
+                                  <div className="grid grid-cols-1 gap-2">
+                                    {modulo.subModulos!.map(subModulo => {
+                                      const isSubAtivo = isSubModuloActive(subModulo.id, formData.modulosAtivos);
+                                      return (
+                                        <label
+                                          key={subModulo.id}
+                                          className={`flex cursor-pointer items-center rounded-lg border p-3 transition-all ${
+                                            isSubAtivo
+                                              ? 'border-violet-500/30 bg-violet-500/10'
+                                              : 'border-white/5 bg-[#08101f]/50 hover:border-white/20'
+                                          }`}
+                                        >
+                                          <div
+                                            className={`mr-3 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border-2 transition-all ${
+                                              isSubAtivo
+                                                ? 'bg-violet-500 border-violet-300'
+                                                : 'border-white/10 bg-[#0b1324]'
+                                            }`}
+                                          >
+                                            {isSubAtivo && <CheckCircle2 className="h-3.5 w-3.5 text-white" />}
+                                          </div>
+                                          <span className={`text-sm font-medium ${isSubAtivo ? 'text-violet-200' : 'text-slate-400'}`}>
+                                            {subModulo.nome}
+                                          </span>
+                                          <input
+                                            type="checkbox"
+                                            className="hidden"
+                                            checked={isSubAtivo}
+                                            onChange={() => toggleSubModulo(subModulo.id, modulo.id)}
+                                          />
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                           );
                         })}
                       </div>
@@ -617,12 +922,14 @@ export function AdminClientesPage() {
                               onChange={handleEditChange}
                               className={`${inputClass} font-black ${
                                 lojaSelecionada.statusLicenca === 'ATIVA' ? 'text-emerald-400' : 
-                                lojaSelecionada.statusLicenca === 'TRIAL' ? 'text-sky-400' : 'text-red-400'
+                                lojaSelecionada.statusLicenca === 'TRIAL' ? 'text-sky-400' : 
+                                lojaSelecionada.statusLicenca === 'SUSPENSA' ? 'text-slate-400' : 'text-red-400'
                               }`}
                             >
                               <option value="ATIVA" className="bg-[#0b1020] text-emerald-400">ATIVA</option>
-                              <option value="INATIVA" className="bg-[#0b1020] text-slate-400">INATIVA</option>
-                              <option value="BLOQUEADA" className="bg-[#0b1020] text-red-400">BLOQUEADA</option>
+                              <option value="SUSPENSA" className="bg-[#0b1020] text-slate-400">SUSPENSA</option>
+                              <option value="INADIMPLENTE" className="bg-[#0b1020] text-red-400">INADIMPLENTE</option>
+                              <option value="CANCELADA" className="bg-[#0b1020] text-red-400">CANCELADA</option>
                               <option value="TRIAL" className="bg-[#0b1020] text-sky-400">TRIAL</option>
                             </select>
                           </div>
@@ -652,6 +959,22 @@ export function AdminClientesPage() {
                               min="1"
                               name="limiteUsuarios"
                               value={lojaSelecionada.limiteUsuarios}
+                              onChange={handleEditChange}
+                              className={`${inputClass} pl-12`}
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className={labelClass}>Qtd. de Estações (Terminais)</label>
+                          <div className="relative">
+                            <Server className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
+                            <input
+                              required
+                              type="number"
+                              min="1"
+                              name="limiteTerminais"
+                              value={lojaSelecionada.limiteTerminais}
                               onChange={handleEditChange}
                               className={`${inputClass} pl-12`}
                             />
@@ -692,48 +1015,119 @@ export function AdminClientesPage() {
 
                     <div className="custom-scrollbar flex-1 overflow-y-auto pr-1">
                       <div className="grid grid-cols-1 gap-3">
-                        {modulosDisponiveis.map(modulo => {
-                          const isAtivo = lojaSelecionada.modulosAtivos.includes(modulo.id);
+                        {MODULOS_HIERARQUICOS.map(modulo => {
+                          const isAtivo = isModuloActive(modulo.id, lojaSelecionada.modulosAtivos);
+                          const isExpanded = expandedModules.has(modulo.id);
+                          const hasSubModulos = modulo.subModulos && modulo.subModulos.length > 0;
+                          const allSubActive = isAllSubModulosActive(modulo, lojaSelecionada.modulosAtivos);
 
                           return (
-                            <label
-                              key={modulo.id}
-                              className={`flex cursor-pointer items-center rounded-xl border p-4 transition-all ${
-                                isAtivo
-                                  ? 'border-emerald-500/40 bg-emerald-500/10 shadow-sm'
-                                  : 'border-white/10 bg-[#08101f] hover:border-white/20'
-                              }`}
-                            >
-                              <div
-                                className={`mr-4 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded border-2 transition-all ${
-                                  isAtivo
-                                    ? 'bg-emerald-500 border-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.35)]'
-                                    : 'border-white/10 bg-[#08101f]'
+                            <div key={modulo.id} className="rounded-xl border border-white/10 bg-[#08101f] overflow-hidden">
+                              <div 
+                                className={`flex cursor-pointer items-center p-4 transition-all ${
+                                  isAtivo ? 'bg-emerald-500/10' : 'hover:bg-white/5'
                                 }`}
+                                onClick={() => hasSubModulos && toggleModuleExpansion(modulo.id)}
                               >
-                                {isAtivo && <CheckCircle2 className="h-4 w-4 text-white" />}
-                              </div>
+                                {hasSubModulos ? (
+                                  <button
+                                    type="button"
+                                    className="mr-3 flex h-6 w-6 items-center justify-center rounded border-2 border-white/10 bg-[#0b1324] transition-transform hover:border-emerald-500/50"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleModuleExpansion(modulo.id);
+                                    }}
+                                  >
+                                    {isExpanded ? (
+                                      <ChevronDown className="h-4 w-4 text-emerald-300" />
+                                    ) : (
+                                      <ChevronRight className="h-4 w-4 text-slate-400" />
+                                    )}
+                                  </button>
+                                ) : (
+                                  <div className="mr-3 w-6" />
+                                )}
 
-                              <div>
-                                <p
-                                  className={`text-sm font-black uppercase tracking-[0.16em] ${
-                                    isAtivo ? 'text-emerald-300' : 'text-slate-300'
+                                <div
+                                  className={`mr-4 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded border-2 transition-all ${
+                                    isAtivo
+                                      ? 'bg-emerald-500 border-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.35)]'
+                                      : 'border-white/10 bg-[#08101f]'
                                   }`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (hasSubModulos) {
+                                      toggleAllSubModulosEdit(modulo);
+                                    } else {
+                                      toggleModuloEdit(modulo.id);
+                                    }
+                                  }}
                                 >
-                                  Módulo {modulo.id}
-                                </p>
-                                <p className="mt-0.5 text-xs font-medium text-slate-400">
-                                  {modulo.desc}
-                                </p>
+                                  {isAtivo && <CheckCircle2 className="h-4 w-4 text-white" />}
+                                </div>
+
+                                <div className="flex-1">
+                                  <p
+                                    className={`text-sm font-black uppercase tracking-[0.16em] ${
+                                      isAtivo ? 'text-emerald-300' : 'text-slate-300'
+                                    }`}
+                                  >
+                                    {modulo.nome}
+                                  </p>
+                                  {hasSubModulos && (
+                                    <p className="mt-0.5 text-xs font-medium text-slate-500">
+                                      {allSubActive ? 'Todos marcados' : 'Clique para expandir'}
+                                    </p>
+                                  )}
+                                </div>
+
+                                <input
+                                  type="checkbox"
+                                  className="hidden"
+                                  checked={isAtivo}
+                                  onChange={() => hasSubModulos ? toggleAllSubModulosEdit(modulo) : toggleModuloEdit(modulo.id)}
+                                />
                               </div>
 
-                              <input
-                                type="checkbox"
-                                className="hidden"
-                                checked={isAtivo}
-                                onChange={() => toggleModuloEdit(modulo.id)}
-                              />
-                            </label>
+                              {hasSubModulos && isExpanded && (
+                                <div className="border-t border-white/10 bg-[#0b1324]/50 p-3 pl-10">
+                                  <div className="grid grid-cols-1 gap-2">
+                                    {modulo.subModulos!.map(subModulo => {
+                                      const isSubAtivo = isSubModuloActive(subModulo.id, lojaSelecionada.modulosAtivos);
+                                      return (
+                                        <label
+                                          key={subModulo.id}
+                                          className={`flex cursor-pointer items-center rounded-lg border p-3 transition-all ${
+                                            isSubAtivo
+                                              ? 'border-emerald-500/30 bg-emerald-500/10'
+                                              : 'border-white/5 bg-[#08101f]/50 hover:border-white/20'
+                                          }`}
+                                        >
+                                          <div
+                                            className={`mr-3 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border-2 transition-all ${
+                                              isSubAtivo
+                                                ? 'bg-emerald-500 border-emerald-300'
+                                                : 'border-white/10 bg-[#0b1324]'
+                                            }`}
+                                          >
+                                            {isSubAtivo && <CheckCircle2 className="h-3.5 w-3.5 text-white" />}
+                                          </div>
+                                          <span className={`text-sm font-medium ${isSubAtivo ? 'text-emerald-200' : 'text-slate-400'}`}>
+                                            {subModulo.nome}
+                                          </span>
+                                          <input
+                                            type="checkbox"
+                                            className="hidden"
+                                            checked={isSubAtivo}
+                                            onChange={() => toggleSubModuloEdit(subModulo.id, modulo.id)}
+                                          />
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                           );
                         })}
                       </div>

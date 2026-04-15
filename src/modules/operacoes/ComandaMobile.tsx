@@ -1,18 +1,23 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
+import { MesaComandaPickerGrid } from '../mesas/MesaComandaPickerGrid';
+import { useMesas } from '../mesas/useMesas';
 import { 
-  UtensilsCrossed, Search, Plus, Minus, ShoppingCart, 
+  Search, Plus, Minus, 
   ArrowLeft, Check, Coffee, Pizza, Loader2, MessageSquareText, X
 } from 'lucide-react';
 import { AxiosError } from 'axios';
+import { getCardapioTotem } from '../../services/api/cardapioTotemApi';
 
 interface IProduto {
   id: string;
+  itemCardapioId: string;
+  produtoId: string;
   nome: string;
   codigo?: string; // 🚀 ADICIONADO: Novo Código Curto
   precoVenda: number;
-  categoria: { nome: string };
+  categoria: string;
 }
 
 interface IItemComanda extends IProduto {
@@ -29,6 +34,10 @@ export function ComandaMobile() {
   
   // Estados da Comanda
   const [mesaSelecionada, setMesaSelecionada] = useState<number | null>(null);
+  const { celulas, carregando: carregandoMesas } = useMesas({
+    enabled: !mesaSelecionada,
+    toastOnError: true,
+  });
   const [produtos, setProdutos] = useState<IProduto[]>([]);
   const [categorias, setCategorias] = useState<string[]>([]);
   const [categoriaAtiva, setCategoriaAtiva] = useState<string>('Todas');
@@ -46,9 +55,17 @@ export function ComandaMobile() {
   const carregarProdutos = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/api/produtos');
-      setProdutos(response.data);
-      const cats = Array.from(new Set(response.data.map((p: any) => p.categoria?.nome || 'Geral'))) as string[];
+      const { itens } = await getCardapioTotem();
+      const mapped: IProduto[] = itens.map((item) => ({
+        id: item.id,
+        itemCardapioId: item.id,
+        produtoId: item.produtoId,
+        nome: item.nome,
+        precoVenda: Number(item.precoVenda),
+        categoria: item.categoria || 'Geral',
+      }));
+      setProdutos(mapped);
+      const cats = Array.from(new Set(mapped.map((p) => p.categoria || 'Geral'))) as string[];
       setCategorias(['Todas', ...cats]);
     } catch (error) {
       console.error("Erro ao carregar produtos", error);
@@ -115,7 +132,15 @@ export function ComandaMobile() {
     setSalvando(true);
 
     try {
-      const response = await api.post(`/api/mesas/${mesaSelecionada}/adicionar`, { itens: carrinho });
+      const itensPayload = carrinho.map((item) => ({
+        produtoId: item.produtoId,
+        itemCardapioId: item.itemCardapioId,
+        quantidade: item.quantidade,
+        valorUnitario: item.precoVenda,
+        valorTotal: item.subtotal,
+        observacao: item.observacao,
+      }));
+      const response = await api.post(`/api/mesas/${mesaSelecionada}/adicionar`, { itens: itensPayload });
       
       alert(`✅ Pedido enviado para a Mesa ${mesaSelecionada}!`);
       
@@ -155,7 +180,7 @@ export function ComandaMobile() {
 
   // 🚀 ATUALIZADO: Agora filtra também pelo código curto
   const produtosFiltrados = produtos.filter(p => {
-    const matchCategoria = categoriaAtiva === 'Todas' || (p.categoria?.nome || 'Geral') === categoriaAtiva;
+    const matchCategoria = categoriaAtiva === 'Todas' || (p.categoria || 'Geral') === categoriaAtiva;
     const matchBusca = p.nome.toLowerCase().includes(busca.toLowerCase()) || 
                        p.codigo?.includes(busca); // Permite buscar pelo código curto
     return matchCategoria && matchBusca;
@@ -163,30 +188,12 @@ export function ComandaMobile() {
 
   if (!mesaSelecionada) {
     return (
-      <div className="min-h-screen bg-[#060816] text-slate-100 p-4 pb-20">
-        <div className="flex items-center gap-3 mb-6 pt-2">
-          <button onClick={() => navigate(-1)} className="p-2 bg-white/5 rounded-full text-slate-300 border border-white/10">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div>
-            <h1 className="text-xl font-black text-white">Comanda Digital</h1>
-            <p className="text-xs text-slate-400 uppercase tracking-widest">Selecione a Mesa</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-3">
-          {Array.from({ length: 20 }, (_, i) => i + 1).map(num => (
-            <button
-              key={num}
-              onClick={() => setMesaSelecionada(num)}
-              className="aspect-square bg-[#08101f] border border-white/10 rounded-2xl flex flex-col items-center justify-center gap-1 active:scale-95 transition-transform hover:bg-white/5"
-            >
-              <UtensilsCrossed className="w-6 h-6 text-violet-300 mb-1" />
-              <span className="text-2xl font-black text-white">{num}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+      <MesaComandaPickerGrid
+        celulas={celulas}
+        carregando={carregandoMesas}
+        onBack={() => navigate(-1)}
+        onSelectMesa={setMesaSelecionada}
+      />
     );
   }
 
@@ -252,7 +259,7 @@ export function ComandaMobile() {
               <div key={produto.id} className="bg-[#08101f] border border-white/10 rounded-2xl p-3 flex flex-col gap-2 shadow-[0_10px_30px_rgba(0,0,0,0.20)]">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 bg-[#0b1324] rounded-xl flex items-center justify-center shrink-0 border border-white/10">
-                    {produto.categoria?.nome?.toLowerCase().includes('bebida') ? <Coffee className="w-5 h-5 text-violet-300" /> : <Pizza className="w-5 h-5 text-amber-300" />}
+                    {produto.categoria?.toLowerCase().includes('bebida') ? <Coffee className="w-5 h-5 text-violet-300" /> : <Pizza className="w-5 h-5 text-amber-300" />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="text-sm font-bold text-white truncate">

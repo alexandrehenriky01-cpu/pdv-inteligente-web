@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Layout } from '../../components/Layout';
 import { api } from '../../services/api';
 import { TefPinpadModal } from './TefPinpadModal';
 import { 
   Search, Plus, Trash2, BrainCircuit, Sparkles, 
-  TrendingUp, Flame, Star, QrCode, CreditCard, 
+  TrendingUp, Flame, Star, QrCode, CreditCard, Tag,
   Banknote, ArrowRight, ShieldCheck, AlertTriangle, ExternalLink,
   Loader2, Lock, Clock, ListOrdered, PauseCircle, PlayCircle, X, ShieldAlert, Key, Keyboard, Power
 } from 'lucide-react';
@@ -13,7 +13,26 @@ import { toast } from 'react-toastify';
 import { IUsuario } from '../../types/auth';
 import { useHardwareAgent } from '../../hooks/useHardwareAgent';
 import { getHardwareAgent } from '../../services/hardwareAgent';
-import { montarCupomTextoPlano } from './cupomPdvTexto'; 
+import {
+  tefCancelarAutorizacaoPendente,
+  tefFalhaSalvarVendaCnc,
+  tefPosVendaSucessoCnc,
+} from '../../services/tefCncFlow';
+import { montarCupomTextoPlano } from './cupomPdvTexto';
+import { PagamentoValorParcialModal } from './PagamentoValorParcialModal';
+import { FechamentoCaixaModal } from './FechamentoCaixaModal';
+import { parseValorMonetarioPdv, validarValorParcialPdv } from './pdvPagamentoParcialUtils';
+import { parseBarcode } from '../../utils/barcodeParser';
+import {
+  descobrirEstacaoPorIp,
+  getCaixaFiscalIdPdv,
+  getEstacaoTrabalhoIdPdv,
+  getNomeEstacaoExibicaoPdv,
+  getTerminalFiscalPdv,
+  montarUrlVerificarCaixa,
+  persistirContextoPosAberturaCaixa,
+  persistirTerminalFiscalPdv,
+} from '../../utils/estacaoWorkstationStorage';
 
 export interface IProdutoPDV {
   id: string;
@@ -33,6 +52,10 @@ export interface IProdutoPDV {
 export interface IItemCarrinho extends IProdutoPDV {
   quantidade: number;
   subtotal: number;
+  /** Preço unitário da tabela de preços (base antes do motor de promoções). */
+  precoUnitarioBase?: number;
+  promocaoAplicada?: boolean;
+  promocaoResumo?: string;
 }
 
 export interface IClientePDV {
@@ -56,7 +79,9 @@ export interface IUsuarioStorage extends IUsuario {
 export interface IPayloadVendaPDV {
   sessaoCaixaId: string; 
   clienteId?: string;
-  terminal?: string; 
+  terminal?: string;
+  estacaoTrabalhoId?: string;
+  caixaFiscalId?: string;
   itens: Array<{
     produtoId: string;
     quantidade: number;
@@ -66,6 +91,9 @@ export interface IPayloadVendaPDV {
     tipoPagamento: string;
     valor: number;
     transacaoTefId?: string;
+    /** POS = manual; TEF = PinPad — usado no ERP para escolher adquirente do caixa. */
+    canalAdquirente?: 'POS' | 'TEF';
+    parcelas?: Array<{ numero: number; valor: number; vencimento: string }>;
   }>;
   tipoPagamento: string;
   formaPagamento: string;
@@ -77,6 +105,18 @@ export interface IPayloadVendaPDV {
     valor: number;
     vencimento: string;
   }>;
+  /** Comprovante SiTef filtrado (agente); usado no pacote único de impressão pós-NFC-e. */
+  comprovanteTefLimpo?: string;
+}
+
+/** Linha já confirmada (pagamento parcial / misto) antes de finalizar a venda. */
+export interface LinhaPagamentoCaixaAcumulada {
+  id: string;
+  tipoPagamentoApi: string;
+  valor: number;
+  transacaoTefId?: string;
+  canalAdquirente?: 'POS' | 'TEF';
+  parcelas?: IPayloadVendaPDV['parcelas'];
 }
 
 export interface ISessaoCaixa {
@@ -84,15 +124,85 @@ export interface ISessaoCaixa {
   status: string;
   saldoAbertura: number;
   dataAbertura: string;
+  /** Identificador fiscal da sessão (ex.: nome do caixa na estação) — gravado pelo backend na abertura. */
+  terminal?: string | null;
 }
 
 export type FormaPagamentoPDV =
   | 'PIX'
   | 'CARTAO_DEBITO'
+  | 'CARTAO_CREDITO'
   | 'DINHEIRO'
   | 'CREDIARIO'
   | 'CARTAO_CREDITO_TEF'
   | 'CARTAO_DEBITO_TEF';
+
+type AlvoModalPagamentoParcialCaixa =
+  | { kind: 'sem_tef'; forma: Exclude<FormaPagamentoPDV, 'CARTAO_CREDITO_TEF' | 'CARTAO_DEBITO_TEF'> }
+  | { kind: 'tef'; cartao: 'CREDITO' | 'DEBITO' };
+
+function novoIdLinhaPdv(): string {
+  if (
+    typeof globalThis.crypto !== 'undefined' &&
+    typeof globalThis.crypto.randomUUID === 'function'
+  ) {
+    return globalThis.crypto.randomUUID();
+  }
+  return `pdv-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+/** Query obrigatória do PDV: origem=PDV força resolução estrita de preço na API (sem preço legado). */
+function montarQueryProdutos(busca?: string, codigoBalanca?: number): string {
+  const q = new URLSearchParams();
+  q.set('origem', 'PDV');
+  if (codigoBalanca !== undefined && Number.isFinite(codigoBalanca)) {
+    q.set('codigoBalanca', String(Math.trunc(codigoBalanca)));
+  }
+  if (busca !== undefined && busca.trim() !== '') {
+    q.set('busca', busca.trim());
+  }
+  const est = getEstacaoTrabalhoIdPdv();
+  if (est) {
+    q.set('estacaoTrabalhoId', est);
+  }
+  return `?${q.toString()}`;
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function round3(n: number): number {
+  return Math.round(n * 1000) / 1000;
+}
+
+export interface AdicionarItemPdvOpts {
+  /** Etiqueta de balança: quantidade em kg e subtotal = valor da etiqueta. */
+  linhaBalcao?: { kg: number; valorTotalReais: number };
+}
+
+/** Bip curto de erro (Web Audio API) — falha silenciosa se o navegador bloquear áudio. */
+function tocarSomErroPdv(): void {
+  try {
+    const AC =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const ctx = new AC();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 220;
+    osc.type = 'sawtooth';
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.22);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.22);
+    ctx.resume?.().catch(() => undefined);
+  } catch {
+    /* sem áudio */
+  }
+}
 
 export interface IVendaPendente {
   id: string;
@@ -108,19 +218,60 @@ export interface IVendaPendente {
   }>;
 }
 
+type PdvEstacaoDiscovery = 'ready' | 'loading' | 'unknown_ip' | 'erro_rede';
+
 export function FrenteCaixa() {
+  const [estacaoDiscovery, setEstacaoDiscovery] = useState<PdvEstacaoDiscovery>(() =>
+    getEstacaoTrabalhoIdPdv() ? 'ready' : 'loading'
+  );
+
+  useEffect(() => {
+    if (getEstacaoTrabalhoIdPdv()) {
+      setEstacaoDiscovery('ready');
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const r = await descobrirEstacaoPorIp(api);
+      if (cancelled) return;
+      if (r === 'ja_configurado' || r === 'descoberto') setEstacaoDiscovery('ready');
+      else if (r === 'nao_cadastrado') setEstacaoDiscovery('unknown_ip');
+      else setEstacaoDiscovery('erro_rede');
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const tentarDescobrirEstacaoNovamente = () => {
+    setEstacaoDiscovery('loading');
+    void (async () => {
+      const r = await descobrirEstacaoPorIp(api);
+      if (r === 'ja_configurado' || r === 'descoberto') setEstacaoDiscovery('ready');
+      else if (r === 'nao_cadastrado') setEstacaoDiscovery('unknown_ip');
+      else setEstacaoDiscovery('erro_rede');
+    })();
+  };
+
+  /** Sem estação resolvida (IP + retaguarda) = PDV bloqueado. */
+  const pdvTerminalBloqueado = estacaoDiscovery !== 'ready';
+
   const [busca, setBusca] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [produtosFiltrados, setProdutosFiltrados] = useState<IProdutoPDV[]>([]);
   const [carrinho, setCarrinho] = useState<IItemCarrinho[]>([]);
   
-  const [formaPagamento, setFormaPagamento] = useState<FormaPagamentoPDV>('PIX');
-  const [transacaoTefId, setTransacaoTefId] = useState<string | null>(null);
+  const [linhasPagamento, setLinhasPagamento] = useState<LinhaPagamentoCaixaAcumulada[]>([]);
+  const [modalParcialAberto, setModalParcialAberto] = useState(false);
+  const [alvoModalParcial, setAlvoModalParcial] = useState<AlvoModalPagamentoParcialCaixa | null>(
+    null
+  );
+  const [campoValorParcial, setCampoValorParcial] = useState('');
+  const [erroModalParcial, setErroModalParcial] = useState<string | null>(null);
   const [modalPinpadTef, setModalPinpadTef] = useState(false);
   const [tefCarregando, setTefCarregando] = useState(false);
   const [tefErroModal, setTefErroModal] = useState<string | null>(null);
   const [tefStatusMensagem, setTefStatusMensagem] = useState<string | null>(null);
-  const [valorRecebido, setValorRecebido] = useState<string>('');
   const [finalizando, setFinalizando] = useState(false);
   const [descontoVenda, setDescontoVenda] = useState<number>(0); 
   const [valorDescontoInput, setValorDescontoInput] = useState<string>('');
@@ -139,8 +290,6 @@ export function FrenteCaixa() {
   const [abrindoCaixa, setAbrindoCaixa] = useState(false);
   
   const [modalFechamento, setModalFechamento] = useState(false);
-  const [valorFechamento, setValorFechamento] = useState('');
-  const [fechandoCaixa, setFechandoCaixa] = useState(false);
 
   const [modalVendasEspera, setModalVendasEspera] = useState(false);
   const [vendasPendentes, setVendasPendentes] = useState<IVendaPendente[]>([]);
@@ -152,11 +301,26 @@ export function FrenteCaixa() {
   const [acaoPendente, setAcaoPendente] = useState<(() => void) | null>(null);
   const [validandoSupervisor, setValidandoSupervisor] = useState(false);
 
-  const [terminalAtivo, setTerminalAtivo] = useState<string>('Carregando...'); 
+  const [terminalAtivo, setTerminalAtivo] = useState<string>(() => {
+    const nome = getNomeEstacaoExibicaoPdv();
+    const term = getTerminalFiscalPdv();
+    return nome?.trim() || term?.trim() || 'Carregando...';
+  });
 
   const buscaInputRef = useRef<HTMLInputElement>(null);
   const senhaSupervisorRef = useRef<HTMLInputElement>(null);
   const tefWsUnsubRef = useRef<(() => void) | null>(null);
+  const tefComprovanteLimpoRef = useRef<string | null>(null);
+  const tefComprovantePorTidRef = useRef<Map<string, string>>(new Map());
+  const carrinhoRef = useRef<IItemCarrinho[]>([]);
+  const calcPromoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [recalculandoPromocoes, setRecalculandoPromocoes] = useState(false);
+  const [resumoPromo, setResumoPromo] = useState<{
+    totalBruto: number;
+    totalDescontoPromocoes: number;
+    totalLiquido: number;
+  } | null>(null);
 
   const { connected: hardwareConectado, send: enviarHardware } = useHardwareAgent();
 
@@ -178,22 +342,21 @@ export function FrenteCaixa() {
   }
 
   useEffect(() => {
-    let nomeTerminal = localStorage.getItem('@PDV_Terminal_Name');
-    if (!nomeTerminal) {
-      nomeTerminal = prompt("Bem-vindo! Identifique esta máquina para o PDV.\nEx: Caixa 01, Terminal Balcão, etc.");
-      if (!nomeTerminal || nomeTerminal.trim() === '') {
-        nomeTerminal = `Terminal-${Math.floor(Math.random() * 10000)}`;
-      }
-      localStorage.setItem('@PDV_Terminal_Name', nomeTerminal);
+    if (pdvTerminalBloqueado) {
+      setTerminalAtivo('—');
+      return;
     }
-    setTerminalAtivo(nomeTerminal);
-  }, []);
+    const nome = getNomeEstacaoExibicaoPdv()?.trim();
+    const term = getTerminalFiscalPdv()?.trim();
+    setTerminalAtivo(nome || term || 'Estação identificada — abra o caixa');
+  }, [pdvTerminalBloqueado, estacaoDiscovery]);
 
   useEffect(() => {
-    verificarCaixa(); 
+    if (pdvTerminalBloqueado) return;
+    verificarCaixa();
     carregarClientes();
     carregarProdutosEstrategicos();
-  }, []);
+  }, [pdvTerminalBloqueado]);
 
   useEffect(() => {
     return () => {
@@ -208,11 +371,150 @@ export function FrenteCaixa() {
     }
   }, [modalSupervisor]);
 
+  carrinhoRef.current = carrinho;
+
+  const assinaturaCarrinhoPromo = useMemo(
+    () =>
+      JSON.stringify(
+        carrinho.map((i) => ({
+          id: i.id,
+          q: i.quantidade,
+          b: round2(Number(i.precoUnitarioBase ?? i.precoVenda)),
+        }))
+      ),
+    [carrinho]
+  );
+
+  useEffect(() => {
+    if (pdvTerminalBloqueado) {
+      if (calcPromoTimerRef.current) {
+        clearTimeout(calcPromoTimerRef.current);
+        calcPromoTimerRef.current = null;
+      }
+      setResumoPromo(null);
+      return;
+    }
+
+    if (calcPromoTimerRef.current) {
+      clearTimeout(calcPromoTimerRef.current);
+      calcPromoTimerRef.current = null;
+    }
+
+    if (carrinhoRef.current.length === 0) {
+      setResumoPromo(null);
+      return;
+    }
+
+    calcPromoTimerRef.current = setTimeout(async () => {
+      calcPromoTimerRef.current = null;
+      setRecalculandoPromocoes(true);
+      try {
+        const atual = carrinhoRef.current;
+        const payload = {
+          clienteId: clienteSelecionado || undefined,
+          itens: atual.map((item) => ({
+            produtoId: item.id,
+            quantidade: item.quantidade,
+            precoUnitarioBase: round2(Number(item.precoUnitarioBase ?? item.precoVenda)),
+          })),
+        };
+        const { data } = await api.post<{
+          sucesso: boolean;
+          dados?: {
+            itens: Array<{
+              produtoId: string;
+              precoUnitarioBase: number;
+              precoUnitarioFinal: number;
+              subtotal: number;
+              promocaoAplicada: boolean;
+              campanhaNome?: string;
+              regraTipo?: string;
+            }>;
+            totalBruto: number;
+            totalDescontoPromocoes: number;
+            totalLiquido: number;
+          };
+          erro?: string;
+        }>('/api/vendas/calcular-carrinho', payload);
+
+        if (!data.sucesso || !data.dados) {
+          throw new Error(data.erro || 'Falha ao calcular promoções.');
+        }
+
+        setResumoPromo({
+          totalBruto: data.dados.totalBruto,
+          totalDescontoPromocoes: data.dados.totalDescontoPromocoes,
+          totalLiquido: data.dados.totalLiquido,
+        });
+
+        setCarrinho((prev) =>
+          prev.map((item) => {
+            const hit = data.dados!.itens.find((i) => i.produtoId === item.id);
+            if (!hit) return item;
+            const resumo =
+              hit.promocaoAplicada && (hit.campanhaNome || hit.regraTipo)
+                ? [hit.campanhaNome, hit.regraTipo].filter(Boolean).join(' · ')
+                : undefined;
+            return {
+              ...item,
+              precoUnitarioBase: hit.precoUnitarioBase,
+              precoVenda: hit.precoUnitarioFinal,
+              subtotal: hit.subtotal,
+              promocaoAplicada: hit.promocaoAplicada,
+              promocaoResumo: resumo,
+            };
+          })
+        );
+      } catch (e) {
+        console.error('calcular-carrinho:', e);
+        setResumoPromo(null);
+        setCarrinho((prev) =>
+          prev.map((item) => {
+            const base = round2(Number(item.precoUnitarioBase ?? item.precoVenda));
+            return {
+              ...item,
+              precoVenda: base,
+              subtotal: round2(item.quantidade * base),
+              promocaoAplicada: false,
+              promocaoResumo: undefined,
+            };
+          })
+        );
+      } finally {
+        setRecalculandoPromocoes(false);
+      }
+    }, 300);
+
+    return () => {
+      if (calcPromoTimerRef.current) {
+        clearTimeout(calcPromoTimerRef.current);
+        calcPromoTimerRef.current = null;
+      }
+    };
+  }, [assinaturaCarrinhoPromo, clienteSelecionado, pdvTerminalBloqueado]);
+
+  useEffect(() => {
+    setLinhasPagamento([]);
+    tefComprovantePorTidRef.current = new Map();
+    tefComprovanteLimpoRef.current = null;
+    setModalParcialAberto(false);
+    setAlvoModalParcial(null);
+    setCampoValorParcial('');
+    setErroModalParcial(null);
+  }, [assinaturaCarrinhoPromo, descontoVenda]);
+
   const verificarCaixa = async () => {
     try {
-      const response = await api.get<ISessaoCaixa>('/api/pdv/caixa/verificar');
+      const urlVerificar = montarUrlVerificarCaixa() ?? '/api/pdv/caixa/verificar';
+      const response = await api.get<ISessaoCaixa | null>(urlVerificar);
       if (response.data) {
         setSessaoCaixa(response.data);
+        const term = response.data.terminal?.trim();
+        if (term) {
+          persistirTerminalFiscalPdv(term);
+          const label = getNomeEstacaoExibicaoPdv()?.trim();
+          setTerminalAtivo(label || term);
+        }
         buscaInputRef.current?.focus();
       } else {
         setModalCaixaAberto(true); 
@@ -224,13 +526,31 @@ export function FrenteCaixa() {
 
   const abrirCaixa = async () => {
     if (!fundoTroco || isNaN(Number(fundoTroco))) return alert("Informe um valor válido para o Fundo de Troco.");
+    const estId = getEstacaoTrabalhoIdPdv()?.trim();
+    if (!estId) {
+      return alert(
+        'Estação de trabalho não identificada neste terminal. Cadastre o IP em Estações de Trabalho ou abra o turno pela Gestão de Caixas e Turnos neste mesmo navegador.'
+      );
+    }
     setAbrindoCaixa(true);
     try {
-      const response = await api.post<ISessaoCaixa>('/api/pdv/caixa/abrir', {
+      const response = await api.post<ISessaoCaixa>('/api/pdv/caixa/abrir-manual', {
+        estacaoTrabalhoId: estId,
         saldoAbertura: Number(fundoTroco),
-        observacao: "Abertura Padrão",
-        terminal: terminalAtivo 
+        observacao: 'Abertura PDV — terminal vinculado à estação',
       });
+      const term = response.data?.terminal?.trim() ?? '';
+      if (term) {
+        persistirContextoPosAberturaCaixa({
+          estacaoTrabalhoId: estId,
+          nomeEstacao: getNomeEstacaoExibicaoPdv(),
+          caixaFiscalId: getCaixaFiscalIdPdv(),
+          terminalResolvido: term,
+          sessaoCaixaId: response.data?.id,
+        });
+        const label = getNomeEstacaoExibicaoPdv()?.trim();
+        setTerminalAtivo(label || term);
+      }
       setSessaoCaixa(response.data);
       setModalCaixaAberto(false);
       setFundoTroco('');
@@ -247,31 +567,7 @@ export function FrenteCaixa() {
     if (carrinho.length > 0) {
       return alert("Você possui itens no carrinho! Finalize, pause ou cancele a venda atual antes de fechar o caixa.");
     }
-    setValorFechamento('');
     setModalFechamento(true);
-  };
-
-  const executarFechamentoCaixa = async () => {
-    if (!sessaoCaixa) return;
-    if (!valorFechamento || isNaN(Number(valorFechamento))) return alert("Informe o valor físico contado na gaveta.");
-
-    setFechandoCaixa(true);
-    try {
-      await api.put(`/api/pdv/caixa/${sessaoCaixa.id}/fechar`, {
-        saldoFechamento: Number(valorFechamento),
-        observacao: "Fechamento pelo PDV - Contagem Cega"
-      });
-      
-      alert("✅ Caixa fechado com sucesso! Turno encerrado.");
-      setSessaoCaixa(null);
-      setModalFechamento(false);
-      setModalCaixaAberto(true); 
-    } catch (err) {
-      const error = err as AxiosError<{error?: string}>;
-      alert(`❌ Erro: ${error.response?.data?.error || "Não foi possível fechar o caixa."}`);
-    } finally {
-      setFechandoCaixa(false);
-    }
   };
 
   const solicitarAutorizacao = (acao: () => void) => {
@@ -332,7 +628,8 @@ export function FrenteCaixa() {
       setCarrinho([]);
       setBusca('');
       setClienteSelecionado('');
-      setValorRecebido('');
+      setLinhasPagamento([]);
+      tefComprovantePorTidRef.current = new Map();
       setDescontoVenda(0);
       setValorDescontoInput('');
       alert("✅ Venda colocada em espera!");
@@ -368,10 +665,12 @@ export function FrenteCaixa() {
       if (item.id === id) {
         const novaQuantidade = item.quantidade + delta;
         if (novaQuantidade <= 0) return item; 
+        const base = round2(Number(item.precoUnitarioBase ?? item.precoVenda));
         return {
           ...item,
           quantidade: novaQuantidade,
-          subtotal: novaQuantidade * Number(item.precoVenda)
+          precoUnitarioBase: item.precoUnitarioBase ?? base,
+          subtotal: round2(novaQuantidade * base),
         };
       }
       return item;
@@ -384,7 +683,13 @@ export function FrenteCaixa() {
     
     const valorNum = Number(valorDescontoInput.replace(',', '.'));
     if (isNaN(valorNum) || valorNum <= 0) return alert("Valor de desconto inválido.");
-    if (valorNum >= totaisBrutos.totalVenda) return alert("O desconto não pode ser maior ou igual ao total da venda.");
+    const liquidoAntesManual =
+      resumoPromo !== null
+        ? resumoPromo.totalLiquido
+        : round2(carrinho.reduce((s, i) => s + Number(i.subtotal), 0));
+    if (valorNum >= liquidoAntesManual) {
+      return alert('O desconto não pode ser maior ou igual ao total da venda (após promoções).');
+    }
 
     solicitarAutorizacao(() => {
       setDescontoVenda(valorNum);
@@ -411,16 +716,21 @@ export function FrenteCaixa() {
       const response = await api.post(`/api/pdv/vendas/${vendaId}/resgatar`);
       const vendaResgatada = response.data;
 
-      const novoCarrinho: IItemCarrinho[] = vendaResgatada.itens.map((item: any) => ({
-        id: item.produtoId,
-        nome: item.produto.nome,
-        codigo: item.produto.codigo,
-        codigoBarras: item.produto.codigoBarras,
-        precoVenda: item.valorUnitario,
-        precoCusto: item.valorUnitario * 0.6, 
-        quantidade: Number(item.quantidade),
-        subtotal: Number(item.valorTotal)
-      }));
+      const novoCarrinho: IItemCarrinho[] = vendaResgatada.itens.map((item: any) => {
+        const vu = Number(item.valorUnitario);
+        const q = Number(item.quantidade);
+        return {
+          id: item.produtoId,
+          nome: item.produto.nome,
+          codigo: item.produto.codigo,
+          codigoBarras: item.produto.codigoBarras,
+          precoUnitarioBase: vu,
+          precoVenda: vu,
+          precoCusto: vu * 0.6,
+          quantidade: q,
+          subtotal: Number(item.valorTotal),
+        };
+      });
 
       setCarrinho(novoCarrinho);
       setDescontoVenda(0); 
@@ -436,7 +746,7 @@ export function FrenteCaixa() {
 
   const carregarClientes = async () => {
     try {
-      const response = await api.get<IClientePDV[]>('/api/pessoas');
+      const response = await api.get<IClientePDV[]>('/api/cadastros/pessoas');
       setClientes(response.data);
     } catch (err) {
       console.error("Erro ao buscar clientes", err);
@@ -445,7 +755,7 @@ export function FrenteCaixa() {
 
   const carregarProdutosEstrategicos = async () => {
     try {
-      const response = await api.get<IProdutoPDV[]>('/api/produtos');
+      const response = await api.get<IProdutoPDV[]>(`/api/cadastros/produtos${montarQueryProdutos()}`);
       if (response.data && response.data.length > 0) {
         setSugestoes(response.data.slice(0, 3));
         setUpsellProduto(response.data.length > 3 ? response.data[3] : response.data[0]); 
@@ -457,10 +767,16 @@ export function FrenteCaixa() {
 
   // 🚀 BUSCA INTELIGENTE MANTIDA PARA AUTO-COMPLETE
   useEffect(() => {
+    if (pdvTerminalBloqueado) {
+      setProdutosFiltrados([]);
+      return;
+    }
     if (busca.length > 2) {
       const buscarProdutos = async () => {
         try {
-          const response = await api.get<IProdutoPDV[]>(`/api/produtos?busca=${encodeURIComponent(busca)}`);
+          const response = await api.get<IProdutoPDV[]>(
+            `/api/cadastros/produtos${montarQueryProdutos(busca)}`
+          );
           setProdutosFiltrados(response.data);
         } catch (err) {
           console.error("Erro ao buscar produtos", err);
@@ -470,22 +786,98 @@ export function FrenteCaixa() {
     } else {
       setProdutosFiltrados([]);
     }
-  }, [busca]);
+  }, [busca, pdvTerminalBloqueado]);
 
-  const adicionarAoCarrinho = (produto: IProdutoPDV) => {
+  const adicionarAoCarrinho = (produto: IProdutoPDV, opts?: AdicionarItemPdvOpts) => {
+    if (pdvTerminalBloqueado) return;
+
     const precoVendaNum = Number(produto.precoVenda) || 0;
-    const precoCustoNum = produto.precoCusto ? Number(produto.precoCusto) : precoVendaNum * 0.6; 
+    if (precoVendaNum <= 0) {
+      toast.error(
+        'ERRO: Produto não encontrado na Tabela de Preços vigente. Solicite atualização ao gerente.',
+        { autoClose: 8000, className: 'border-l-4 border-red-500' }
+      );
+      tocarSomErroPdv();
+      return;
+    }
 
-    setCarrinho(prev => {
-      const existe = prev.find(item => item.id === produto.id);
+    const balcao = opts?.linhaBalcao;
+    if (balcao) {
+      const kg = round3(balcao.kg);
+      const subEtiqueta = round2(balcao.valorTotalReais);
+      if (kg <= 0 || subEtiqueta <= 0) {
+        toast.error('Etiqueta de balança inválida (peso/valor).', {
+          autoClose: 6000,
+          className: 'border-l-4 border-red-500',
+        });
+        tocarSomErroPdv();
+        return;
+      }
+    }
+
+    const precoCustoNum = produto.precoCusto ? Number(produto.precoCusto) : precoVendaNum * 0.6;
+    const precoCustoPorKg =
+      produto.precoCusto && Number(produto.precoCusto) > 0
+        ? Number(produto.precoCusto)
+        : precoVendaNum * 0.6;
+
+    setCarrinho((prev) => {
+      const existe = prev.find((item) => item.id === produto.id);
+      if (balcao) {
+        const kg = round3(balcao.kg);
+        const subEtiqueta = round2(balcao.valorTotalReais);
+        const base = round2(Number(existe?.precoUnitarioBase ?? precoVendaNum));
+        if (existe) {
+          const novaQ = round3(existe.quantidade + kg);
+          const novoSub = round2(existe.subtotal + subEtiqueta);
+          return prev.map((item) =>
+            item.id === produto.id
+              ? {
+                  ...item,
+                  quantidade: novaQ,
+                  precoUnitarioBase: base,
+                  precoVenda: base,
+                  subtotal: novoSub,
+                }
+              : item
+          );
+        }
+        return [
+          ...prev,
+          {
+            ...produto,
+            precoUnitarioBase: precoVendaNum,
+            precoVenda: precoVendaNum,
+            precoCusto: precoCustoPorKg,
+            quantidade: kg,
+            subtotal: subEtiqueta,
+          },
+        ];
+      }
       if (existe) {
-        return prev.map(item => 
-          item.id === produto.id 
-            ? { ...item, quantidade: item.quantidade + 1, subtotal: (item.quantidade + 1) * precoVendaNum }
+        const base = round2(Number(existe.precoUnitarioBase ?? precoVendaNum));
+        return prev.map((item) =>
+          item.id === produto.id
+            ? {
+                ...item,
+                quantidade: item.quantidade + 1,
+                precoUnitarioBase: base,
+                subtotal: round2((item.quantidade + 1) * base),
+              }
             : item
         );
       }
-      return [...prev, { ...produto, precoVenda: precoVendaNum, precoCusto: precoCustoNum, quantidade: 1, subtotal: precoVendaNum }];
+      return [
+        ...prev,
+        {
+          ...produto,
+          precoUnitarioBase: precoVendaNum,
+          precoVenda: precoVendaNum,
+          precoCusto: precoCustoNum,
+          quantidade: 1,
+          subtotal: precoVendaNum,
+        },
+      ];
     });
     setBusca('');
     setProdutosFiltrados([]); // Limpa a lista
@@ -493,10 +885,49 @@ export function FrenteCaixa() {
   };
 
   // 🚀 NOVA LÓGICA DE ENTER: FORÇA A BUSCA DE CÓDIGOS CURTOS (EX: "5", "01")
-  const handleKeyDownBusca = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDownBusca = async (e: KeyboardEvent<HTMLInputElement>) => {
+    if (pdvTerminalBloqueado) return;
     if (e.key === 'Enter' && busca.trim().length > 0) {
       e.preventDefault();
-      
+
+      const rawBusca = busca.trim();
+      const parsed = parseBarcode(rawBusca);
+
+      if (parsed.isBalanca) {
+        try {
+          const response = await api.get<IProdutoPDV[]>(
+            `/api/cadastros/produtos${montarQueryProdutos(undefined, parsed.codigoBalanca)}`
+          );
+          if (response.data.length !== 1) {
+            alert(
+              response.data.length === 0
+                ? `Nenhum produto com código na balança ${parsed.codigoBalanca}.`
+                : `Vários produtos para código na balança ${parsed.codigoBalanca} — cadastro duplicado.`
+            );
+            setBusca('');
+            return;
+          }
+          const p = response.data[0];
+          const precoKg = Number(p.precoVenda) || 0;
+          if (precoKg <= 0) {
+            toast.error('Produto sem preço/kg na tabela vigente.', {
+              autoClose: 8000,
+              className: 'border-l-4 border-red-500',
+            });
+            tocarSomErroPdv();
+            setBusca('');
+            return;
+          }
+          const kg = round3(parsed.valorTotal / precoKg);
+          adicionarAoCarrinho(p, {
+            linhaBalcao: { kg, valorTotalReais: parsed.valorTotal },
+          });
+        } catch (err) {
+          console.error('Erro na busca por código de balança:', err);
+        }
+        return;
+      }
+
       // Se já buscou e tem 1 resultado na tela, adiciona ele
       if (produtosFiltrados.length === 1) {
         adicionarAoCarrinho(produtosFiltrados[0]);
@@ -505,11 +936,15 @@ export function FrenteCaixa() {
 
       // Se não, força uma busca exata na API (ideal para código curto ou leitor de código de barras rápido)
       try {
-        const response = await api.get<IProdutoPDV[]>(`/api/produtos?busca=${encodeURIComponent(busca)}`);
-        
+        const response = await api.get<IProdutoPDV[]>(
+          `/api/cadastros/produtos${montarQueryProdutos(rawBusca)}`
+        );
+
         // Procura match exato pelo novo 'codigo' ou 'codigoBarras'
-        const matchExato = response.data.find(p => p.codigo === busca || p.codigoBarras === busca);
-        
+        const matchExato = response.data.find(
+          (p) => p.codigo === rawBusca || p.codigoBarras === rawBusca
+        );
+
         if (matchExato) {
           adicionarAoCarrinho(matchExato);
         } else if (response.data.length === 1) {
@@ -517,32 +952,38 @@ export function FrenteCaixa() {
         } else if (response.data.length > 1) {
           setProdutosFiltrados(response.data); // Abre a lista para o usuário escolher
         } else {
-          alert(`Nenhum produto encontrado com o código "${busca}".`);
+          alert(`Nenhum produto encontrado com o código "${rawBusca}".`);
           setBusca('');
         }
       } catch (err) {
-        console.error("Erro na busca forçada:", err);
+        console.error('Erro na busca forçada:', err);
       }
     }
   };
 
-  const totaisBrutos = carrinho.reduce((acc, item) => {
-    const venda = Number(item.precoVenda) * item.quantidade;
-    const custo = Number(item.precoCusto) * item.quantidade;
-    return { totalVenda: acc.totalVenda + venda, totalCusto: acc.totalCusto + custo };
-  }, { totalVenda: 0, totalCusto: 0 });
+  const totaisBrutos = carrinho.reduce(
+    (acc, item) => {
+      const baseLinha = round2(Number(item.precoUnitarioBase ?? item.precoVenda) * item.quantidade);
+      const custo = Number(item.precoCusto) * item.quantidade;
+      return { totalVenda: acc.totalVenda + baseLinha, totalCusto: acc.totalCusto + custo };
+    },
+    { totalVenda: 0, totalCusto: 0 }
+  );
+
+  const liquidoPosPromo =
+    resumoPromo !== null
+      ? resumoPromo.totalLiquido
+      : round2(carrinho.reduce((s, i) => s + Number(i.subtotal), 0));
 
   const totais = {
-    totalVenda: Math.max(0, totaisBrutos.totalVenda - descontoVenda),
-    totalCusto: totaisBrutos.totalCusto
+    totalVenda: Math.max(0, liquidoPosPromo - descontoVenda),
+    totalCusto: totaisBrutos.totalCusto,
   };
 
   const lucroReal = totais.totalVenda - totais.totalCusto;
-  
-  const valorRec = valorRecebido ? Number(valorRecebido.replace(',', '.')) : 0;
-  const troco = formaPagamento === 'DINHEIRO' && valorRec >= totais.totalVenda 
-    ? valorRec - totais.totalVenda 
-    : 0;
+
+  const totalPagoLinhas = round2(linhasPagamento.reduce((acc, l) => acc + l.valor, 0));
+  const valorRestante = round2(Math.max(0, totais.totalVenda - totalPagoLinhas));
 
   const clienteAtual = clientes.find(c => c.id === clienteSelecionado);
   const errosFiscais: { id: string; tipo: string; mensagem: string; acao: () => void; textoAcao: string }[] = [];
@@ -597,20 +1038,110 @@ export function FrenteCaixa() {
     return f;
   };
 
-  const selecionarFormaSemTef = async (
-    forma: Exclude<FormaPagamentoPDV, 'CARTAO_CREDITO_TEF' | 'CARTAO_DEBITO_TEF'>
-  ) => {
-    if (transacaoTefId) {
-      await api.post('/api/tef/cancelar', { transacaoTefId }).catch(() => undefined);
-      setTransacaoTefId(null);
-    }
-    setFormaPagamento(forma);
-    if (forma !== 'CREDIARIO') setQtdParcelas(1);
+  const rotuloFormaPdv = (tipoApi: string): string => {
+    const m: Record<string, string> = {
+      PIX: 'PIX',
+      CARTAO_DEBITO: 'Débito',
+      CARTAO_CREDITO: 'Crédito',
+      DINHEIRO: 'Dinheiro',
+      CREDIARIO: 'Crediário',
+    };
+    return m[tipoApi] ?? tipoApi;
   };
 
-  const solicitarTefPinpad = async (tipoCartao: 'CREDITO' | 'DEBITO') => {
+  const abrirModalPagamentoParcial = (alvo: AlvoModalPagamentoParcialCaixa) => {
+    if (carrinho.length === 0) {
+      alert('Adicione itens ao carrinho.');
+      return;
+    }
+    if (bloqueioFiscal) {
+      alert('Corrija as pendências fiscais antes de receber.');
+      return;
+    }
+    const totalPago = round2(linhasPagamento.reduce((s, l) => s + l.valor, 0));
+    const vr = round2(Math.max(0, totais.totalVenda - totalPago));
+    if (vr <= 0) {
+      toast.info('Total já coberto. Finalize a venda (F10) ou remova uma linha.');
+      return;
+    }
+    setAlvoModalParcial(alvo);
+    setCampoValorParcial(vr.toFixed(2));
+    setErroModalParcial(null);
+    if (alvo.kind === 'sem_tef' && alvo.forma !== 'CREDIARIO') setQtdParcelas(1);
+    setModalParcialAberto(true);
+  };
+
+  const fecharModalPagamentoParcial = () => {
+    setModalParcialAberto(false);
+    setAlvoModalParcial(null);
+    setCampoValorParcial('');
+    setErroModalParcial(null);
+  };
+
+  const adicionarLinhaSemTefConfirmada = (
+    forma: Exclude<FormaPagamentoPDV, 'CARTAO_CREDITO_TEF' | 'CARTAO_DEBITO_TEF'>,
+    valor: number
+  ) => {
+    const tipoApi = resolveTipoPagamentoApi(forma);
+    let parcelas: IPayloadVendaPDV['parcelas'] | undefined;
+    if (forma === 'CREDIARIO' && qtdParcelas > 0) {
+      parcelas = gerarParcelas(valor, qtdParcelas);
+    } else if (forma === 'CARTAO_CREDITO') {
+      parcelas = gerarParcelas(valor, 1);
+    }
+    const canalAdquirente: 'POS' | undefined =
+      forma === 'CARTAO_CREDITO' || forma === 'CARTAO_DEBITO' ? 'POS' : undefined;
+    setLinhasPagamento((prev) => [
+      ...prev,
+      {
+        id: novoIdLinhaPdv(),
+        tipoPagamentoApi: tipoApi,
+        valor,
+        ...(canalAdquirente ? { canalAdquirente } : {}),
+        ...(parcelas ? { parcelas } : {}),
+      },
+    ]);
+    toast.success(`${rotuloFormaPdv(tipoApi)}: R$ ${valor.toFixed(2)} lançado.`);
+  };
+
+  const confirmarModalPagamentoParcial = () => {
+    if (!alvoModalParcial) return;
+    const totalPago = round2(linhasPagamento.reduce((s, l) => s + l.valor, 0));
+    const vr = round2(Math.max(0, totais.totalVenda - totalPago));
+    const parsed = parseValorMonetarioPdv(campoValorParcial);
+    if (parsed === null) {
+      setErroModalParcial('Valor inválido.');
+      return;
+    }
+    const msgVal = validarValorParcialPdv(parsed, vr);
+    if (msgVal) {
+      setErroModalParcial(msgVal);
+      return;
+    }
+    const valor = round2(parsed);
+
+    if (alvoModalParcial.kind === 'sem_tef') {
+      adicionarLinhaSemTefConfirmada(alvoModalParcial.forma, valor);
+      fecharModalPagamentoParcial();
+      return;
+    }
+
+    fecharModalPagamentoParcial();
+    void solicitarTefPinpad(alvoModalParcial.cartao, valor);
+  };
+
+  const removerLinhaPagamento = (id: string) => {
+    const linha = linhasPagamento.find((l) => l.id === id);
+    if (linha?.transacaoTefId) {
+      void tefCancelarAutorizacaoPendente(linha.transacaoTefId).catch(() => undefined);
+      tefComprovantePorTidRef.current.delete(linha.transacaoTefId);
+    }
+    setLinhasPagamento((prev) => prev.filter((l) => l.id !== id));
+  };
+
+  const solicitarTefPinpad = async (tipoCartao: 'CREDITO' | 'DEBITO', valorTransacao: number) => {
     if (carrinho.length === 0) return alert('Adicione itens ao carrinho antes do TEF.');
-    if (totais.totalVenda <= 0) return alert('Total da venda inválido para TEF.');
+    if (!(valorTransacao > 0)) return alert('Valor inválido para TEF.');
 
     tefWsUnsubRef.current?.();
     tefWsUnsubRef.current = null;
@@ -633,15 +1164,6 @@ export function FrenteCaixa() {
       setTefStatusMensagem(null);
       setTefCarregando(false);
       return;
-    }
-
-    try {
-      if (transacaoTefId) {
-        await api.post('/api/tef/cancelar', { transacaoTefId }).catch(() => undefined);
-        setTransacaoTefId(null);
-      }
-    } catch {
-      /* segue */
     }
 
     let finalizado = false;
@@ -673,31 +1195,47 @@ export function FrenteCaixa() {
         const codigoAutorizacao =
           msg.codigoAutorizacao != null ? String(msg.codigoAutorizacao) : undefined;
         const bandeiraCartao = msg.bandeira != null ? String(msg.bandeira) : undefined;
+        const comprovanteLimpoWs =
+          (msg as { comprovanteLimpo?: unknown }).comprovanteLimpo != null &&
+          String((msg as { comprovanteLimpo?: unknown }).comprovanteLimpo).trim() !== ''
+            ? String((msg as { comprovanteLimpo?: unknown }).comprovanteLimpo).trim()
+            : '';
+
         const comprovanteLinhas = [
           '--- COMPROVANTE TEF (HARDWARE LOCAL) ---',
           nsu ? `NSU: ${nsu}` : '',
           codigoAutorizacao ? `AUTORIZACAO: ${codigoAutorizacao}` : '',
           bandeiraCartao ? `BANDEIRA: ${bandeiraCartao}` : '',
-          `VALOR: R$ ${totais.totalVenda.toFixed(2)}`,
+          `VALOR: R$ ${valorTransacao.toFixed(2)}`,
           `TIPO: ${tipoCartao}`,
           msg.mensagem != null ? String(msg.mensagem) : '',
         ]
           .filter(Boolean)
           .join('\n');
 
+        const comprovanteParaRegistro = comprovanteLimpoWs || comprovanteLinhas;
+
         try {
+          const idEstacaoTef = getEstacaoTrabalhoIdPdv()?.trim() ?? '';
+          const termTef =
+            sessaoCaixa?.terminal?.trim() || getTerminalFiscalPdv()?.trim() || '';
+          if (!termTef) {
+            throw new Error('Sessão sem terminal fiscal. Abra o caixa novamente pela estação correta.');
+          }
           const res = await api.post<{
             sucesso: boolean;
             dados?: { transacaoTefId: string };
             erro?: string;
           }>('/api/tef/registrar-hardware', {
-            valor: totais.totalVenda,
+            valor: valorTransacao,
             tipoCartao,
-            terminal: terminalAtivo,
+            terminal: termTef,
             nsu: nsu || `HW-${Date.now()}`,
             codigoAutorizacao,
             bandeiraCartao,
+            comprovanteImpressaoLimpo: comprovanteParaRegistro,
             comprovanteImpressao: comprovanteLinhas,
+            ...(idEstacaoTef ? { estacaoTrabalhoId: idEstacaoTef } : {}),
           });
           if (res.status !== 200) {
             throw new Error(`HTTP ${res.status}: falha ao registrar TEF.`);
@@ -706,13 +1244,29 @@ export function FrenteCaixa() {
           if (!data.sucesso || !data.dados?.transacaoTefId) {
             throw new Error(data.erro || 'Falha ao registrar TEF no servidor.');
           }
-          // Efetiva confirmação no SiTef somente após persistência no ERP (HTTP 200 + sucesso).
-          getHardwareAgent().send({ acao: 'FINALIZAR_SITEF', confirmar: true });
-          setTransacaoTefId(data.dados.transacaoTefId);
-          setFormaPagamento(tipoCartao === 'CREDITO' ? 'CARTAO_CREDITO_TEF' : 'CARTAO_DEBITO_TEF');
+          const tid = data.dados.transacaoTefId;
+          tefComprovantePorTidRef.current.set(tid, comprovanteParaRegistro);
+          const tipoForma: FormaPagamentoPDV =
+            tipoCartao === 'CREDITO' ? 'CARTAO_CREDITO_TEF' : 'CARTAO_DEBITO_TEF';
+          const tipoApi = resolveTipoPagamentoApi(tipoForma);
+          const parcelasTef =
+            tipoCartao === 'CREDITO' ? gerarParcelas(valorTransacao, 1) : undefined;
+          setLinhasPagamento((prev) => [
+            ...prev,
+            {
+              id: novoIdLinhaPdv(),
+              tipoPagamentoApi: tipoApi,
+              valor: round2(valorTransacao),
+              transacaoTefId: tid,
+              canalAdquirente: 'TEF',
+              ...(parcelasTef ? { parcelas: parcelasTef } : {}),
+            },
+          ]);
           setModalPinpadTef(false);
           setTefStatusMensagem(null);
-          toast.success('PinPad: transação aprovada e confirmada no SiTef.');
+          toast.success(
+            'PinPad: autorizado (CNC). Linha lançada — finalize a venda (F10) após cobrir o total.'
+          );
         } catch (err) {
           getHardwareAgent().send({ acao: 'FINALIZAR_SITEF', confirmar: false });
           const ax = err as AxiosError<{ erro?: string; error?: string }>;
@@ -744,7 +1298,7 @@ export function FrenteCaixa() {
 
     const enviado = agent.send({
       acao: 'INICIAR_TEF',
-      valor: totais.totalVenda,
+      valor: valorTransacao,
       tipo: tipoCartao,
       parcelas: 1,
     });
@@ -782,58 +1336,107 @@ export function FrenteCaixa() {
     if (!sessaoCaixa) return alert("Caixa não está aberto!");
     if (bloqueioFiscal) return alert("⚠️ Existem pendências fiscais! Corrija os erros listados antes de emitir a nota.");
     
-    if (formaPagamento === 'DINHEIRO') {
-      if (!valorRecebido || isNaN(valorRec) || valorRec < totais.totalVenda) {
-        return alert(`⚠️ O valor recebido (R$ ${valorRec.toFixed(2)}) não pode ser menor que o total da venda!`);
-      }
+    if (linhasPagamento.length === 0) {
+      return alert('Inclua ao menos uma forma de pagamento.');
+    }
+    if (valorRestante > 0.009) {
+      return alert(
+        `Falta cobrir R$ ${valorRestante.toFixed(2)}. Lançe mais pagamentos ou ajuste os valores.`
+      );
     }
 
-    if (formaPagamento === 'CARTAO_CREDITO_TEF' || formaPagamento === 'CARTAO_DEBITO_TEF') {
-      if (!transacaoTefId) {
-        return alert('Conclua a autorização no PinPad (TEF) antes de finalizar a venda.');
-      }
-    }
+    const tefIdsLinhas = linhasPagamento
+      .map((l) => l.transacaoTefId)
+      .filter((id): id is string => typeof id === 'string' && id.trim().length > 0);
 
     setFinalizando(true);
-    try {
-      let parcelasPayload = undefined;
-      if (formaPagamento === 'CREDIARIO' && qtdParcelas > 0) {
-        parcelasPayload = gerarParcelas(totais.totalVenda, qtdParcelas);
-      }
+    const terminalFiscal =
+      sessaoCaixa.terminal?.trim() || getTerminalFiscalPdv()?.trim() || '';
+    if (!terminalFiscal) {
+      setFinalizando(false);
+      return alert(
+        'Terminal fiscal da sessão não encontrado. Refaça a abertura do caixa pela estação correta (Gestão de Turnos ou PDV com estação identificada).'
+      );
+    }
+    const estacaoIdVenda = getEstacaoTrabalhoIdPdv()?.trim();
+    const caixaFiscalIdVenda = getCaixaFiscalIdPdv()?.trim();
 
-      const tipoApi = resolveTipoPagamentoApi(formaPagamento);
-      const pagamentoLinha: IPayloadVendaPDV['pagamentos'][0] = {
-        tipoPagamento: tipoApi,
-        valor: totais.totalVenda,
-      };
-      if (formaPagamento === 'CARTAO_CREDITO_TEF' || formaPagamento === 'CARTAO_DEBITO_TEF') {
-        pagamentoLinha.transacaoTefId = transacaoTefId ?? undefined;
-      }
+    const comprovanteMerge =
+      tefIdsLinhas.length > 0
+        ? tefIdsLinhas
+            .map((id) => tefComprovantePorTidRef.current.get(id))
+            .filter((s): s is string => typeof s === 'string' && s.trim() !== '')
+            .join('\n---\n')
+        : '';
+    tefComprovanteLimpoRef.current = comprovanteMerge.trim() !== '' ? comprovanteMerge : null;
+
+    const tipoPrincipal = linhasPagamento[0]?.tipoPagamentoApi ?? 'PIX';
+    const rotuloCupom =
+      linhasPagamento.length > 1 ? 'MISTO' : rotuloFormaPdv(tipoPrincipal);
+
+    try {
+      const pagamentosPayload: IPayloadVendaPDV['pagamentos'] = linhasPagamento.map((l) => {
+        const pl: IPayloadVendaPDV['pagamentos'][0] = {
+          tipoPagamento: l.tipoPagamentoApi,
+          valor: l.valor,
+        };
+        if (l.transacaoTefId) {
+          pl.transacaoTefId = l.transacaoTefId;
+          pl.canalAdquirente = 'TEF';
+        } else if (
+          l.tipoPagamentoApi === 'CARTAO_CREDITO' ||
+          l.tipoPagamentoApi === 'CARTAO_DEBITO'
+        ) {
+          pl.canalAdquirente = 'POS';
+        }
+        if (l.parcelas != null && l.parcelas.length > 0) {
+          pl.parcelas = l.parcelas;
+        }
+        return pl;
+      });
 
       const payload: IPayloadVendaPDV = {
-        sessaoCaixaId: sessaoCaixa.id, 
+        sessaoCaixaId: sessaoCaixa.id,
         clienteId: clienteSelecionado || undefined,
-        terminal: terminalAtivo, 
-        itens: carrinho.map(item => ({
+        terminal: terminalFiscal,
+        ...(estacaoIdVenda ? { estacaoTrabalhoId: estacaoIdVenda } : {}),
+        ...(caixaFiscalIdVenda ? { caixaFiscalId: caixaFiscalIdVenda } : {}),
+        itens: carrinho.map((item) => ({
           produtoId: item.id,
           quantidade: item.quantidade,
-          valorUnitario: Number(item.precoVenda) 
+          valorUnitario: Number(item.precoVenda),
         })),
-        pagamentos: [pagamentoLinha],
-        tipoPagamento: tipoApi,
-        formaPagamento: tipoApi, 
+        pagamentos: pagamentosPayload,
+        tipoPagamento: tipoPrincipal,
+        formaPagamento: tipoPrincipal,
         valorTotal: totais.totalVenda,
-        valorDesconto: descontoVenda, 
+        valorDesconto: descontoVenda,
         modeloNota,
-        parcelas: parcelasPayload
+        ...(comprovanteMerge.trim() !== '' ? { comprovanteTefLimpo: comprovanteMerge } : {}),
       };
 
       const resVenda = await api.post<{
         mensagem?: string;
         venda?: { id: string };
         comprovantesTef?: string[];
+        pacoteImpressaoPos?: { formato: string; payload: string } | null;
         auryaCorrecoesTributarias?: { nomeProduto: string; cstAnterior: string; csosnNovo: string }[];
+        requerConfirmacaoTef?: boolean;
       }>('/api/vendas', payload);
+
+      if (tefIdsLinhas.length > 0) {
+        try {
+          await tefPosVendaSucessoCnc(tefIdsLinhas, {
+            vendaId: resVenda.data.venda?.id ?? '',
+          });
+        } catch (tefErr) {
+          console.error(tefErr);
+          toast.error(
+            'Venda gravada, mas a confirmação TEF falhou. Verifique a maquininha e concilie no ERP.'
+          );
+        }
+      }
+
 
       const correcoes = resVenda.data.auryaCorrecoesTributarias ?? [];
       for (const c of correcoes) {
@@ -845,46 +1448,69 @@ export function FrenteCaixa() {
 
       const vendaId = resVenda.data.venda?.id ?? '—';
       const comps = resVenda.data.comprovantesTef ?? [];
+      const pacotePos = resVenda.data.pacoteImpressaoPos;
+      const temPacotePos =
+        pacotePos?.formato === 'base64' &&
+        typeof pacotePos.payload === 'string' &&
+        pacotePos.payload.trim() !== '';
+      const subtotalCupom =
+        resumoPromo?.totalBruto ??
+        round2(
+          carrinho.reduce((s, i) => s + i.quantidade * Number(i.precoUnitarioBase ?? i.precoVenda), 0)
+        );
       const textoCupom = montarCupomTextoPlano({
         nomeLoja: nomeLojaPdV,
-        terminal: terminalAtivo,
+        terminal: getNomeEstacaoExibicaoPdv()?.trim() || terminalFiscal,
         operador: nomeOperador,
         vendaId,
         modeloNota,
-        formaPagamento: tipoApi,
-        itens: carrinho,
-        subtotal: totaisBrutos.totalVenda,
-        desconto: descontoVenda,
+        formaPagamento: rotuloCupom,
+        itens: carrinho.map((i) => ({
+          nome: i.nome,
+          quantidade: i.quantidade,
+          precoVenda: Number(i.precoVenda),
+          subtotal: Number(i.subtotal),
+        })),
+        subtotal: subtotalCupom,
+        desconto: round2((resumoPromo?.totalDescontoPromocoes ?? 0) + descontoVenda),
         total: totais.totalVenda,
-        comprovantesTef: comps.length > 0 ? comps : undefined,
+        comprovantesTef: temPacotePos ? undefined : comps.length > 0 ? comps : undefined,
       });
 
-      const cupomEnviado = enviarHardware({
-        acao: 'IMPRIMIR_CUPOM',
-        formato: 'texto',
-        payload: textoCupom,
-      });
+      const cupomEnviado = temPacotePos
+        ? enviarHardware({
+            acao: 'IMPRIMIR_CUPOM',
+            formato: 'base64',
+            payload: pacotePos!.payload,
+          })
+        : enviarHardware({
+            acao: 'IMPRIMIR_CUPOM',
+            formato: 'texto',
+            payload: textoCupom,
+          });
       if (cupomEnviado) {
         toast.success(
-          'Venda finalizada. Cupom enviado à impressora (agente local). NFC-e em processamento na SEFAZ.'
+          temPacotePos
+            ? 'Venda finalizada. Cupom fiscal + TEF enviados à impressora (pacote único).'
+            : 'Venda finalizada. Cupom enviado à impressora (agente local).'
         );
       } else {
         if (comps.length > 0) {
           imprimirComprovantesTef(comps);
-          toast.success('Venda finalizada. Comprovante aberto no navegador (agente local offline). NFC-e em processamento.');
+          toast.success('Venda finalizada. Comprovante aberto no navegador (agente local offline).');
         } else {
-          toast.success('Venda finalizada. NFC-e em processamento na SEFAZ.');
+          toast.success('Venda finalizada.');
           toast.info('Hardware local offline — cupom não impresso. Inicie o AuryaHardwareAgent.');
         }
       }
       
       setCarrinho([]);
-      setValorRecebido('');
+      setLinhasPagamento([]);
+      tefComprovantePorTidRef.current = new Map();
       setBusca('');
       setClienteSelecionado('');
       setModeloNota('65');
-      setFormaPagamento('PIX');
-      setTransacaoTefId(null);
+      tefComprovanteLimpoRef.current = null;
       setQtdParcelas(1);
       setDescontoVenda(0);
       setValorDescontoInput('');
@@ -893,6 +1519,10 @@ export function FrenteCaixa() {
     } catch (err) {
       const error = err as AxiosError<{error?: string, erro?: string}>;
       const mensagemErro = error.response?.data?.erro || error.response?.data?.error || "Erro ao finalizar venda.";
+      if (tefIdsLinhas.length > 0) {
+        await tefFalhaSalvarVendaCnc(tefIdsLinhas).catch(() => undefined);
+      }
+      tefComprovanteLimpoRef.current = null;
       alert(`❌ ${mensagemErro}`);
     } finally {
       setFinalizando(false);
@@ -915,6 +1545,7 @@ export function FrenteCaixa() {
     modalFechamento,
     modalPinpadTef,
     tefCarregando,
+    modalParcialAberto,
   });
 
   useEffect(() => {
@@ -933,17 +1564,26 @@ export function FrenteCaixa() {
       modalFechamento,
       modalPinpadTef,
       tefCarregando,
+      modalParcialAberto,
     };
   });
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (pdvTerminalBloqueado) return;
+
       const { modalSupervisor, modalCaixaAberto, modalVendasEspera, modalFechamento } = statesRef.current;
 
       if (e.key === 'Escape') {
         if (modalSupervisor) { setModalSupervisor(false); setAcaoPendente(null); }
         if (modalVendasEspera) setModalVendasEspera(false);
         if (modalFechamento) setModalFechamento(false);
+        if (statesRef.current.modalParcialAberto) {
+          setModalParcialAberto(false);
+          setAlvoModalParcial(null);
+          setCampoValorParcial('');
+          setErroModalParcial(null);
+        }
         if (statesRef.current.modalPinpadTef) {
           tefWsUnsubRef.current?.();
           tefWsUnsubRef.current = null;
@@ -955,7 +1595,16 @@ export function FrenteCaixa() {
         return;
       }
 
-      if (modalSupervisor || modalCaixaAberto || modalVendasEspera || modalFechamento || statesRef.current.modalPinpadTef) return;
+      if (
+        modalSupervisor ||
+        modalCaixaAberto ||
+        modalVendasEspera ||
+        modalFechamento ||
+        statesRef.current.modalPinpadTef ||
+        statesRef.current.modalParcialAberto
+      ) {
+        return;
+      }
 
       switch(e.key) {
         case 'F2':
@@ -987,10 +1636,61 @@ export function FrenteCaixa() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [pdvTerminalBloqueado]);
 
   return (
     <Layout>
+      <PagamentoValorParcialModal
+        aberto={modalParcialAberto}
+        titulo={
+          alvoModalParcial?.kind === 'tef'
+            ? alvoModalParcial.cartao === 'CREDITO'
+              ? 'Valor — crédito TEF'
+              : 'Valor — débito TEF'
+            : alvoModalParcial?.kind === 'sem_tef'
+              ? `Valor — ${rotuloFormaPdv(resolveTipoPagamentoApi(alvoModalParcial.forma))}`
+              : 'Valor do pagamento'
+        }
+        subtitulo={
+          alvoModalParcial?.kind === 'tef'
+            ? 'Depois de confirmar aqui, autorize no PinPad pelo valor informado.'
+            : 'Informe quanto entra nesta forma de pagamento (pagamento misto).'
+        }
+        valorRestante={valorRestante}
+        valorCampo={campoValorParcial}
+        onValorCampoChange={setCampoValorParcial}
+        erroTexto={erroModalParcial}
+        onConfirmar={() => {
+          confirmarModalPagamentoParcial();
+        }}
+        onFechar={fecharModalPagamentoParcial}
+        ocupado={false}
+      >
+        {alvoModalParcial?.kind === 'sem_tef' && alvoModalParcial.forma === 'CREDIARIO' ? (
+          <div>
+            <label
+              htmlFor="pdv-parcial-parcelas"
+              className="mb-1.5 block text-xs font-bold text-slate-400"
+            >
+              Parcelas (crediário)
+            </label>
+            <select
+              id="pdv-parcial-parcelas"
+              className="w-full rounded-xl border border-white/10 bg-[#0b1324] px-3 py-2.5 text-sm font-bold text-white outline-none focus:border-violet-500/45"
+              value={qtdParcelas}
+              onChange={(e) => setQtdParcelas(Number(e.target.value))}
+            >
+              <option value={1}>1x (30 dias)</option>
+              <option value={2}>2x (30 e 60 dias)</option>
+              <option value={3}>3x (30, 60 e 90 dias)</option>
+              <option value={4}>4x</option>
+              <option value={5}>5x</option>
+              <option value={6}>6x</option>
+            </select>
+          </div>
+        ) : null}
+      </PagamentoValorParcialModal>
+
       <TefPinpadModal
         aberto={modalPinpadTef}
         carregando={tefCarregando}
@@ -1007,6 +1707,63 @@ export function FrenteCaixa() {
           setTefCarregando(false);
         }}
       />
+
+      {pdvTerminalBloqueado && estacaoDiscovery === 'loading' && (
+        <div
+          className="fixed inset-0 z-[300] flex flex-col items-center justify-center gap-4 bg-[#020617]/95 backdrop-blur-md p-6"
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+        >
+          <Loader2 className="h-12 w-12 text-violet-400 animate-spin" aria-hidden />
+          <p className="text-slate-300 font-medium">Identificando terminal…</p>
+        </div>
+      )}
+
+      {pdvTerminalBloqueado && estacaoDiscovery === 'unknown_ip' && (
+        <div
+          className="fixed inset-0 z-[300] flex items-center justify-center bg-[#020617]/95 backdrop-blur-md p-6"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="pdv-terminal-bloqueado-msg"
+        >
+          <div className="max-w-lg w-full rounded-[28px] border border-amber-500/40 bg-[#08101f] shadow-[0_25px_80px_rgba(0,0,0,0.65)] p-8 text-center">
+            <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10">
+              <AlertTriangle className="h-9 w-9 text-amber-400" aria-hidden />
+            </div>
+            <p id="pdv-terminal-bloqueado-msg" className="text-lg font-bold text-white leading-relaxed">
+              Computador não reconhecido. Cadastre o IP deste terminal na tela de Estações de Trabalho na
+              retaguarda.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {pdvTerminalBloqueado && estacaoDiscovery === 'erro_rede' && (
+        <div
+          className="fixed inset-0 z-[300] flex items-center justify-center bg-[#020617]/95 backdrop-blur-md p-6"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="pdv-estacao-erro-rede"
+        >
+          <div className="max-w-lg w-full rounded-[28px] border border-red-500/35 bg-[#08101f] shadow-[0_25px_80px_rgba(0,0,0,0.65)] p-8 text-center">
+            <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full border border-red-500/30 bg-red-500/10">
+              <ShieldAlert className="h-9 w-9 text-red-400" aria-hidden />
+            </div>
+            <p id="pdv-estacao-erro-rede" className="text-lg font-bold text-white leading-relaxed mb-6">
+              Não foi possível identificar o terminal. Verifique a conexão com o servidor e tente novamente.
+            </p>
+            <button
+              type="button"
+              onClick={tentarDescobrirEstacaoNovamente}
+              className="w-full rounded-xl bg-violet-600 px-4 py-3 font-bold text-white hover:bg-violet-700 transition-colors"
+            >
+              Tentar novamente
+            </button>
+          </div>
+        </div>
+      )}
+
       <style>{`
         @keyframes glow { 0% { box-shadow: 0 0 15px rgba(16, 185, 129, 0.4); } 50% { box-shadow: 0 0 30px rgba(16, 185, 129, 0.8); } 100% { box-shadow: 0 0 15px rgba(16, 185, 129, 0.4); } }
         .btn-glow { animation: glow 2s infinite; }
@@ -1016,48 +1773,21 @@ export function FrenteCaixa() {
         .animate-modal { animation: modalEnter 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
       `}</style>
 
-      {modalFechamento && (
-        <div className="fixed inset-0 bg-[#020617]/85 backdrop-blur-md flex items-center justify-center z-[70] p-4">
-          <div className="bg-[#08101f] border border-orange-500/30 rounded-[30px] shadow-[0_25px_80px_rgba(0,0,0,0.60)] w-full max-w-md flex flex-col relative overflow-hidden animate-modal">
-            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-violet-600 to-fuchsia-600"></div>
-            <div className="p-8 text-center">
-              <div className="w-16 h-16 bg-violet-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-violet-500/20">
-                <Power className="w-8 h-8 text-violet-300" />
-              </div>
-              <h2 className="text-xl font-black text-white mb-2">Fechamento de Caixa</h2>
-              <p className="text-slate-400 text-xs mb-6">Realize a contagem cega. Informe o valor total em <strong className="text-white">Dinheiro Físico</strong> presente na gaveta neste momento.</p>
-              
-              <div className="text-left mb-6">
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 pl-1">Saldo em Gaveta (R$)</label>
-                <input 
-                  type="number" 
-                  autoFocus
-                  placeholder="Ex: 550.00"
-                  className="w-full p-4 bg-slate-950 border border-slate-700 text-white rounded-xl focus:ring-2 focus:ring-violet-500 outline-none text-2xl font-black font-mono shadow-inner text-center"
-                  value={valorFechamento}
-                  onChange={(e) => setValorFechamento(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && executarFechamentoCaixa()}
-                />
-              </div>
-
-              <div className="flex gap-3">
-                <button 
-                  onClick={() => setModalFechamento(false)}
-                  className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold text-sm transition-colors"
-                >
-                  Cancelar [ESC]
-                </button>
-                <button 
-                  onClick={executarFechamentoCaixa}
-                  disabled={fechandoCaixa || !valorFechamento}
-                  className="flex-1 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white rounded-xl font-black text-sm uppercase tracking-wider transition-all shadow-[0_0_20px_rgba(139,92,246,0.30)] disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {fechandoCaixa ? <Loader2 className="w-4 h-4 animate-spin"/> : 'Encerrar Turno'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {modalFechamento && sessaoCaixa && (
+        <FechamentoCaixaModal
+          aberto={modalFechamento}
+          sessaoCaixaId={sessaoCaixa.id}
+          modo="pdv"
+          titulo="Fechamento de caixa"
+          subtitulo="Contagem cega: informe os valores contados em dinheiro, cartões e PIX."
+          onFechar={() => setModalFechamento(false)}
+          onConcluido={() => {
+            toast.success('Caixa fechado com sucesso. Turno encerrado.');
+            setSessaoCaixa(null);
+            setModalFechamento(false);
+            setModalCaixaAberto(true);
+          }}
+        />
       )}
 
       {modalSupervisor && (
@@ -1266,8 +1996,9 @@ export function FrenteCaixa() {
                 ref={buscaInputRef}
                 type="text" 
                 placeholder="Nome, Código Curto ou Cód. Barras..." // 🚀 ADICIONADO AVISO DE CÓDIGO CURTO
-                className="w-full p-3.5 pl-12 text-lg font-bold bg-[#0b1324] border border-white/10 rounded-xl focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500/40 outline-none text-white placeholder:text-slate-500 transition-all shadow-inner"
+                className="w-full p-3.5 pl-12 text-lg font-bold bg-[#0b1324] border border-white/10 rounded-xl focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500/40 outline-none text-white placeholder:text-slate-500 transition-all shadow-inner disabled:opacity-40 disabled:cursor-not-allowed"
                 value={busca}
+                disabled={pdvTerminalBloqueado}
                 onFocus={() => setIsSearchFocused(true)}
                 onBlur={() => setTimeout(() => setIsSearchFocused(false), 200)}
                 onChange={(e) => setBusca(e.target.value)}
@@ -1328,23 +2059,52 @@ export function FrenteCaixa() {
               </div>
             ) : (
               <div className="space-y-2">
-                {carrinho.map((item, idx) => (
-                  <div key={idx} className="bg-[#0b1324]/80 border border-white/10 p-3 rounded-xl flex items-center justify-between group shadow-sm hover:border-white/20 transition-colors">
-                    <div className="flex-1">
+                {carrinho.map((item) => (
+                  <div
+                    key={item.id}
+                    className={`bg-[#0b1324]/80 border p-3 rounded-xl flex items-center justify-between group shadow-sm hover:border-white/20 transition-colors ${
+                      item.promocaoAplicada
+                        ? 'border-emerald-500/35 ring-1 ring-emerald-500/15'
+                        : 'border-white/10'
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
                       {/* 🚀 EXIBINDO O CÓDIGO CURTO NO CARRINHO */}
                       <p className="text-white font-bold text-sm truncate pr-2">
                         {item.codigo ? <span className="text-violet-400 font-mono mr-1">[{item.codigo}]</span> : ''}
                         {item.nome}
                       </p>
-                      <p className="text-violet-300 font-black text-xs font-mono mt-0.5">R$ {Number(item.precoVenda).toFixed(2)}</p>
+                      <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                        <p className="text-violet-300 font-black text-xs font-mono">
+                          R$ {Number(item.precoVenda).toFixed(2)}
+                          {item.promocaoAplicada &&
+                            item.precoUnitarioBase !== undefined &&
+                            round2(Number(item.precoUnitarioBase)) > round2(Number(item.precoVenda)) + 0.001 && (
+                              <span className="text-slate-500 line-through ml-1 font-normal">
+                                {Number(item.precoUnitarioBase).toFixed(2)}
+                              </span>
+                            )}
+                        </p>
+                        {item.promocaoAplicada && (
+                          <span className="inline-flex items-center gap-0.5 rounded-md bg-emerald-500/15 text-emerald-300 text-[9px] font-black uppercase tracking-wide px-1.5 py-0.5 border border-emerald-500/25">
+                            <Tag className="w-3 h-3 shrink-0" />
+                            Promo
+                          </span>
+                        )}
+                      </div>
+                      {item.promocaoResumo && (
+                        <p className="text-emerald-400/90 text-[10px] mt-0.5 truncate" title={item.promocaoResumo}>
+                          {item.promocaoResumo}
+                        </p>
+                      )}
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 shrink-0">
                       <div className="flex items-center bg-[#08101f] rounded-lg border border-white/10 shadow-inner">
                         <button onClick={() => alterarQuantidadeSeguro(item.id, -1)} className="px-2.5 py-1 text-slate-400 hover:text-white font-bold">-</button>
                         <span className="text-white font-black px-1.5 text-sm min-w-[1.5rem] text-center">{item.quantidade}</span>
                         <button onClick={() => alterarQuantidadeSeguro(item.id, 1)} className="px-2.5 py-1 text-slate-400 hover:text-white font-bold">+</button>
                       </div>
-                      <p className="text-white font-black w-16 text-right text-sm font-mono">R$ {(Number(item.precoVenda) * item.quantidade).toFixed(2)}</p>
+                      <p className="text-white font-black w-16 text-right text-sm font-mono">R$ {Number(item.subtotal).toFixed(2)}</p>
                       <button onClick={() => removerDoCarrinhoSeguro(item.id)} className="text-slate-500 hover:text-red-300 bg-[#08101f] hover:bg-red-500/10 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all border border-white/10">
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -1384,10 +2144,22 @@ export function FrenteCaixa() {
             </div>
 
             <div className="flex justify-between items-center mb-2 bg-[#08101f] p-3 rounded-xl border border-white/10 shadow-inner">
-              <div>
-                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-0.5">Total a Pagar</p>
+              <div className="min-w-0">
+                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-0.5 flex items-center gap-2">
+                  Total a Pagar
+                  {recalculandoPromocoes && (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-400 shrink-0" aria-hidden />
+                  )}
+                </p>
+                {resumoPromo && resumoPromo.totalDescontoPromocoes > 0 && (
+                  <p className="text-emerald-400 text-[10px] font-bold mb-0.5">
+                    Promoções: −R$ {resumoPromo.totalDescontoPromocoes.toFixed(2)}
+                  </p>
+                )}
                 {descontoVenda > 0 && (
-                  <p className="text-red-400 text-xs font-bold line-through mb-0.5">R$ {totaisBrutos.totalVenda.toFixed(2)}</p>
+                  <p className="text-red-400 text-xs font-bold line-through mb-0.5">
+                    R$ {liquidoPosPromo.toFixed(2)}
+                  </p>
                 )}
                 <p className="text-3xl font-black text-white font-mono">R$ {totais.totalVenda.toFixed(2)}</p>
               </div>
@@ -1426,93 +2198,93 @@ export function FrenteCaixa() {
             </div>
 
             <div className="mb-2 space-y-2">
-              <div className="grid grid-cols-4 gap-2">
-                {(['PIX', 'CARTAO_DEBITO', 'DINHEIRO', 'CREDIARIO'] as const).map((forma) => (
+              <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-wider text-slate-400 px-0.5">
+                <span>Pagamentos lançados</span>
+                <span className="font-mono text-amber-300">
+                  Restante: R$ {valorRestante.toFixed(2)}
+                </span>
+              </div>
+              {linhasPagamento.length > 0 && (
+                <ul className="max-h-24 overflow-y-auto space-y-1 rounded-lg border border-white/10 bg-[#08101f]/80 p-2">
+                  {linhasPagamento.map((linha) => (
+                    <li
+                      key={linha.id}
+                      className="flex items-center justify-between gap-2 text-[11px] font-bold text-slate-200"
+                    >
+                      <span className="truncate">
+                        {rotuloFormaPdv(linha.tipoPagamentoApi)}
+                        {linha.transacaoTefId ? ' · TEF' : ''}
+                      </span>
+                      <span className="flex items-center gap-2 shrink-0 font-mono text-emerald-300">
+                        R$ {linha.valor.toFixed(2)}
+                        <button
+                          type="button"
+                          onClick={() => removerLinhaPagamento(linha.id)}
+                          className="rounded border border-white/10 p-1 text-slate-500 hover:text-red-400"
+                          title="Remover linha"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className="text-[9px] text-slate-500 text-center">
+                Toque na forma de pagamento — informe o valor (padrão = restante) para pagamento misto.
+              </p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                {(
+                  [
+                    { forma: 'PIX' as const, label: 'PIX' },
+                    { forma: 'CARTAO_DEBITO' as const, label: 'DÉBITO' },
+                    { forma: 'CARTAO_CREDITO' as const, label: 'CRÉDITO' },
+                    { forma: 'DINHEIRO' as const, label: 'DINHEIRO' },
+                    { forma: 'CREDIARIO' as const, label: 'PRAZO' },
+                  ] as const
+                ).map(({ forma, label }) => (
                   <button
                     key={forma}
                     type="button"
-                    onClick={() => void selecionarFormaSemTef(forma)}
-                    className={`py-2 rounded-lg flex flex-col items-center gap-1 font-black text-[9px] uppercase tracking-wider border-2 transition-all ${
-                      formaPagamento === forma ? 'bg-violet-500/15 border-violet-500/40 text-violet-300 shadow-[0_0_10px_rgba(139,92,246,0.25)]' : 'bg-[#08101f] border-white/10 text-slate-500'
-                    }`}
+                    onClick={() => abrirModalPagamentoParcial({ kind: 'sem_tef', forma })}
+                    className="py-2 rounded-lg flex flex-col items-center gap-1 font-black text-[9px] uppercase tracking-wider border-2 transition-all bg-[#08101f] border-white/10 text-slate-500 hover:border-violet-500/35 hover:text-violet-200"
                   >
                     {forma === 'PIX' && <QrCode className="w-4 h-4" />}
-                    {forma === 'CARTAO_DEBITO' && <CreditCard className="w-4 h-4" />}
+                    {(forma === 'CARTAO_DEBITO' || forma === 'CARTAO_CREDITO') && (
+                      <CreditCard className="w-4 h-4" />
+                    )}
                     {forma === 'DINHEIRO' && <Banknote className="w-4 h-4" />}
                     {forma === 'CREDIARIO' && <ShieldCheck className="w-4 h-4" />}
-                    {forma === 'CARTAO_DEBITO' ? 'DÉBITO' : forma === 'CREDIARIO' ? 'PRAZO' : forma}
+                    {label}
                   </button>
                 ))}
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => void solicitarTefPinpad('CREDITO')}
+                  onClick={() => abrirModalPagamentoParcial({ kind: 'tef', cartao: 'CREDITO' })}
                   disabled={carrinho.length === 0 || bloqueioFiscal}
-                  className={`py-2.5 rounded-lg flex flex-col items-center gap-1 font-black text-[9px] uppercase tracking-wider border-2 transition-all disabled:opacity-40 ${
-                    formaPagamento === 'CARTAO_CREDITO_TEF'
-                      ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300'
-                      : 'bg-[#08101f] border-cyan-500/25 text-cyan-400/90 hover:border-cyan-500/45'
-                  }`}
+                  className="py-2.5 rounded-lg flex flex-col items-center gap-1 font-black text-[9px] uppercase tracking-wider border-2 transition-all disabled:opacity-40 bg-[#08101f] border-cyan-500/25 text-cyan-400/90 hover:border-cyan-500/45"
                 >
                   <CreditCard className="w-4 h-4" />
-                  Crédito (TEF)
+                  CREDITO TEF
                 </button>
                 <button
                   type="button"
-                  onClick={() => void solicitarTefPinpad('DEBITO')}
+                  onClick={() => abrirModalPagamentoParcial({ kind: 'tef', cartao: 'DEBITO' })}
                   disabled={carrinho.length === 0 || bloqueioFiscal}
-                  className={`py-2.5 rounded-lg flex flex-col items-center gap-1 font-black text-[9px] uppercase tracking-wider border-2 transition-all disabled:opacity-40 ${
-                    formaPagamento === 'CARTAO_DEBITO_TEF'
-                      ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300'
-                      : 'bg-[#08101f] border-cyan-500/25 text-cyan-400/90 hover:border-cyan-500/45'
-                  }`}
+                  className="py-2.5 rounded-lg flex flex-col items-center gap-1 font-black text-[9px] uppercase tracking-wider border-2 transition-all disabled:opacity-40 bg-[#08101f] border-cyan-500/25 text-cyan-400/90 hover:border-cyan-500/45"
                 >
                   <CreditCard className="w-4 h-4" />
-                  Débito (TEF)
+                  DEBITO TEF
                 </button>
               </div>
-              {(formaPagamento === 'CARTAO_CREDITO_TEF' || formaPagamento === 'CARTAO_DEBITO_TEF') &&
-                transacaoTefId && (
-                  <p className="text-[10px] text-emerald-400/90 font-bold text-center">
-                    PinPad OK — NSU vinculado. Finalize a venda (F10).
-                  </p>
-                )}
+              {linhasPagamento.some((l) => l.transacaoTefId) && valorRestante <= 0.009 && (
+                <p className="text-[10px] text-emerald-400/90 font-bold text-center">
+                  TEF autorizado (CNC) — F10 finaliza e confirma na maquininha após gravar no ERP.
+                </p>
+              )}
             </div>
-
-            {formaPagamento === 'CREDIARIO' && (
-              <div className="mb-2">
-                <select 
-                  className="w-full p-2 bg-[#08101f] border border-white/10 text-white font-bold text-xs rounded-lg focus:ring-2 focus:ring-violet-500/20 outline-none"
-                  value={qtdParcelas}
-                  onChange={(e) => setQtdParcelas(Number(e.target.value))}
-                >
-                  <option value={1}>1x (30 dias)</option>
-                  <option value={2}>2x (30 e 60 dias)</option>
-                  <option value={3}>3x (30, 60 e 90 dias)</option>
-                  <option value={4}>4x</option>
-                  <option value={5}>5x</option>
-                  <option value={6}>6x</option>
-                </select>
-              </div>
-            )}
-
-            {formaPagamento === 'DINHEIRO' && (
-              <div className="mb-2 flex gap-2 items-center">
-                <input 
-                  type="number" 
-                  placeholder="Recebido (R$)"
-                  className="flex-1 p-2 bg-[#08101f] border border-white/10 text-white rounded-lg focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500/40 outline-none text-sm font-black font-mono shadow-inner"
-                  value={valorRecebido}
-                  onChange={(e) => setValorRecebido(e.target.value)}
-                />
-                {valorRecebido && troco >= 0 && (
-                  <p className="text-emerald-400 font-black text-xs bg-emerald-500/10 p-2 rounded-lg border border-emerald-500/20 whitespace-nowrap">
-                    Troco: R$ {troco.toFixed(2)}
-                  </p>
-                )}
-              </div>
-            )}
 
             <button 
               onClick={finalizarVenda}
@@ -1521,8 +2293,8 @@ export function FrenteCaixa() {
                 finalizando ||
                 bloqueioFiscal ||
                 !sessaoCaixa ||
-                ((formaPagamento === 'CARTAO_CREDITO_TEF' || formaPagamento === 'CARTAO_DEBITO_TEF') &&
-                  !transacaoTefId)
+                linhasPagamento.length === 0 ||
+                valorRestante > 0.009
               }
               className={`w-full py-3 rounded-xl font-black text-sm flex flex-col items-center justify-center transition-all ${
                 carrinho.length > 0 && !bloqueioFiscal && sessaoCaixa

@@ -12,6 +12,8 @@ const __dirname = path.dirname(__filename);
 /** Fora do pacote (.exe) = desenvolvimento local com Vite. */
 const isDev = !app.isPackaged;
 
+const windowIconPath = path.join(__dirname, 'assets', 'window-icon.jpeg');
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -20,7 +22,9 @@ function createWindow() {
     minHeight: 700,
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: '#020617',
+    /** Barra de título / taskbar — marca Aurya (evita ícone padrão do Electron). */
+    icon: windowIconPath,
+    backgroundColor: '#f8fafc',
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

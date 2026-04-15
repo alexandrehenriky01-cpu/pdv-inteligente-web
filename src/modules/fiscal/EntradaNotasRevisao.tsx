@@ -1,4 +1,4 @@
-import React from 'react';
+import { useEffect, useMemo, useState, type ComponentType } from 'react';
 import {
   ArrowLeft,
   ClipboardCheck,
@@ -32,7 +32,7 @@ export type RevisaoAbaId =
 const abasRevisao: {
   id: RevisaoAbaId;
   label: string;
-  Icon: React.ComponentType<{ className?: string }>;
+  Icon: ComponentType<{ className?: string }>;
 }[] = [
   { id: 'estoque', label: 'Estoque / Produtos', Icon: PackageCheck },
   { id: 'financeiro', label: 'Financeiro', Icon: Wallet },
@@ -91,14 +91,14 @@ export function EntradaNotasRevisao({
   parseDataEmissaoXml,
 }: EntradaNotasRevisaoProps) {
   const navigate = useNavigate();
-  const [filtroContaPlano, setFiltroContaPlano] = React.useState('');
+  const [filtroContaPlano, setFiltroContaPlano] = useState('');
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (revisaoAba !== 'contabil') setFiltroContaPlano('');
   }, [revisaoAba]);
 
   const selectedMeta = contasAnaliticasPlano.find((c) => c.id === contaContabilId);
-  const contasFiltradasPlano = React.useMemo(() => {
+  const contasFiltradasPlano = useMemo(() => {
     const t = filtroContaPlano.trim().toLowerCase();
     let list = contasAnaliticasPlano;
     if (t) {

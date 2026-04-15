@@ -2,7 +2,7 @@
 import axios, { InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 import { AUTH_TOKEN_KEY, clearStoredAuth } from './authStorage';
 
-function resolveApiBaseUrl(): string {
+export function resolveApiBaseUrl(): string {
   const fallback = 'https://pdv-inteligente-api.onrender.com';
   const raw = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
   let base = raw && raw.length > 0 ? raw : fallback;
@@ -23,7 +23,7 @@ function isLoginPostRequest(config: InternalAxiosRequestConfig | undefined): boo
   const method = (config.method || 'get').toLowerCase();
   if (method !== 'post') return false;
   const url = String(config.url || '');
-  return url === '/api/login' || url.endsWith('/api/login');
+  return url === '/api/auth/login' || url.endsWith('/api/auth/login');
 }
 
 // Injeta o Token salvo no LocalStorage em todas as chamadas
@@ -44,7 +44,7 @@ api.interceptors.response.use(
   (response: AxiosResponse) => response,
   (error: AxiosError) => {
     if (error.response?.status === 401) {
-      // Credenciais inválidas no POST /api/login — não limpar sessão anterior nem forçar redirect
+      // Credenciais inválidas no POST /api/auth/login — não limpar sessão anterior nem forçar redirect
       if (isLoginPostRequest(error.config)) {
         return Promise.reject(error);
       }

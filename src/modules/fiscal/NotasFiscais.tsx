@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { api } from '../../services/api';
 import { Layout } from '../../components/Layout';
 import {
@@ -326,7 +326,7 @@ export function NotasFiscais() {
                         isFalhaFiscal && Boolean(venda.mensagemErroFiscal?.trim());
 
                       return (
-                        <React.Fragment key={venda.id}>
+                        <Fragment key={venda.id}>
                         <tr
                           className="transition-colors hover:bg-white/5"
                         >
@@ -446,7 +446,7 @@ export function NotasFiscais() {
                             </td>
                           </tr>
                         )}
-                        </React.Fragment>
+                        </Fragment>
                       );
                     })}
                   </tbody>

@@ -1,4 +1,4 @@
-import React from 'react';
+import { type ChangeEvent, type FC } from 'react';
 import {
   Building2,
   Landmark,
@@ -15,7 +15,7 @@ import {
   IndicadorIE
 } from '../../types/pessoa';
 
-export const FormDadosFiscais: React.FC<IFormPessoaProps> = ({
+export const FormDadosFiscais: FC<IFormPessoaProps> = ({
   formData,
   setFormData,
   inputClass,
@@ -23,7 +23,7 @@ export const FormDadosFiscais: React.FC<IFormPessoaProps> = ({
 }) => {
 
   // 💡 CNAE MASK
-  const handleCnaeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCnaeChange = (e: ChangeEvent<HTMLInputElement>) => {
     let value = e.target.value.replace(/\D/g, '');
 
     if (value.length > 7) value = value.slice(0, 7);
@@ -36,7 +36,7 @@ export const FormDadosFiscais: React.FC<IFormPessoaProps> = ({
   };
 
   // 💡 IE uppercase
-  const handleIeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleIeChange = (e: ChangeEvent<HTMLInputElement>) => {
     setFormData({
       ...formData,
       inscricaoEstadual: e.target.value.toUpperCase()
@@ -44,7 +44,7 @@ export const FormDadosFiscais: React.FC<IFormPessoaProps> = ({
   };
 
   // 💡 indicador inteligente
-  const handleIndicadorIEChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleIndicadorIEChange = (e: ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value as IndicadorIE;
     let ieValue = formData.inscricaoEstadual ?? '';
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import axios from 'axios';
 import { useBalanca } from './useBalanca';
 
@@ -45,7 +45,7 @@ export default function RecebimentoColetor() {
   }, [pesoReal, estabilizado]);
 
   // 5. Submissão para a nossa API blindada
-  const handleRegistrarRecebimento = async (e: React.FormEvent) => {
+  const handleRegistrarRecebimento = async (e: FormEvent) => {
     e.preventDefault();
     setMensagem(null);
 

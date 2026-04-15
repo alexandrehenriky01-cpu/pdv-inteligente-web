@@ -3,6 +3,7 @@ import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 // Rotas Públicas e Dashboard
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
+import { DashboardFood } from './pages/DashboardFood';
 
 // Cadastros Base
 import { Categorias } from './pages/cadastros/Categorias'; 
@@ -11,12 +12,26 @@ import { Embalagens } from './pages/cadastros/embalagens';
 import { CadastroPessoa } from './pages/cadastros/CadastroPessoa';
 
 // Operacional e Vendas
-import { FrenteCaixa } from './modules/operacoes/FrenteCaixa'; 
+import { FrenteCaixa } from './modules/operacoes/FrenteCaixa';
+import { SelfCheckoutLayout } from './modules/selfcheckout/SelfCheckoutLayout';
+import { SelfCheckoutPage } from './modules/selfcheckout/SelfCheckoutPage';
+import { TotemLayout } from './modules/totem/TotemLayout';
+import { TotemWelcomePage } from './modules/totem/pages/TotemWelcomePage';
+import { TotemMenuPage } from './modules/totem/pages/TotemMenuPage';
+import { TotemCheckoutPage } from './modules/totem/pages/TotemCheckoutPage';
 import { PdvFoodService } from './modules/operacoes/PdvFoodService';
 import { ComandaMobile } from './modules/operacoes/ComandaMobile';
+import { KdsPage } from './modules/kds/KdsPage';
+import { PainelSenhasPage } from './modules/kds/PainelSenhasPage';
+import { DeliveryLayout } from './modules/delivery/DeliveryLayout';
+import { DeliveryMenuPage } from './modules/delivery/DeliveryMenuPage';
+import { DeliveryCheckoutPage } from './modules/delivery/DeliveryCheckoutPage';
+import { DeliveryTrackingPage } from './modules/delivery/DeliveryTrackingPage';
 
 // Estoque
 import { Estoque } from './modules/estoque/pages/Estoque';
+import { TabelasPrecoPage } from './modules/estoque/pages/TabelasPrecoPage';
+import IntegracaoBalancasPage from './modules/estoque/pages/IntegracaoBalancasPage';
 import { DashboardEstoqueIA } from './modules/estoque/pages/DashboardEstoqueIA';
 import { GestaoInventarioPage } from './modules/estoque/pages/GestaoInventarioPage';
 import { ContagemCegaPage } from './modules/estoque/pages/ContagemCegaPage';
@@ -73,6 +88,7 @@ import { AdminClientesPage } from './pages/admin/AdminClientesPage';
 // Gestão de Usuários, Equipe e Configurações
 import { GestaoUsuariosPage } from './modules/configuracoes/pages/GestaoUsuariosPage';
 import { GestaoPermissoesPage } from './modules/configuracoes/pages/GestaoPermissoesPage';
+import { GestaoTefPage } from './modules/configuracoes/pages/GestaoTefPage';
 import ConfiguracoesLoja from './modules/clientes_sistema/ConfiguracoesLoja';
 
 // 🖨️ MÓDULO DE ETIQUETAS, ESTAÇÕES DE TRABALHO E BALANÇAS
@@ -80,9 +96,21 @@ import LayoutEtiquetasPage from './modules/producao/configuracoes/LayoutEtiqueta
 import LayoutEtiquetaEditorPage from './modules/producao/configuracoes/LayoutEtiquetaEditorPage'; 
 import EstacoesTrabalhoPage from './modules/producao/configuracoes/EstacoesTrabalhoPage'; 
 import BalancasPage from './modules/producao/configuracoes/BalancasPage';
+import { CaixasConfigPage } from './modules/vendas/pages/CaixasConfigPage';
+import { AdquirentesPage } from './modules/vendas/pages/AdquirentesPage';
+import { CampanhasPromocionaisPage } from './modules/vendas/pages/CampanhasPromocionaisPage';
+import { GestaoTurnosCaixaPage } from './modules/vendas/pages/GestaoTurnosCaixaPage';
+import { GestaoPedidosFoodPage } from './modules/vendas/pages/GestaoPedidosFoodPage';
+import { GestaoCardapioPage } from './modules/vendas/pages/GestaoCardapioPage';
+import { GarcomLayout } from './modules/garcom/GarcomLayout';
+import { GarcomMesasPage } from './modules/garcom/pages/GarcomMesasPage';
+import { GarcomMesaContaPage } from './modules/garcom/pages/GarcomMesaContaPage';
+import { GarcomPedirPage } from './modules/garcom/pages/GarcomPedirPage';
+import { GarcomFechamentoPage } from './modules/garcom/pages/GarcomFechamentoPage';
 
 // IMPORTAÇÃO DO GUARDIÃO DE ROTAS TIPADO
 import { PrivateRoute } from './components/PrivateRoute';
+import { RenderIfModule } from './components/RenderIfModule';
 import { AuthProvider } from './contexts/AuthContext';
 
 // 🥩 MÓDULO DE PRODUÇÃO (AÇOUGUE / INDÚSTRIA)
@@ -98,6 +126,12 @@ function App() {
         {/* 🔓 ROTAS PÚBLICAS */}
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<Login />} />
+
+        <Route path="/delivery/:slug" element={<DeliveryLayout />}>
+          <Route index element={<DeliveryMenuPage />} />
+          <Route path="checkout" element={<DeliveryCheckoutPage />} />
+          <Route path="pedido/:pedidoId" element={<DeliveryTrackingPage />} />
+        </Route>
         
         {/* 👑 ROTAS SAAS (ACESSO RESTRITO AO SUPER_ADMIN) */}
         <Route element={<PrivateRoute rolesPermitidas={['SUPER_ADMIN', 'SUPORTE_MASTER']} />}>
@@ -109,6 +143,7 @@ function App() {
           
           {/* 📊 Visão Geral */}
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/dashboard-food" element={<DashboardFood />} />
           
           {/* 🧠 Central da Aurya */}
           <Route path="/ConsultorIA" element={<ConsultorIA />} />
@@ -127,18 +162,54 @@ function App() {
           {/* 🚀 GESTÃO DE EQUIPE E ACESSOS (RBAC) */}
           <Route path="/equipe" element={<GestaoUsuariosPage />} />
           <Route path="/permissoes" element={<GestaoPermissoesPage />} />
+          <Route path="/configuracao-tef" element={<GestaoTefPage />} />
           <Route path="/configuracoes-loja" element={<ConfiguracoesLoja />} />
           
           {/* 👇 MÓDULO DE IMPRESSÃO E PRODUÇÃO E HARDWARE */}
           <Route path="/layout-etiquetas" element={<LayoutEtiquetasPage />} />
           <Route path="/configuracoes/etiquetas/:id/editor" element={<LayoutEtiquetaEditorPage />} />
           <Route path="/estacoes-trabalho" element={<EstacoesTrabalhoPage />} />
+          <Route path="/locais-cobranca" element={<AdquirentesPage />} />
+          <Route path="/configuracao-caixas-pdv" element={<CaixasConfigPage />} />
           <Route path="/balancas" element={<BalancasPage />} />
           
           {/* 🛒 Operacional & Vendas */}
           <Route path="/frente-caixa" element={<FrenteCaixa />} />
+          <Route
+            path="/self-checkout"
+            element={
+              <SelfCheckoutLayout>
+                <SelfCheckoutPage />
+              </SelfCheckoutLayout>
+            }
+          />
+          <Route path="/totem-food" element={<TotemLayout />}>
+            <Route index element={<TotemWelcomePage />} />
+            <Route path="cardapio" element={<TotemMenuPage />} />
+            <Route path="pagamento" element={<TotemCheckoutPage />} />
+          </Route>
           <Route path="/pdv-food" element={<PdvFoodService />} />
+          <Route path="/kds" element={<KdsPage />} />
+          <Route path="/painel-senhas" element={<PainelSenhasPage />} />
           <Route path="/comanda-mobile" element={<ComandaMobile />} />
+          <Route path="/garcom" element={<GarcomLayout />}>
+            <Route index element={<Navigate to="/garcom/mesas" replace />} />
+            <Route path="mesas" element={<GarcomMesasPage />} />
+            <Route path="mesa/:numeroMesa" element={<GarcomMesaContaPage />} />
+            <Route path="mesa/:numeroMesa/fechar" element={<GarcomFechamentoPage />} />
+            <Route path="mesa/:numeroMesa/pedir" element={<GarcomPedirPage />} />
+          </Route>
+          <Route path="/vendas/campanhas-promocionais" element={<CampanhasPromocionaisPage />} />
+          <Route path="/vendas/gestao-turnos-caixa" element={<GestaoTurnosCaixaPage />} />
+          <Route path="/gestao-food" element={<GestaoPedidosFoodPage />} />
+          <Route
+            path="/cardapio/gestao"
+            element={
+              <RenderIfModule module="FOOD_SERVICE">
+                <GestaoCardapioPage />
+              </RenderIfModule>
+            }
+          />
           
           {/* 📦 Estoque Inteligente */}
           <Route path="/estoque" element={<Estoque />} />
@@ -146,6 +217,8 @@ function App() {
           <Route path="/estoque/inteligencia" element={<DashboardEstoqueIA />} />
           <Route path="/estoque/inventario" element={<GestaoInventarioPage />} />
           <Route path="/estoque/bipador" element={<ContagemCegaPage />} />
+          <Route path="/estoque/listas-preco" element={<TabelasPrecoPage />} />
+          <Route path="/estoque/carga-balancas" element={<IntegracaoBalancasPage />} />
 
           {/* 🏭 Logística e WMS */}
           <Route path="/wms/recebimento" element={<RecebimentoIndustria />} />

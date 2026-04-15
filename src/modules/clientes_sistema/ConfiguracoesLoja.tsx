@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Upload, Save, Building2, Phone, MapPin, UserSquare2, FileText, ShieldCheck, Key, Hash, CloudCog, Scale, Trash2, RefreshCw } from 'lucide-react';
+import { useEffect, useState, type ChangeEvent, type FC } from 'react';
+import { isAxiosError } from 'axios';
+import { Upload, Save, Building2, Phone, MapPin, UserSquare2, FileText, ShieldCheck, Key, Hash, CloudCog, Scale, Trash2, RefreshCw, Link2 } from 'lucide-react';
 // 🚀 1. IMPORTAMOS O HOOK DE NAVEGAÇÃO
 import { useNavigate } from 'react-router-dom'; 
 import { api } from '../../services/api'; 
@@ -39,6 +40,9 @@ interface CompanySettings {
   cscId: string;
   cscHash: string;
   rntrc: string;
+
+  /** Slug público do cardápio delivery (apenas minúsculas, números e hífens). */
+  slug: string;
   
   nfeHomologacaoSerie: string;
   nfeHomologacaoNumero: string;
@@ -79,7 +83,7 @@ function formatarDataBr(iso: string | null | undefined): string | null {
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-export const ConfiguracoesLoja: React.FC = () => {
+export const ConfiguracoesLoja: FC = () => {
   // 🚀 2. INICIALIZAMOS O NAVEGADOR
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<string>('identificacao');
@@ -101,7 +105,7 @@ export const ConfiguracoesLoja: React.FC = () => {
     possuiCertificado: false,
     certificadoNome: '',
     certificadoValidade: '',
-    senhaCertificado: '', cscId: '', cscHash: '', rntrc: '',
+    senhaCertificado: '', cscId: '', cscHash: '', rntrc: '', slug: '',
     nfeHomologacaoSerie: '', nfeHomologacaoNumero: '', nfeProducaoSerie: '', nfeProducaoNumero: '', nfeToggle: false,
     nfceHomologacaoSerie: '', nfceHomologacaoNumero: '', nfceProducaoSerie: '', nfceProducaoNumero: '', nfceToggle: false,
     nfseHomologacaoSerie: '', nfseHomologacaoNumero: '', nfseProducaoSerie: '', nfseProducaoNumero: '', nfseToggle: false,
@@ -212,6 +216,7 @@ export const ConfiguracoesLoja: React.FC = () => {
             mdfeProducaoSerie: lojaDB.mdfeSerieProducao != null ? String(lojaDB.mdfeSerieProducao) : prev.mdfeProducaoSerie,
             mdfeProducaoNumero: lojaDB.mdfeNumeroProducao != null ? String(lojaDB.mdfeNumeroProducao) : prev.mdfeProducaoNumero,
             logoUrl: lojaDB.logoUrl ?? prev.logoUrl,
+            slug: typeof lojaDB.slug === 'string' ? lojaDB.slug : prev.slug,
             possuiCertificado: Boolean(lojaDB.possuiCertificado),
             certificadoNome: lojaDB.certificadoNome ?? prev.certificadoNome,
             certificadoValidade: lojaDB.certificadoValidade ?? prev.certificadoValidade,
@@ -280,9 +285,13 @@ export const ConfiguracoesLoja: React.FC = () => {
       }
 
       navigate('/');
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Erro ao salvar:', error);
-      alert('❌ Erro ao salvar configurações. Tente novamente.');
+      const apiMsg =
+        isAxiosError<{ error?: string }>(error) && typeof error.response?.data?.error === 'string'
+          ? error.response.data.error
+          : null;
+      alert(apiMsg ? `Erro: ${apiMsg}` : 'Erro ao salvar configurações. Tente novamente.');
     }
   };
 
@@ -378,7 +387,7 @@ export const ConfiguracoesLoja: React.FC = () => {
                     id="logo-upload"
                     className="hidden"
                     accept="image/*"
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => {
                       setRemoverLogo(false);
                       updateSetting('logo', e.target.files?.[0] || null);
                     }}
@@ -443,6 +452,40 @@ export const ConfiguracoesLoja: React.FC = () => {
                   <div>
                     <label className={labelClass}>Nome Fantasia</label>
                     <input type="text" className={inputClass} placeholder="Nome Fantasia" value={settings.nomeFantasia} onChange={(e) => updateSetting('nomeFantasia', e.target.value)} />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className={labelClass}>
+                      <span className="inline-flex items-center gap-1.5">
+                        <Link2 className="h-3.5 w-3.5 text-violet-400" />
+                        Link do Delivery (slug)
+                      </span>
+                    </label>
+                    <input
+                      type="text"
+                      className={`${inputClass} font-mono text-sm`}
+                      placeholder="ex.: minha-hamburgueria"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={settings.slug}
+                      onChange={(e) => {
+                        const v = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '');
+                        updateSetting('slug', v);
+                      }}
+                    />
+                    <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                      Apenas letras minúsculas, números e hífens. Deixe em branco se não quiser usar um link curto ainda.
+                    </p>
+                    {settings.slug.trim() !== '' ? (
+                      <p className="mt-2 text-xs text-slate-400">
+                        Seu link será:{' '}
+                        <span className="break-all font-mono text-[13px] text-violet-200/95">
+                          {typeof window !== 'undefined'
+                            ? `${window.location.origin}${window.location.pathname.replace(/\/$/, '')}`
+                            : ''}
+                          #/delivery/{settings.slug.trim()}
+                        </span>
+                      </p>
+                    ) : null}
                   </div>
                   <div>
                     <label className={labelClass}>{settings.pessoaFisica ? 'CPF' : 'CNPJ'}</label>
@@ -711,7 +754,7 @@ export const ConfiguracoesLoja: React.FC = () => {
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:space-x-3">
                         <input
                           type="file"
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                          onChange={(e: ChangeEvent<HTMLInputElement>) => {
                             setRemoverCertificado(false);
                             updateSetting('certificado', e.target.files?.[0] || null);
                           }}

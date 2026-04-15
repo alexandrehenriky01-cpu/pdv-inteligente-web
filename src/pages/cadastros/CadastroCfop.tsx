@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api } from '../../services/api';
 import { Layout } from '../../components/Layout';
 import { AxiosError } from 'axios';
@@ -68,8 +68,8 @@ function parseJsonOpcional(raw: string): unknown | undefined {
   return JSON.parse(t) as unknown;
 }
 
-function formatFloat(val: string | number | null | undefined): number | null {
-  if (val === null || val === undefined || val === '') return null;
+function formatFloat(val: string | number | boolean | null | undefined): number | null {
+  if (val === null || val === undefined || val === '' || typeof val === 'boolean') return null;
   if (typeof val === 'number') return Number.isFinite(val) ? val : null;
   const n = parseFloat(String(val).replace(',', '.'));
   return Number.isFinite(n) ? n : null;
@@ -250,7 +250,7 @@ export function CadastroCfop() {
     };
   };
 
-  const handleSalvar = async (e: React.FormEvent) => {
+  const handleSalvar = async (e: FormEvent) => {
     e.preventDefault();
     setFormError(null);
     if (!String(form.codigoCfop ?? '').trim() || !String(form.descricaoInterna ?? '').trim()) {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState, type FC } from 'react';
 import { Link } from 'react-router-dom';
 import { Layout } from '../../../components/Layout';
 import { 
@@ -42,7 +42,7 @@ interface CotacaoCompra {
   itens: ItemCotacao[];
 }
 
-export const GerenciarCotacoes: React.FC = () => {
+export const GerenciarCotacoes: FC = () => {
   const [cotacoes, setCotacoes] = useState<CotacaoCompra[]>([]);
   const [cotacoesFiltradas, setCotacoesFiltradas] = useState<CotacaoCompra[]>([]);
   const [cotacaoSelecionada, setCotacaoSelecionada] = useState<CotacaoCompra | null>(null);

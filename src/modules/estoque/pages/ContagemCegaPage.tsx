@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { toast } from 'react-toastify';
 import { api } from '../../../services/api';
 import {
   Barcode,
@@ -56,12 +57,13 @@ export function ContagemCegaPage() {
     } catch (err) {
       const error = err as AxiosError<{ error?: string }>;
       console.error('Erro ao verificar inventário:', error.response?.data || error.message);
+      toast.error(error.response?.data?.error || error.message || 'Erro ao verificar inventário.');
     } finally {
       setLoading(false);
     }
   };
 
-  const registrarBip = async (e: React.FormEvent) => {
+  const registrarBip = async (e: FormEvent) => {
     e.preventDefault();
     if (!inventarioAberto || !codigoBarras || !quantidade) return;
 
@@ -99,7 +101,7 @@ export function ContagemCegaPage() {
     setTimeout(() => setMensagem({ texto: '', tipo: '' }), 3000);
   };
 
-  const handleCodigoKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleCodigoKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && codigoBarras) {
       e.preventDefault();
       qtdRef.current?.focus();

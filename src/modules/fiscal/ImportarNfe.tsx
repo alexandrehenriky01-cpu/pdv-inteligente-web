@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { api } from '../../services/api';
 import { Layout } from '../../components/Layout';
 import { useNavigate } from 'react-router-dom';
@@ -224,7 +224,7 @@ export function ImportarNfe() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [previewData, modalPesquisa.isOpen]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) setFile(e.target.files[0]);
   };
 
@@ -247,7 +247,7 @@ export function ImportarNfe() {
     }
   };
 
-  const handleCfopChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleCfopChange = (e: ChangeEvent<HTMLSelectElement>) => {
     const id = e.target.value;
     setSelectedCfopId(id);
 
@@ -300,6 +300,7 @@ export function ImportarNfe() {
           valorTotal: it.valorTotal ?? it.quantidade * it.valorUnitario,
           unidadeMedida: it.unidadeMedida || 'UN',
           produtoIdSelecionado: it.produtoIdSelecionado,
+          produtoNomeSelecionado: it.produtoNomeSelecionado ?? '',
         })),
       };
 
@@ -333,7 +334,7 @@ export function ImportarNfe() {
 
     setBuscandoProdutos(true);
     try {
-      const response = await api.get<IProdutoBusca[]>(`/api/produtos?busca=${encodeURIComponent(termo)}`);
+      const response = await api.get<IProdutoBusca[]>(`/api/cadastros/produtos?busca=${encodeURIComponent(termo)}`);
       setProdutosPesquisa(response.data);
     } catch (err) {
       const error = err as AxiosError<{ error?: string }>;

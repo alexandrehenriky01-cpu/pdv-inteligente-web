@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../../../services/api';
 import { Layout } from '../../../components/Layout';
 import {
@@ -30,6 +30,15 @@ export interface IPessoaResumo {
   nome: string;
 }
 
+/** Alinhado ao enum `StatusTitulo` do Prisma (backend). */
+export type StatusTituloGestao =
+  | 'ABERTO'
+  | 'PAGO_PARCIAL'
+  | 'PAGO_TOTAL'
+  | 'CANCELADO'
+  | 'AGUARDANDO_LIQUIDACAO'
+  | string;
+
 export interface ITitulo {
   id: string;
   descricao: string;
@@ -39,7 +48,7 @@ export interface ITitulo {
   saldoDevedor: number;
   dataVencimento: string;
   dataEmissao?: string;
-  status: 'PENDENTE' | 'PAGO' | 'ATRASADO' | 'PAGO_TOTAL' | 'ABERTO' | 'CONCLUIDO' | string;
+  status: StatusTituloGestao;
   pessoa: IPessoaResumo;
   origem: 'MANUAL' | 'PDV' | 'NFE' | string;
   planoContas: string;
@@ -69,7 +78,9 @@ export function GestaoTitulosPage() {
   // ==========================================
   const [busca, setBusca] = useState('');
   const [filtroTipo, setFiltroTipo] = useState<'TODOS' | 'RECEBER' | 'PAGAR'>('TODOS');
-  const [filtroStatus, setFiltroStatus] = useState<'TODOS' | 'ABERTOS' | 'PAGOS' | 'VENCIDOS'>('TODOS');
+  const [filtroStatus, setFiltroStatus] = useState<
+    'TODOS' | 'ABERTOS' | 'PAGOS' | 'VENCIDOS' | 'AGUARDANDO_LIQUIDACAO'
+  >('TODOS');
   const [filtroValorMin, setFiltroValorMin] = useState('');
   const [filtroValorMax, setFiltroValorMax] = useState('');
   const [filtroDataEmissaoInicio, setFiltroDataEmissaoInicio] = useState('');
@@ -100,9 +111,14 @@ export function GestaoTitulosPage() {
   const [novoVencimento, setNovoVencimento] = useState('');
   const [novoPlanoContasId, setNovoPlanoContasId] = useState('');
 
-  const isPago = (status: string) => ['PAGO', 'PAGO_TOTAL', 'CONCLUIDO', 'BAIXADO'].includes(status?.toUpperCase() || '');
-  const isPendente = (status: string) => ['PENDENTE', 'ABERTO'].includes(status?.toUpperCase() || '');
-  const isAtrasado = (status: string) => ['ATRASADO', 'VENCIDO'].includes(status?.toUpperCase() || '');
+  const isPago = (status: string) =>
+    ['PAGO', 'PAGO_TOTAL', 'CONCLUIDO', 'BAIXADO'].includes(status?.toUpperCase() || '');
+  const isPendente = (status: string) =>
+    ['PENDENTE', 'ABERTO', 'PAGO_PARCIAL'].includes(status?.toUpperCase() || '');
+  const isAtrasado = (status: string) =>
+    ['ATRASADO', 'VENCIDO'].includes(status?.toUpperCase() || '');
+  const isAguardandoLiquidacao = (status: string) =>
+    String(status || '').toUpperCase() === 'AGUARDANDO_LIQUIDACAO';
 
   useEffect(() => {
     carregarDados();
@@ -278,6 +294,9 @@ export function GestaoTitulosPage() {
     if (filtroStatus === 'ABERTOS' && isPago(statusSeguro)) return false;
     if (filtroStatus === 'PAGOS' && !isPago(statusSeguro)) return false;
     if (filtroStatus === 'VENCIDOS' && !isAtrasado(statusSeguro)) return false;
+    if (filtroStatus === 'AGUARDANDO_LIQUIDACAO' && !isAguardandoLiquidacao(statusSeguro)) {
+      return false;
+    }
 
     // 3. Origem / Tipo de Documento
     if (filtroOrigem !== 'TODAS' && t.origem !== filtroOrigem) return false;
@@ -322,6 +341,13 @@ export function GestaoTitulosPage() {
   };
 
   const getStatusBadge = (status: string) => {
+    if (isAguardandoLiquidacao(status)) {
+      return (
+        <span className="inline-flex w-max items-center gap-1 rounded-full border border-sky-400/30 bg-sky-500/15 px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-sky-200 shadow-[0_0_12px_rgba(56,189,248,0.2)]">
+          <Clock className="h-3 w-3" /> Aguard. liquidação (cartão)
+        </span>
+      );
+    }
     if (isPago(status)) {
       return (
         <span className="inline-flex w-max items-center gap-1 rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-emerald-300">
@@ -339,7 +365,7 @@ export function GestaoTitulosPage() {
     if (isPendente(status)) {
       return (
         <span className="inline-flex w-max items-center gap-1 rounded-full border border-amber-400/20 bg-amber-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-amber-300">
-          <Clock className="h-3 w-3" /> Pendente
+          <Clock className="h-3 w-3" /> Em aberto
         </span>
       );
     }
@@ -440,36 +466,69 @@ export function GestaoTitulosPage() {
         {/* ÁREA DA TABELA E FILTROS */}
         <div className="rounded-[30px] border border-white/10 bg-[#08101f]/90 shadow-[0_25px_60px_rgba(0,0,0,0.35)] backdrop-blur-xl overflow-hidden">
           
-          {/* BARRA DE CONTROLES RÁPIDOS */}
-          <div className="flex flex-col items-center justify-between gap-4 border-b border-white/10 bg-black/10 p-5 lg:flex-row">
-            <div className="relative w-full lg:w-[400px]">
-              <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
-              <input
-                type="text"
-                value={busca}
-                onChange={(e) => setBusca(e.target.value)}
-                placeholder="Buscar (Cliente, Descrição, Origem...)"
-                className={`${inputClass} pl-12 py-3`}
-              />
-            </div>
-
-            <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
-              <div className="flex rounded-xl border border-white/10 bg-[#0b1324] p-1.5 shadow-inner">
-                <button onClick={() => setFiltroTipo('TODOS')} className={`flex-1 rounded-lg px-4 py-2.5 text-xs font-black uppercase tracking-[0.14em] transition-all sm:flex-none ${filtroTipo === 'TODOS' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>Todos</button>
-                <button onClick={() => setFiltroTipo('RECEBER')} className={`flex-1 rounded-lg px-4 py-2.5 text-xs font-black uppercase tracking-[0.14em] transition-all sm:flex-none ${filtroTipo === 'RECEBER' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>Receber</button>
-                <button onClick={() => setFiltroTipo('PAGAR')} className={`flex-1 rounded-lg px-4 py-2.5 text-xs font-black uppercase tracking-[0.14em] transition-all sm:flex-none ${filtroTipo === 'PAGAR' ? 'bg-rose-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>Pagar</button>
+          {/* BARRA DE CONTROLES RÁPIDOS — linha 1: busca + tipo; linha 2: status em largura total (evita esmagar chips no lg:flex-row) */}
+          <div className="border-b border-white/10 bg-black/10">
+            <div className="flex flex-col items-stretch justify-between gap-4 p-5 lg:flex-row lg:items-center">
+              <div className="relative w-full min-w-0 lg:max-w-[400px] lg:flex-1">
+                <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="text"
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                  placeholder="Buscar (Cliente, Descrição, Origem...)"
+                  className={`${inputClass} pl-12 py-3`}
+                />
               </div>
 
-              <button
-                onClick={() => setShowFiltrosAvancados(!showFiltrosAvancados)}
-                className={`inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-black uppercase tracking-wider transition-all sm:flex-none ${
-                  showFiltrosAvancados ? 'border-violet-400/30 bg-violet-500/20 text-violet-300' : 'border-white/10 bg-[#0b1324] text-slate-400 hover:text-white'
-                }`}
-              >
-                <Filter className="h-4 w-4" />
-                Filtros Avançados
-                {showFiltrosAvancados ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              </button>
+              <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center lg:w-auto lg:flex-none">
+                <div className="flex min-w-0 flex-1 rounded-xl border border-white/10 bg-[#0b1324] p-1.5 shadow-inner sm:flex-none">
+                  <button onClick={() => setFiltroTipo('TODOS')} className={`flex-1 rounded-lg px-4 py-2.5 text-xs font-black uppercase tracking-[0.14em] transition-all sm:flex-none ${filtroTipo === 'TODOS' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>Todos</button>
+                  <button onClick={() => setFiltroTipo('RECEBER')} className={`flex-1 rounded-lg px-4 py-2.5 text-xs font-black uppercase tracking-[0.14em] transition-all sm:flex-none ${filtroTipo === 'RECEBER' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>Receber</button>
+                  <button onClick={() => setFiltroTipo('PAGAR')} className={`flex-1 rounded-lg px-4 py-2.5 text-xs font-black uppercase tracking-[0.14em] transition-all sm:flex-none ${filtroTipo === 'PAGAR' ? 'bg-rose-600 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>Pagar</button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowFiltrosAvancados(!showFiltrosAvancados)}
+                  className={`inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-black uppercase tracking-wider transition-all ${
+                    showFiltrosAvancados ? 'border-violet-400/30 bg-violet-500/20 text-violet-300' : 'border-white/10 bg-[#0b1324] text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Filter className="h-4 w-4" />
+                  Filtros Avançados
+                  {showFiltrosAvancados ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex w-full min-w-0 flex-wrap items-center gap-2 border-t border-white/5 px-5 pb-4 pt-3 sm:gap-3">
+              <span className="w-full shrink-0 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500 sm:mr-1 sm:w-auto sm:self-center">
+                Status:
+              </span>
+              {(
+                [
+                  { id: 'TODOS' as const, label: 'Todos' },
+                  { id: 'ABERTOS' as const, label: 'Abertos / pendentes' },
+                  { id: 'AGUARDANDO_LIQUIDACAO' as const, label: 'Aguard. liquidação (cartões)' },
+                  { id: 'PAGOS' as const, label: 'Pagos' },
+                  { id: 'VENCIDOS' as const, label: 'Vencidos' },
+                ] as const
+              ).map((chip) => (
+                <button
+                  key={chip.id}
+                  type="button"
+                  onClick={() => setFiltroStatus(chip.id)}
+                  className={`shrink-0 rounded-lg px-3 py-2 text-left text-[10px] font-black uppercase leading-snug tracking-[0.1em] transition-all sm:py-1.5 sm:tracking-[0.12em] ${
+                    filtroStatus === chip.id
+                      ? chip.id === 'AGUARDANDO_LIQUIDACAO'
+                        ? 'bg-sky-600/30 text-sky-200 ring-1 ring-sky-400/40'
+                        : 'bg-violet-600 text-white shadow-md'
+                      : 'bg-[#0b1324] text-slate-400 ring-1 ring-white/10 hover:text-white'
+                  }`}
+                >
+                  {chip.label}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -480,9 +539,18 @@ export function GestaoTitulosPage() {
                 
                 <div>
                   <label className={labelClass}>Status do Título</label>
-                  <select value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value as any)} className={inputClass}>
+                  <select
+                    value={filtroStatus}
+                    onChange={(e) =>
+                      setFiltroStatus(e.target.value as typeof filtroStatus)
+                    }
+                    className={inputClass}
+                  >
                     <option value="TODOS">Todos os Status</option>
                     <option value="ABERTOS">Abertos / Pendentes</option>
+                    <option value="AGUARDANDO_LIQUIDACAO">
+                      Aguardando liquidação (cartões)
+                    </option>
                     <option value="PAGOS">Pagos / Baixados</option>
                     <option value="VENCIDOS">Vencidos / Atrasados</option>
                   </select>
@@ -538,18 +606,39 @@ export function GestaoTitulosPage() {
             </div>
           )}
 
-          {/* 🚀 TABELA COM BARRA DE ROLAGEM FORÇADA (max-h-[600px] e custom-scrollbar) */}
-          <div className="custom-scrollbar overflow-x-auto overflow-y-auto max-h-[600px] w-full">
-            <table className="min-w-[1100px] w-full text-left">
+          {/* Tabela: scroll horizontal suave; coluna descrição com largura máxima + truncamento */}
+          <div className="custom-scrollbar w-full min-w-0 max-w-full overflow-x-auto overflow-y-auto max-h-[600px]">
+            <table className="min-w-[900px] w-full table-fixed text-left">
+              <colgroup>
+                <col style={{ width: '26%' }} />
+                <col style={{ width: '14%' }} />
+                <col style={{ width: '16%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '10%' }} />
+                <col style={{ width: '14%' }} />
+                <col style={{ width: '10%' }} />
+              </colgroup>
               <thead className="sticky top-0 z-10 border-b border-white/10 bg-[#0b1324] backdrop-blur-md">
                 <tr>
-                  <th className="p-5 text-xs font-black uppercase tracking-[0.16em] text-slate-400">Descrição / Origem</th>
-                  <th className="p-5 text-xs font-black uppercase tracking-[0.16em] text-slate-400">Pessoa (Cliente/Forn.)</th>
-                  <th className="p-5 text-xs font-black uppercase tracking-[0.16em] text-slate-400">Conta Contábil</th>
-                  <th className="p-5 text-xs font-black uppercase tracking-[0.16em] text-slate-400">Vencimento</th>
-                  <th className="p-5 text-right text-xs font-black uppercase tracking-[0.16em] text-slate-400">Valor (R$)</th>
-                  <th className="p-5 text-center text-xs font-black uppercase tracking-[0.16em] text-slate-400">Status</th>
-                  <th className="p-5 text-right text-xs font-black uppercase tracking-[0.16em] text-slate-400">Ações</th>
+                  <th className="p-4 text-xs font-black uppercase tracking-[0.16em] text-slate-400 sm:p-5">
+                    Descrição / Origem
+                  </th>
+                  <th className="p-4 text-xs font-black uppercase tracking-[0.16em] text-slate-400 sm:p-5">
+                    Pessoa (Cliente/Forn.)
+                  </th>
+                  <th className="p-4 text-xs font-black uppercase tracking-[0.16em] text-slate-400 sm:p-5">Conta Contábil</th>
+                  <th className="whitespace-nowrap p-4 text-xs font-black uppercase tracking-[0.16em] text-slate-400 sm:p-5">
+                    Vencimento
+                  </th>
+                  <th className="whitespace-nowrap p-4 text-right text-xs font-black uppercase tracking-[0.16em] text-slate-400 sm:p-5">
+                    Valor (R$)
+                  </th>
+                  <th className="p-4 text-center text-xs font-black uppercase tracking-[0.16em] text-slate-400 sm:p-5">
+                    Status
+                  </th>
+                  <th className="p-4 text-right text-xs font-black uppercase tracking-[0.16em] text-slate-400 sm:p-5">
+                    Ações
+                  </th>
                 </tr>
               </thead>
 
@@ -575,31 +664,62 @@ export function GestaoTitulosPage() {
 
                     return (
                       <tr key={titulo.id} className="group cursor-pointer transition-colors hover:bg-white/5" onClick={() => abrirModalEdit(titulo)}>
-                        <td className="p-5">
-                          <div className="flex items-center gap-4">
-                            <div className={`rounded-lg p-2 ${titulo.tipo === 'RECEBER' ? 'bg-emerald-500/10' : 'bg-rose-500/10'}`}>
+                        <td className="p-4 align-top sm:p-5">
+                          <div className="flex min-w-0 items-start gap-3">
+                            <div className={`shrink-0 rounded-lg p-2 ${titulo.tipo === 'RECEBER' ? 'bg-emerald-500/10' : 'bg-rose-500/10'}`}>
                               {titulo.tipo === 'RECEBER' ? <ArrowUpRight className="h-5 w-5 text-emerald-300" /> : <ArrowDownRight className="h-5 w-5 text-rose-300" />}
                             </div>
-                            <div>
-                              <span className="block text-base font-black text-white">{titulo.descricao}</span>
-                              <span className="mt-1 inline-block rounded-lg border border-white/10 bg-[#0b1324] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
+                            <div className="min-w-0 flex-1 overflow-hidden">
+                              <span
+                                className="line-clamp-2 block text-sm font-black leading-snug text-white sm:text-base"
+                                title={
+                                  [titulo.descricao, titulo.observacao].filter(Boolean).join(' — ') ||
+                                  titulo.descricao
+                                }
+                              >
+                                {titulo.descricao}
+                              </span>
+                              <span
+                                className="mt-1 block max-w-full truncate rounded-lg border border-white/10 bg-[#0b1324] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500"
+                                title={`Origem: ${titulo.origem}`}
+                              >
                                 Origem: {titulo.origem}
                               </span>
                             </div>
                           </div>
                         </td>
-                        <td className="p-5 text-sm font-bold text-slate-300">{titulo.pessoa?.nome || 'Diversos / Consumidor'}</td>
-                        <td className="p-5">
-                          {isPendenteConciliacao ? (
-                            <span className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400/20 bg-amber-500/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-amber-300 shadow-sm"><AlertTriangle className="h-3.5 w-3.5" /> CONCILIAR</span>
-                          ) : (
-                            <span className="inline-flex items-center rounded-lg border border-white/10 bg-[#0b1324] px-3 py-1.5 font-mono text-xs font-bold text-slate-300">{titulo.planoContas}</span>
-                          )}
+                        <td className="p-4 align-top sm:p-5">
+                          <span
+                            className="line-clamp-2 block text-sm font-bold leading-snug text-slate-300"
+                            title={titulo.pessoa?.nome || 'Diversos / Consumidor'}
+                          >
+                            {titulo.pessoa?.nome || 'Diversos / Consumidor'}
+                          </span>
                         </td>
-                        <td className="p-5 text-sm font-medium text-slate-400">{new Date(titulo.dataVencimento).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}</td>
-                        <td className={`p-5 text-right font-mono text-lg font-black ${titulo.tipo === 'RECEBER' ? 'text-emerald-300' : 'text-rose-300'}`}>{formatarMoeda(titulo.valor)}</td>
-                        <td className="p-5 text-center">{getStatusBadge(titulo.status)}</td>
-                        <td className="p-5">
+                        <td className="p-4 align-top sm:p-5">
+                          <div className="min-w-0">
+                            {isPendenteConciliacao ? (
+                              <span className="inline-flex max-w-full items-center gap-1.5 truncate rounded-lg border border-amber-400/20 bg-amber-500/10 px-2 py-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-amber-300 shadow-sm sm:px-3 sm:tracking-[0.16em]"><AlertTriangle className="h-3.5 w-3.5 shrink-0" /> CONCILIAR</span>
+                            ) : (
+                              <span
+                                className="block truncate font-mono text-xs font-bold text-slate-300"
+                                title={titulo.planoContas}
+                              >
+                                {titulo.planoContas}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="whitespace-nowrap p-4 text-sm font-medium text-slate-400 sm:p-5">
+                          {new Date(titulo.dataVencimento).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}
+                        </td>
+                        <td className={`whitespace-nowrap p-4 text-right font-mono text-base font-black sm:p-5 sm:text-lg ${titulo.tipo === 'RECEBER' ? 'text-emerald-300' : 'text-rose-300'}`}>
+                          {formatarMoeda(titulo.valor)}
+                        </td>
+                        <td className="p-4 text-center align-middle sm:p-5">
+                          <div className="flex justify-center">{getStatusBadge(titulo.status)}</div>
+                        </td>
+                        <td className="p-4 sm:p-5">
                           <div className="flex justify-end gap-3 opacity-0 transition-opacity group-hover:opacity-100">
                             <button onClick={(e) => { e.stopPropagation(); abrirModalEdit(titulo); }} className="rounded-xl border border-white/10 bg-[#0b1324] p-2.5 text-slate-400 hover:border-violet-400/20 hover:bg-violet-500/10 hover:text-violet-300" title="Ver Detalhes"><Edit2 className="h-4 w-4" /></button>
                             {!isPago(titulo.status) ? (

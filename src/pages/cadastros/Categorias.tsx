@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState, type ElementType, type FormEvent } from 'react';
 import { api } from '../../services/api';
 import { Layout } from '../../components/Layout';
 import {
@@ -33,7 +33,7 @@ export interface Categoria {
 }
 
 interface CategoriaVisualMeta {
-  icon: React.ElementType;
+  icon: ElementType;
   dotClass: string;
   pillClass: string;
   badgeClass: string;
@@ -55,7 +55,7 @@ export function Categorias() {
   const carregarCategorias = async () => {
     setLoadingList(true);
     try {
-      const response = await api.get<Categoria[]>('/api/categorias');
+      const response = await api.get<Categoria[]>('/api/cadastros/categorias');
       setCategorias(response.data);
     } catch (error) {
       console.error('Erro ao carregar categorias:', error);
@@ -64,7 +64,7 @@ export function Categorias() {
     }
   };
 
-  const handleCriarCategoria = async (e: React.FormEvent) => {
+  const handleCriarCategoria = async (e: FormEvent) => {
     e.preventDefault();
     
     // 🚀 TRAVA DE SEGURANÇA: Mantemos apenas a do Nome. O Código agora é opcional!
@@ -79,7 +79,7 @@ export function Categorias() {
         nome: novaCategoria.trim(),
         codigo: novoCodigo ? novoCodigo.trim() : '',
       }) as { nome: string; codigo: string };
-      await api.post<Categoria>('/api/categorias', payload);
+      await api.post<Categoria>('/api/cadastros/categorias', payload);
 
       setNovaCategoria('');
       setNovoCodigo('');
@@ -116,7 +116,7 @@ export function Categorias() {
         nome: editNome.trim(),
         codigo: editCodigo.trim(),
       }) as { nome: string; codigo: string };
-      await api.put<Categoria>(`/api/categorias/${editandoId}`, payload);
+      await api.put<Categoria>(`/api/cadastros/categorias/${editandoId}`, payload);
       cancelarEdicao();
       carregarCategorias();
     } catch (err) {
@@ -138,7 +138,7 @@ export function Categorias() {
     }
 
     try {
-      await api.delete(`/api/categorias/${id}`);
+      await api.delete(`/api/cadastros/categorias/${id}`);
       carregarCategorias();
     } catch (err) {
       const error = err as AxiosError<{ error?: string }>;

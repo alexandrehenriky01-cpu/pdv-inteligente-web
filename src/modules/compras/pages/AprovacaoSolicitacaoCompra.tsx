@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState, type FC } from 'react';
 import { Layout } from '../../../components/Layout';
 import { 
   CheckCircle2, XCircle, Clock, Search, Filter, FileText, 
@@ -41,7 +41,7 @@ function statusNoGrupo(tab: TabAprovacao, status: string): boolean {
   return false;
 }
 
-export const AprovacaoSolicitacaoCompra: React.FC = () => {
+export const AprovacaoSolicitacaoCompra: FC = () => {
   const [solicitacoes, setSolicitacoes] = useState<SolicitacaoCompra[]>([]);
   const [solicitacoesFiltradas, setSolicitacoesFiltradas] = useState<SolicitacaoCompra[]>([]);
   const [solicitacaoSelecionada, setSolicitacaoSelecionada] = useState<SolicitacaoCompra | null>(null);

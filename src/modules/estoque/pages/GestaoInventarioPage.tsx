@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { toast } from 'react-toastify';
 import { Layout } from '../../../components/Layout';
 import { api } from '../../../services/api';
 import {
@@ -70,8 +71,8 @@ export function GestaoInventarioPage() {
     try {
       const [resInv, resCat, resProd] = await Promise.all([
         api.get<IInventario[]>('/api/estoque/inventario'),
-        api.get<ICategoria[]>('/api/categorias').catch(() => ({ data: [] as ICategoria[] })),
-        api.get<IProdutoInventario[]>('/api/produtos').catch(() => ({ data: [] as IProdutoInventario[] }))
+        api.get<ICategoria[]>('/api/cadastros/categorias').catch(() => ({ data: [] as ICategoria[] })),
+        api.get<IProdutoInventario[]>('/api/cadastros/produtos').catch(() => ({ data: [] as IProdutoInventario[] }))
       ]);
 
       setInventarios(resInv.data);
@@ -80,6 +81,7 @@ export function GestaoInventarioPage() {
     } catch (err) {
       const error = err as AxiosError<{ error?: string }>;
       console.error('Erro ao carregar dados do inventário:', error.response?.data || error.message);
+      toast.error(error.response?.data?.error || error.message || 'Erro ao carregar inventário.');
     } finally {
       setLoading(false);
     }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Layout } from '../../../components/Layout';
 import { api } from '../../../services/api';
 import { toast } from 'react-toastify';
@@ -65,7 +65,7 @@ export function WmsConsultaEstoque() {
     }
   };
 
-  const handleBuscar = (e: React.FormEvent) => {
+  const handleBuscar = (e: FormEvent) => {
     e.preventDefault();
     buscarEstoque();
   };

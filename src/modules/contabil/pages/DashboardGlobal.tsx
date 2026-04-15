@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Layout } from '../../../components/Layout';
 import { RelatorioErrorBoundary } from '../../../components/RelatorioErrorBoundary';
 import { api } from '../../../services/api';
@@ -16,6 +16,7 @@ import {
   LineChart,
 } from 'lucide-react';
 import { formatarMoedaContabil, normalizarIndicadoresDreApi } from '../utils/dreApi';
+import { auryaBrandMark } from '../../../assets/branding';
 
 interface IDashboardData {
   kpis: {
@@ -145,7 +146,7 @@ export function DashboardGlobal() {
 
             <div className="relative shrink-0">
               <img
-                src="/Aurya.jpeg"
+                src={auryaBrandMark}
                 alt="Aurya IA"
                 className="h-20 w-20 rounded-full border-2 border-violet-500/50 shadow-[0_0_20px_rgba(139,92,246,0.4)]"
               />

@@ -1,5 +1,4 @@
 // src/components/PrivateRoute.tsx
-import React from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { IUsuario } from '../types/auth';
 import { AUTH_TOKEN_KEY, AUTH_USER_KEY } from '../services/authStorage';

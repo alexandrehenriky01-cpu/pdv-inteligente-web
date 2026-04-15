@@ -1,4 +1,4 @@
-import React from 'react';
+import { type ChangeEvent, type FC } from 'react';
 import { Package, ThermometerSnowflake, Scale, Tag, ShieldCheck, FileText, Box } from 'lucide-react';
 
 interface IAbaProducaoProps {
@@ -6,9 +6,9 @@ interface IAbaProducaoProps {
   setDados: (dados: any) => void;
 }
 
-export const AbaProducaoAcougue: React.FC<IAbaProducaoProps> = ({ dados, setDados }) => {
+export const AbaProducaoAcougue: FC<IAbaProducaoProps> = ({ dados, setDados }) => {
   
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
     
     // Tratamento correto para checkboxes e números

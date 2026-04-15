@@ -1,15 +1,18 @@
-import React from 'react'
+import { StrictMode } from 'react';
 import ReactDOM from 'react-dom/client'
-import App from './App.tsx'
+import App from './app'
 import './index.css'
 import { ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
 
 // 👇 IMPORTA O TEMA
 import { ThemeProvider } from './theme/ThemeContext'
+import { initDatadogBrowserRum } from './lib/datadogRumInit'
+
+initDatadogBrowserRum()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
+  <StrictMode>
     <ThemeProvider>
       <App />
       <ToastContainer
@@ -25,5 +28,5 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         pauseOnHover
       />
     </ThemeProvider>
-  </React.StrictMode>,
+  </StrictMode>,
 )

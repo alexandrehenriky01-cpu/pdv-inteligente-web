@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState, type KeyboardEvent } from 'react';
 import { Layout } from '../../../components/Layout';
 import { api } from '../../../services/api';
 import {
@@ -160,7 +160,7 @@ export function OrdemProducao() {
     try {
       const [resOPs, resProd, resEstacoes] = await Promise.all([
         api.get<IOP[]>('/api/producao/op').catch(() => ({ data: [] })),
-        api.get<IProduto[]>('/api/produtos'),
+        api.get<IProduto[]>('/api/cadastros/produtos'),
         api.get('/api/estacoes-trabalho').catch(() => ({ data: { data: [] as EstacaoTrabalho[] } }))
       ]);
       setOps(resOPs.data);
@@ -409,7 +409,7 @@ export function OrdemProducao() {
     setTermoBusca('');
   };
 
-  const handleKeyDownF2 = (e: React.KeyboardEvent<HTMLInputElement | HTMLSelectElement>, tipo: 'NF' | 'PRODUTO_ORIGEM' | 'PRODUTO_DESTINO', idTemp?: string) => {
+  const handleKeyDownF2 = (e: KeyboardEvent<HTMLInputElement | HTMLSelectElement>, tipo: 'NF' | 'PRODUTO_ORIGEM' | 'PRODUTO_DESTINO', idTemp?: string) => {
     if (e.key === 'F2') {
       e.preventDefault();
       abrirModalBusca(tipo, idTemp);

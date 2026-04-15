@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Layout } from '../../../components/Layout';
 import { api } from '../../../services/api';
 import { toast } from 'react-toastify';

@@ -1,6 +1,6 @@
+import { memo, useCallback, type CSSProperties, type FC, type MouseEvent, type TouchEvent } from 'react';
 // src/pages/configuracoes/components/layout-etiquetas/EtiquetaCanvasEditor.tsx
 
-import React, { useCallback } from 'react';
 import { Rnd } from 'react-rnd';
 import { DraggableEvent, DraggableData } from 'react-draggable';
 import {
@@ -39,7 +39,7 @@ function textoPreviewParaElemento(el: LayoutElemento): string {
 function estiloListrasBarcode(
   barcodeType: BarcodeType,
   inverted: boolean,
-): React.CSSProperties {
+): CSSProperties {
   const fg = inverted ? '#ffffff' : '#000000';
   const bg = inverted ? '#000000' : '#ffffff';
   let stripe = 2;
@@ -67,7 +67,7 @@ interface ElementProps {
   onUpdateElement: (id: string, updates: Partial<LayoutElemento>) => void;
 }
 
-const CanvasElement = React.memo(({ el, isSelected, onSelect, onUpdateElement }: ElementProps) => {
+const CanvasElement = memo(({ el, isSelected, onSelect, onUpdateElement }: ElementProps) => {
   
   const renderConteudo = () => {
     switch (el.type) {
@@ -238,7 +238,7 @@ const CanvasElement = React.memo(({ el, isSelected, onSelect, onUpdateElement }:
       className={`absolute group ${
         isSelected ? 'ring-2 ring-purple-500 ring-offset-1 ring-offset-white' : 'hover:ring-1 hover:ring-purple-400/50'
       }`}
-      onClick={(e: React.MouseEvent<HTMLElement>) => {
+      onClick={(e: MouseEvent<HTMLElement>) => {
         e.stopPropagation();
         onSelect(el.id);
       }}
@@ -253,7 +253,7 @@ const CanvasElement = React.memo(({ el, isSelected, onSelect, onUpdateElement }:
           onUpdateElement(el.id, { x: Math.round(d.x), y: Math.round(d.y) });
         }
       }}
-      onResizeStart={(e: React.MouseEvent<HTMLElement> | React.TouchEvent<HTMLElement>) => {
+      onResizeStart={(e: MouseEvent<HTMLElement> | TouchEvent<HTMLElement>) => {
         e.stopPropagation();
         onSelect(el.id);
       }}
@@ -306,7 +306,7 @@ interface Props {
   onUpdateElement: (id: string, updates: Partial<LayoutElemento>) => void;
 }
 
-const EtiquetaCanvasEditor: React.FC<Props> = ({
+const EtiquetaCanvasEditor: FC<Props> = ({
   elements,
   selectedId,
   onSelect,
@@ -341,4 +341,4 @@ const EtiquetaCanvasEditor: React.FC<Props> = ({
   );
 };
 
-export default React.memo(EtiquetaCanvasEditor);
+export default memo(EtiquetaCanvasEditor);

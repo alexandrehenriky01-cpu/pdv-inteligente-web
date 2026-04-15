@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { Fragment, useEffect, useState, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
 import { Layout } from '../../components/Layout';
@@ -316,7 +316,7 @@ export function GestaoNotas() {
     setTimeout(() => setChaveCopiada(null), 2000);
   };
 
-  const handleKeyDownF2 = (e: React.KeyboardEvent, tipoConsulta: string) => {
+  const handleKeyDownF2 = (e: KeyboardEvent, tipoConsulta: string) => {
     if (e.key === 'F2') {
       e.preventDefault();
       // 🚀 CORREÇÃO: Crases restauradas
@@ -805,7 +805,7 @@ export function GestaoNotas() {
                           </button>
 
                           {isAutorizada && (
-                            <React.Fragment>
+                            <Fragment>
                               <button
                                 onClick={() => handleAction(venda, 'imprimir')}
                                 className="flex items-center gap-1.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 p-2.5 text-indigo-400 shadow-sm transition-colors hover:bg-indigo-500/20"
@@ -820,13 +820,13 @@ export function GestaoNotas() {
                               >
                                 <Ban className="h-4 w-4" />
                               </button>
-                            </React.Fragment>
+                            </Fragment>
                           )}
 
                           {!isAutorizada && !isCancelada && (
-                            <React.Fragment>
+                            <Fragment>
                               {isRejeitada && (
-                                <React.Fragment>
+                                <Fragment>
                                   <button
                                     onClick={() => handleAction(venda, 'verErro')}
                                     className="flex items-center gap-1.5 rounded-xl border border-red-500/30 bg-red-500/10 p-2.5 text-red-400 shadow-sm transition-colors hover:bg-red-500/20"
@@ -842,7 +842,7 @@ export function GestaoNotas() {
                                     <Sparkles className="h-4 w-4" />
                                     Aurya Fix
                                   </button>
-                                </React.Fragment>
+                                </Fragment>
                               )}
 
                               <button
@@ -873,7 +873,7 @@ export function GestaoNotas() {
                                   <Ban className="h-4 w-4" />
                                 </button>
                               )}
-                            </React.Fragment>
+                            </Fragment>
                           )}
                         </div>
                       </div>

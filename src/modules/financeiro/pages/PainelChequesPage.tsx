@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState, type DragEvent } from 'react';
+import { toast } from 'react-toastify';
 import { Layout } from '../../../components/Layout';
 import { api } from '../../../services/api';
 import {
@@ -93,6 +94,7 @@ export function PainelChequesPage() {
     } catch (err) {
       const error = err as AxiosError<{ error?: string }>;
       console.error(error.response?.data || error.message);
+      toast.error(error.response?.data?.error || error.message || 'Erro ao carregar cheques.');
     } finally {
       setLoading(false);
     }
@@ -128,15 +130,15 @@ export function PainelChequesPage() {
     }
   };
 
-  const handleDragStart = (e: React.DragEvent, chequeId: string) => {
+  const handleDragStart = (e: DragEvent, chequeId: string) => {
     e.dataTransfer.setData('chequeId', chequeId);
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragOver = (e: DragEvent) => {
     e.preventDefault();
   };
 
-  const handleDrop = async (e: React.DragEvent, novoStatus: ChequeStatus) => {
+  const handleDrop = async (e: DragEvent, novoStatus: ChequeStatus) => {
     e.preventDefault();
     const chequeId = e.dataTransfer.getData('chequeId');
     const chequeMovido = cheques.find(c => c.id === chequeId);

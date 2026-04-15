@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState, type FC, type ReactNode } from 'react';
 import {
   Barcode,
   QrCode,
@@ -25,7 +25,7 @@ interface ToolItem {
   type: EtiquetaElementType;
   label: string;
   description: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
 }
 
 const tools: ToolItem[] = [
@@ -73,7 +73,7 @@ const tools: ToolItem[] = [
   },
 ];
 
-const EtiquetaToolbox: React.FC<Props> = ({ onAddElement, onAddVariavel }) => {
+const EtiquetaToolbox: FC<Props> = ({ onAddElement, onAddVariavel }) => {
   const [aberto, setAberto] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(VARIAVEIS_ETIQUETA_SECOES.map((s) => [s.id, true])),
   );

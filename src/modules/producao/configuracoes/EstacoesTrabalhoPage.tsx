@@ -1,6 +1,6 @@
+import { useCallback, useEffect, useState, type ChangeEvent, type FC } from 'react';
 // src/pages/configuracoes/EstacoesTrabalhoPage.tsx
 
-import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Plus, Search, Edit2, Trash2, MonitorSmartphone, 
   Activity, AlertTriangle, Loader2, Scale, Printer, 
@@ -22,7 +22,7 @@ const getModoIcon = (modo: string) => {
   }
 };
 
-const EstacoesTrabalhoPage: React.FC = () => {
+const EstacoesTrabalhoPage: FC = () => {
   const [estacoes, setEstacoes] = useState<EstacaoTrabalho[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -204,7 +204,7 @@ const EstacoesTrabalhoPage: React.FC = () => {
               <input
                 placeholder="Buscar estação pelo nome ou identificador..."
                 value={filters.search}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFilters({ search: e.target.value })}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setFilters({ search: e.target.value })}
                 className="w-full bg-[#131b2f] border border-gray-700 text-white pl-12 pr-4 py-3 rounded-xl focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 outline-none transition-all"
               />
             </div>

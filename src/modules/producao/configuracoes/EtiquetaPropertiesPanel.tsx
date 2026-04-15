@@ -1,6 +1,6 @@
+import { useRef, type FC } from 'react';
 // src/pages/configuracoes/components/layout-etiquetas/EtiquetaPropertiesPanel.tsx
 
-import React, { useRef } from 'react';
 import { Bold, Italic, AlignLeft, AlignCenter, AlignRight } from 'lucide-react';
 import {
   LayoutElemento,
@@ -115,7 +115,7 @@ interface Props {
   onReplaceElement?: (id: string, next: LayoutElemento) => void;
 }
 
-const EtiquetaPropertiesPanel: React.FC<Props> = ({
+const EtiquetaPropertiesPanel: FC<Props> = ({
   selectedElement,
   onUpdateElement,
   onReplaceElement,

@@ -1,3 +1,4 @@
+import { type ReactNode } from 'react';
 import React, {
   createContext,
   useCallback,
@@ -26,7 +27,7 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [usuario, setUsuario] = useState<UsuarioSessao>(null);
 
   const reloadUsuarioFromStorage = useCallback(() => {

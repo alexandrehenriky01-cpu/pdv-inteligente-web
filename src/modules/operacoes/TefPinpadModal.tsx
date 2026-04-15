@@ -1,5 +1,5 @@
-import React from 'react';
 import { CreditCard, Loader2, X } from 'lucide-react';
+import { Dialog, DialogContent, DialogTitle } from '../../components/ui/dialog';
 
 export interface TefPinpadModalProps {
   aberto: boolean;
@@ -25,48 +25,56 @@ export function TefPinpadModal({
   subtitulo = 'Siga as instruções no terminal.',
   onFechar,
 }: TefPinpadModalProps) {
-  if (!aberto) return null;
-
   const temStatusSiTef = Boolean(mensagemStatus?.trim());
 
   return (
-    <div className="fixed inset-0 bg-[#020617]/90 backdrop-blur-md flex items-center justify-center z-[80] p-4">
-      <div className="bg-[#08101f] border border-violet-500/35 rounded-[24px] shadow-[0_25px_80px_rgba(0,0,0,0.65)] w-full max-w-md relative overflow-hidden animate-[modalEnter_0.35s_ease-out_forwards]">
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-violet-600 to-fuchsia-600" />
+    <Dialog
+      open={aberto}
+      onOpenChange={(open) => {
+        if (!open) onFechar();
+      }}
+    >
+      <DialogContent
+        hideDescription
+        overlayClassName="z-[350] bg-[#020617]/90 backdrop-blur-md"
+        className="z-[360] w-full max-w-md gap-0 overflow-hidden rounded-[24px] border-violet-500/35 bg-[#08101f] p-0 shadow-[0_25px_80px_rgba(0,0,0,0.65)]"
+        onPointerDownOutside={(e) => e.preventDefault()}
+      >
+        <div className="absolute left-0 top-0 h-1 w-full bg-gradient-to-r from-violet-600 to-fuchsia-600" />
         <button
           type="button"
           onClick={onFechar}
-          className="absolute top-3 right-3 p-2 rounded-lg text-slate-500 hover:text-white hover:bg-white/5 transition-colors"
+          className="absolute right-3 top-3 rounded-lg p-2 text-slate-500 transition-colors hover:bg-white/5 hover:text-white"
           aria-label="Fechar"
         >
-          <X className="w-5 h-5" />
+          <X className="h-5 w-5" />
         </button>
         <div className="p-8 text-center">
-          <div className="w-20 h-20 mx-auto mb-5 rounded-full bg-violet-500/15 border border-violet-500/30 flex items-center justify-center">
+          <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full border border-violet-500/30 bg-violet-500/15">
             {carregando ? (
-              <Loader2 className="w-10 h-10 text-violet-300 animate-spin" />
+              <Loader2 className="h-10 w-10 animate-spin text-violet-300" />
             ) : (
-              <CreditCard className="w-10 h-10 text-violet-300" />
+              <CreditCard className="h-10 w-10 text-violet-300" />
             )}
           </div>
-          <h2 className="text-xl font-black text-white mb-2 tracking-tight">{titulo}</h2>
+          <DialogTitle className="mb-2 text-xl font-black tracking-tight text-white">{titulo}</DialogTitle>
 
           {temStatusSiTef && carregando ? (
-            <div className="mb-4 rounded-xl border border-cyan-500/35 bg-cyan-950/40 px-4 py-4 min-h-[4.5rem] flex items-center justify-center">
-              <p className="text-cyan-100 text-base font-bold leading-snug whitespace-pre-wrap text-center">
+            <div className="mb-4 flex min-h-[4.5rem] items-center justify-center rounded-xl border border-cyan-500/35 bg-cyan-950/40 px-4 py-4">
+              <p className="whitespace-pre-wrap text-center text-base font-bold leading-snug text-cyan-100">
                 {mensagemStatus}
               </p>
             </div>
           ) : (
-            <p className="text-slate-400 text-sm mb-2">{subtitulo}</p>
+            <p className="mb-2 text-sm text-slate-400">{subtitulo}</p>
           )}
 
           {temStatusSiTef && !carregando && (
-            <p className="text-slate-500 text-xs mb-4 whitespace-pre-wrap">{mensagemStatus}</p>
+            <p className="mb-4 whitespace-pre-wrap text-xs text-slate-500">{mensagemStatus}</p>
           )}
 
           {mensagemErro && (
-            <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs text-left font-medium whitespace-pre-wrap">
+            <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-left text-xs font-medium whitespace-pre-wrap text-red-300">
               {mensagemErro}
             </div>
           )}
@@ -74,13 +82,13 @@ export function TefPinpadModal({
             <button
               type="button"
               onClick={onFechar}
-              className="w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm"
+              className="w-full rounded-xl bg-slate-800 py-3 text-sm font-bold text-white hover:bg-slate-700"
             >
               Voltar
             </button>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

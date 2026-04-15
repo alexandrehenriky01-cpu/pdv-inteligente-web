@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   Wand2, Save, ArrowLeft, Loader2, MousePointer2, Trash2
@@ -132,7 +132,7 @@ export default function LayoutEtiquetaEditorPage() {
   }, [hasUnsavedChanges]);
 
   // INTEGRAÇÃO COM A AURYA (IA)
-  const handleUploadImagemIA = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadImagemIA = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 

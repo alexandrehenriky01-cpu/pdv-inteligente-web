@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Layout } from '../../../components/Layout';
 import { api } from '../../../services/api';
 import { toast } from 'react-toastify';
@@ -49,7 +49,7 @@ export function WmsAreas() {
   // ==========================================
   // CRIAR NOVA ÁREA (CÂMARA FRIA)
   // ==========================================
-  const handleCriarArea = async (e: React.FormEvent) => {
+  const handleCriarArea = async (e: FormEvent) => {
     e.preventDefault();
     setSalvando(true);
     try {
@@ -73,7 +73,7 @@ export function WmsAreas() {
   // ==========================================
   // GERADOR DE ENDEREÇOS EM MASSA
   // ==========================================
-  const handleGerarEnderecos = async (e: React.FormEvent) => {
+  const handleGerarEnderecos = async (e: FormEvent) => {
     e.preventDefault();
     if (!areaSelecionada) return;
 

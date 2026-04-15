@@ -1,6 +1,6 @@
+import { useEffect, useMemo, useState, type FC } from 'react';
 // src/pages/configuracoes/LayoutEtiquetasPage.tsx
 
-import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom'; // ✅ NOVO: Para navegar até o Canvas
 import { 
   Plus, Search, Edit2, Trash2, Power, PowerOff, Eye, X, AlertTriangle, Loader2, Palette 
@@ -46,7 +46,7 @@ interface LayoutEtiqueta {
   updatedAt?: string;
 }
 
-const LayoutEtiquetasPage: React.FC = () => {
+const LayoutEtiquetasPage: FC = () => {
   const navigate = useNavigate(); // ✅ Hook de navegação
   const [layouts, setLayouts] = useState<LayoutEtiqueta[]>([]);
   const [loading, setLoading] = useState(false);

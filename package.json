@@ -14,7 +14,9 @@
     "electron:build": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false NODE_ENV=production npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder"
   },
   "dependencies": {
+    "@datadog/browser-rum": "^6.32.0",
     "@google/generative-ai": "^0.24.1",
+    "@radix-ui/react-dialog": "^1.1.15",
     "axios": "^1.6.8",
     "date-fns": "^4.1.0",
     "lucide-react": "^0.577.0",
@@ -23,7 +25,9 @@
     "react-rnd": "^10.5.3",
     "react-router-dom": "^6.22.3",
     "react-toastify": "^11.0.5",
-    "recharts": "^3.8.0"
+    "recharts": "^3.8.0",
+    "socket.io-client": "^4.8.3",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@types/react": "^18.3.28",
@@ -53,6 +57,7 @@
       "package.json"
     ],
     "win": {
+      "icon": "electron/assets/window-icon.jpeg",
       "signAndEditExecutable": false,
       "signDlls": false,
       "target": [

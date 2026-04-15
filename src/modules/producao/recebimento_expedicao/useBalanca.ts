@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
 
+import { useEffect, useRef, useState } from 'react';
 interface UseBalancaProps {
   workstationId: string; // ID da estação de trabalho atual (Doca, Mesa de Produção, etc.)
   ipAgente?: string;     // IP da máquina onde o Agente C# está rodando (default: localhost)

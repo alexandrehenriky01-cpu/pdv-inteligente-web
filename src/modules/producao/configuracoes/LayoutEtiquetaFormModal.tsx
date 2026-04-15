@@ -1,6 +1,6 @@
+import { useEffect, useState, type ChangeEvent, type FC, type FormEvent } from 'react';
 // src/pages/configuracoes/components/layout-etiquetas/LayoutEtiquetaFormModal.tsx
 import { api } from '../../../services/api';
-import React, { useState, useEffect } from 'react';
 import { LayoutEtiquetaJson, DEFAULT_LAYOUT_JSON } from '../types/etiquetas'; // Ajuste o caminho conforme necessário
 
 export type TipoEtiquetaLayout =
@@ -40,7 +40,7 @@ interface Props {
   // api: any; 
 }
 
-const LayoutEtiquetaFormModal: React.FC<Props> = ({
+const LayoutEtiquetaFormModal: FC<Props> = ({
   layout,
   onClose,
   onSuccess,
@@ -79,7 +79,7 @@ const LayoutEtiquetaFormModal: React.FC<Props> = ({
   }, [layout]);
 
   const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
+    e: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) => {
     const { name, value, type } = e.target;
     
@@ -96,7 +96,7 @@ const LayoutEtiquetaFormModal: React.FC<Props> = ({
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
 

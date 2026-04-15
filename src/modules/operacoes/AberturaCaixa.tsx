@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../../services/api';
 import { Monitor, DollarSign, Loader2, AlertCircle } from 'lucide-react';
 import { AxiosError } from 'axios';

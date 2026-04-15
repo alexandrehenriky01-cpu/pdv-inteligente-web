@@ -1,6 +1,6 @@
+import { type FC } from 'react';
 // src/pages/configuracoes/components/layout-etiquetas/PlaceholdersPanel.tsx
 
-import React from 'react';
 import { PLACEHOLDERS_DISPONIVEIS } from '../types/etiquetas'; // Ajuste o caminho de importação se necessário
 
 // Mapeamento amigável (Dicionário) apenas para a UI (títulos e descrições)
@@ -23,7 +23,7 @@ interface Props {
   onInsertPlaceholder: (placeholder: string) => void;
 }
 
-const PlaceholdersPanel: React.FC<Props> = ({ onInsertPlaceholder }) => {
+const PlaceholdersPanel: FC<Props> = ({ onInsertPlaceholder }) => {
   return (
     <div className="space-y-4">
       <div className="border-b border-gray-800 pb-2">

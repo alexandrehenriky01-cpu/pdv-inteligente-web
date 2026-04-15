@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState, type ChangeEvent } from 'react';
 import { flushSync } from 'react-dom';
 import { Layout } from '../../components/Layout';
 import { api } from '../../services/api';
@@ -13,6 +13,7 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AxiosError } from 'axios';
 import { transformarParaMaiusculas } from '../../utils/formatters';
+import { auryaBrandMark } from '../../assets/branding';
 
 /** Tipo de item (SPED / Reg. 0200) — valores na raiz do produto. */
 const OPCOES_TIPO_ITEM_SPED: { value: string; label: string }[] = [
@@ -32,6 +33,14 @@ function parseFloatPermiteZero(val: unknown): number | undefined {
   if (val === '' || val === undefined || val === null) return undefined;
   const n = typeof val === 'number' ? val : parseFloat(String(val));
   if (Number.isNaN(n)) return undefined;
+  return n;
+}
+
+/** Peso opcional em kg para campos decimais da API (`pesoConferencia`, `pesoBruto`, etc.). */
+function parsePesoKgOpcionalApi(val: unknown): number | null {
+  if (val === '' || val === undefined || val === null) return null;
+  const n = Number(String(val).replace(',', '.'));
+  if (!Number.isFinite(n) || n < 0) return null;
   return n;
 }
 
@@ -216,6 +225,12 @@ export interface IProduto {
   tipoConservacao?: string | null;
   pesoLiquido?: string | number | null;
   pesoBruto?: string | number | null;
+  /** Peso produto + embalagem (kg) — self-checkout / conferência na balança. */
+  pesoConferencia?: string | number | null;
+  /** Envia produto na carga TXT da balança (Toledo MGV6 etc.). */
+  pesavel?: boolean;
+  /** Código reduzido (até 6 dígitos) na balança — único por loja. */
+  codigoBalanca?: string | number | null;
 }
 
 export interface IIASugestoes {
@@ -283,6 +298,10 @@ export function Produtos() {
     cstCofins: '', aliquotaCofins: '',
     contaEstoqueId: '',
     tipoItem: '',
+    pesavel: false,
+    codigoBalanca: '',
+    pesoConferencia: '',
+    diasValidade: '',
     dadosProducao: estadoInicialProducao,
   });
   const totalSteps = formData?.controlaProducao ? 5 : 4;   
@@ -355,8 +374,8 @@ export function Produtos() {
     setLoading(true);
     try {
       const [resProd, resCat, resContas] = await Promise.all([
-        api.get<IProduto[]>('/api/produtos'),
-        api.get<ICategoria[]>('/api/categorias'),
+        api.get<IProduto[]>('/api/cadastros/produtos'),
+        api.get<ICategoria[]>('/api/cadastros/categorias'),
         api.get<IPlanoConta[]>('/api/contabilidade/planos')
       ]);
       
@@ -376,10 +395,10 @@ export function Produtos() {
     const nomeTrim = nome.trim();
     try {
       const payload = transformarParaMaiusculas({ nome: nomeTrim }) as { nome: string };
-      const response = await api.post<ICategoria>('/api/categorias', payload);
+      const response = await api.post<ICategoria>('/api/cadastros/categorias', payload);
       let novoId = extrairIdCategoriaDaResposta(response.data);
       if (!novoId) {
-        const listRes = await api.get<ICategoria[]>('/api/categorias');
+        const listRes = await api.get<ICategoria[]>('/api/cadastros/categorias');
         const nomeU = nomeTrim.toUpperCase();
         novoId = listRes.data.find((c) => c.nome.toUpperCase() === nomeU)?.id;
       }
@@ -414,6 +433,10 @@ export function Produtos() {
       cstCsosnIcms: '', aliquotaIcms: '', cstPis: '', aliquotaPis: '', cstCofins: '', aliquotaCofins: '',
       contaEstoqueId: '',
       tipoItem: '',
+      pesavel: false,
+      codigoBalanca: '',
+      pesoConferencia: '',
+      diasValidade: '',
       dadosProducao: estadoInicialProducao,
     });
     setStepAtual(1);
@@ -445,6 +468,22 @@ export function Produtos() {
       aliquotaCofins: produto.aliquotaCofins?.toString() || '',
       contaEstoqueId: produto.contaEstoqueId || '',
       tipoItem: produto.tipoItem ?? '',
+      pesavel: !!(produto as { pesavel?: boolean }).pesavel,
+      codigoBalanca:
+        (produto as { codigoBalanca?: number | null }).codigoBalanca != null
+          ? String((produto as { codigoBalanca?: number | null }).codigoBalanca)
+          : '',
+      pesoConferencia: (() => {
+        const pc = produto.pesoConferencia;
+        if (pc !== undefined && pc !== null && String(pc).trim() !== '') return String(pc);
+        const legado = produto.pesoBruto;
+        if (legado !== undefined && legado !== null && String(legado).trim() !== '') return String(legado);
+        return '';
+      })(),
+      diasValidade:
+        produto.diasValidade !== undefined && produto.diasValidade !== null && produto.diasValidade !== ''
+          ? produto.diasValidade
+          : '',
       dadosProducao: {
         ...estadoInicialProducao,
         ...(produto.dadosProducao || {}),
@@ -480,7 +519,7 @@ export function Produtos() {
   };
 
   const handleProducaoChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
+    e: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) => {
     const { name, value, type } = e.target;
     let parsedValue: string | number | boolean = value;
@@ -509,7 +548,7 @@ export function Produtos() {
     return String(n);
   }
 
-  const handleEmbalagemPrimariaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleEmbalagemPrimariaChange = (e: ChangeEvent<HTMLSelectElement>) => {
     const id = e.target.value;
     const emb = id ? listaEmbalagens.find((x) => x.id === id) : undefined;
     const taraVal = id === '' ? '' : taraDisplayFromEmbalagem(emb);
@@ -523,7 +562,7 @@ export function Produtos() {
     }));
   };
 
-  const handleEmbalagemSecundariaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleEmbalagemSecundariaChange = (e: ChangeEvent<HTMLSelectElement>) => {
     const id = e.target.value;
     const emb = id ? listaEmbalagens.find((x) => x.id === id) : undefined;
     const taraVal = id === '' ? '' : taraDisplayFromEmbalagem(emb);
@@ -557,12 +596,20 @@ export function Produtos() {
       }
 
       try {
-        const { controlaProducao, dadosProducao: dpForm, ...restForm } = dadosParaSalvar;
+        const {
+          controlaProducao,
+          dadosProducao: dpForm,
+          pesoConferencia: pesoConferenciaForm,
+          ...restForm
+        } = dadosParaSalvar;
+
+        const pesoConferenciaApi = parsePesoKgOpcionalApi(pesoConferenciaForm);
 
         let dadosProdFormatados: Record<string, unknown> | undefined = undefined;
         let diasValidadeRaiz: number | null | undefined = undefined;
         let tipoConservacaoRaiz: string | null | undefined = undefined;
         let pesoLiquidoRaiz: number | null | undefined = undefined;
+
         let pesoBrutoRaiz: number | null | undefined = undefined;
 
         if (controlaProducao && dpForm) {
@@ -582,6 +629,8 @@ export function Produtos() {
             ...restProducao
           } = dp;
 
+          pesoBrutoRaiz = parsePesoKgOpcionalApi(pbForm);
+
           const diasParsed =
             restProducao.diasValidade === '' || restProducao.diasValidade === undefined
               ? 0
@@ -590,8 +639,6 @@ export function Produtos() {
 
           const pl =
             plForm === '' || plForm === undefined ? null : parseFloat(String(plForm));
-          const pb =
-            pbForm === '' || pbForm === undefined ? null : parseFloat(String(pbForm));
 
           dadosProdFormatados = {
             ...restProducao,
@@ -619,8 +666,27 @@ export function Produtos() {
               ? String(restProducao.tipoConservacao).trim()
               : null;
           pesoLiquidoRaiz = pl !== null && !Number.isNaN(pl) ? pl : null;
-          pesoBrutoRaiz = pb !== null && !Number.isNaN(pb) ? pb : null;
         }
+
+        const codBalRaw = restForm.codigoBalanca;
+        const codBalParsed =
+          codBalRaw === '' || codBalRaw === undefined || codBalRaw === null
+            ? null
+            : parseInt(String(codBalRaw).replace(/\D/g, ''), 10);
+        const codigoBalancaPayload =
+          codBalRaw === '' || codBalRaw === undefined || codBalRaw === null
+            ? null
+            : Number.isNaN(codBalParsed ?? NaN)
+              ? null
+              : codBalParsed;
+
+        const diasValidadeSemProducao: number | null =
+          restForm.diasValidade === '' || restForm.diasValidade === undefined
+            ? null
+            : (() => {
+                const n = parseInt(String(restForm.diasValidade), 10);
+                return Number.isNaN(n) ? null : n;
+              })();
 
         const payloadSemMaiusculas = {
           ...restForm,
@@ -632,15 +698,22 @@ export function Produtos() {
           ncm: restForm.ncm ? String(restForm.ncm).replace(/\D/g, '') : '',
           cfopPadrao: restForm.cfopPadrao ? String(restForm.cfopPadrao).replace(/\D/g, '') : '',
           cstCsosn: restForm.cstCsosnIcms,
+          pesavel: !!restForm.pesavel,
+          codigoBalanca: codigoBalancaPayload,
           ...(controlaProducao
             ? {
                 diasValidade: diasValidadeRaiz,
                 tipoConservacao: tipoConservacaoRaiz,
                 pesoLiquido: pesoLiquidoRaiz,
-                pesoBruto: pesoBrutoRaiz,
+                pesoBruto: pesoBrutoRaiz === undefined ? null : pesoBrutoRaiz,
+                pesoConferencia: pesoConferenciaApi,
                 dadosProducao: dadosProdFormatados,
               }
-            : { dadosProducao: undefined }),
+            : {
+                dadosProducao: undefined,
+                diasValidade: diasValidadeSemProducao,
+                pesoConferencia: pesoConferenciaApi,
+              }),
         };
 
         const payload = transformarParaMaiusculas(payloadSemMaiusculas);
@@ -648,9 +721,9 @@ export function Produtos() {
         console.log('Payload de Produto Enviado:', dadosParaSalvar);
 
         if (dadosParaSalvar.id) {
-          await api.put(`/api/produtos/${dadosParaSalvar.id}`, payload);
+          await api.put(`/api/cadastros/produtos/${dadosParaSalvar.id}`, payload);
         } else {
-          await api.post('/api/produtos', payload);
+          await api.post('/api/cadastros/produtos', payload);
         }
 
         if (isEditModeFromPDV) {
@@ -674,7 +747,7 @@ export function Produtos() {
     if(!id) return;
     if(!window.confirm("Deseja realmente excluir este produto?")) return;
     try {
-      await api.delete(`/api/produtos/${id}`);
+      await api.delete(`/api/cadastros/produtos/${id}`);
       carregarDados();
     } catch (err) {
       const error = err as AxiosError<{error?: string}>;
@@ -715,7 +788,7 @@ export function Produtos() {
     }
     setIaLoading(true);
     try {
-      const response = await api.post<IIAResponseProduto>('/api/ia/produto/sugerir', { 
+      const response = await api.post<IIAResponseProduto>('/api/ia/produtos/sugerir-preenchimento', { 
         nomeProduto: formData.nome 
       });
 
@@ -732,10 +805,10 @@ export function Produtos() {
           const payloadCategoria = transformarParaMaiusculas({
             nome: dadosIA.categoriaSugerida,
           }) as { nome: string };
-          const catResponse = await api.post<ICategoria>('/api/categorias', payloadCategoria);
+          const catResponse = await api.post<ICategoria>('/api/cadastros/categorias', payloadCategoria);
           let resolvido = extrairIdCategoriaDaResposta(catResponse.data);
           if (!resolvido) {
-            const listRes = await api.get<ICategoria[]>('/api/categorias');
+        const listRes = await api.get<ICategoria[]>('/api/cadastros/categorias');
             const nomeU = String(dadosIA.categoriaSugerida).trim().toUpperCase();
             resolvido = listRes.data.find((c) => c.nome.toUpperCase() === nomeU)?.id;
           }
@@ -895,7 +968,7 @@ export function Produtos() {
           </div>
         ) : produtosFiltrados.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center bg-[#08101f]/70 rounded-[30px] border border-white/10 border-dashed relative overflow-hidden group">
-            <img src="/Aurya.jpeg" alt="Aurya IA" className="w-24 h-24 rounded-full border-4 border-white/10 shadow-[0_0_30px_rgba(99,102,241,0.5)] mb-6" />
+            <img src={auryaBrandMark} alt="Aurya IA" className="w-24 h-24 rounded-full border-4 border-white/10 shadow-[0_0_30px_rgba(99,102,241,0.5)] mb-6" />
             <h3 className="text-3xl font-black text-white mb-2 tracking-tight">Nenhum produto encontrado</h3>
             <p className="text-slate-400 max-w-md mb-8 text-lg">Comece a preencher seu catálogo ou ajuste sua busca.</p>
             <div className="flex gap-4">
@@ -913,7 +986,7 @@ export function Produtos() {
               <div className="bg-[#08101f]/95 backdrop-blur-xl p-5 rounded-[24px] relative z-10 flex flex-col md:flex-row items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
                   <div className="relative shrink-0">
-                    <img src="/Aurya.jpeg" alt="Aurya" className="w-12 h-12 rounded-full border-2 border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.4)]" />
+                    <img src={auryaBrandMark} alt="Aurya" className="w-12 h-12 rounded-full border-2 border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.4)]" />
                     <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-slate-900 animate-pulse"></div>
                   </div>
                   <div>
@@ -1055,7 +1128,7 @@ export function Produtos() {
                 {statusGeracao === 'gerando' && (
                   <div className="text-center animate-fade-in-down flex flex-col items-center justify-center w-full">
                     <div className="relative mb-10">
-                       <img src="/Aurya.jpeg" alt="Aurya IA" className="w-32 h-32 rounded-full border-4 border-indigo-500 shadow-[0_0_50px_rgba(99,102,241,0.8)] relative z-10" />
+                       <img src={auryaBrandMark} alt="Aurya IA" className="w-32 h-32 rounded-full border-4 border-indigo-500 shadow-[0_0_50px_rgba(99,102,241,0.8)] relative z-10" />
                        <div className="absolute inset-0 bg-indigo-500/30 rounded-full blur-3xl animate-pulse-glow"></div>
                        <Loader2 className="w-10 h-10 text-violet-300 absolute -bottom-4 -right-4 animate-spin bg-[#0b1324] rounded-full p-1" />
                     </div>
@@ -1159,7 +1232,7 @@ export function Produtos() {
                       <div className="bg-indigo-950/90 backdrop-blur-xl p-6 rounded-[15px] relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
                         <div className="flex items-center gap-4">
                           <div className="relative shrink-0">
-                            <img src="/Aurya.jpeg" alt="Aurya" className="w-14 h-14 rounded-full border-2 border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.5)]" />
+                            <img src={auryaBrandMark} alt="Aurya" className="w-14 h-14 rounded-full border-2 border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.5)]" />
                             <Sparkles className="w-4 h-4 text-violet-300 absolute -bottom-1 -right-1 animate-pulse" />
                           </div>
                           <div>
@@ -1277,6 +1350,97 @@ export function Produtos() {
                           Classificação para estoque fiscal (Reg. 0200). Obrigatório em módulos NFe/SPED quando exigido pelo roteiro.
                         </p>
                       </div>
+
+                      <div className="md:col-span-2 mt-2 rounded-2xl border border-cyan-500/25 bg-cyan-950/20 p-5 space-y-4">
+                        <h4 className="text-xs font-black uppercase tracking-widest text-cyan-300 flex items-center gap-2">
+                          <Scale className="w-4 h-4" />
+                          Balança (carga retaguarda)
+                        </h4>
+                        <label className="flex items-center gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={!!formData.pesavel}
+                            onChange={(e) => setFormData({ ...formData, pesavel: e.target.checked })}
+                            className="rounded border-white/20 bg-[#0b1324] text-cyan-500 focus:ring-cyan-500/30"
+                          />
+                          <span className="text-sm font-bold text-slate-200">Produto pesável (balança)</span>
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className={labelClass}>Dias de validade (etiqueta)</label>
+                            <input
+                              type="number"
+                              min={0}
+                              max={999}
+                              disabled={!!formData.controlaProducao}
+                              value={
+                                formData.controlaProducao
+                                  ? (formData.dadosProducao?.diasValidade ?? '')
+                                  : (formData.diasValidade ?? '')
+                              }
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                if (formData.controlaProducao) {
+                                  setFormData({
+                                    ...formData,
+                                    dadosProducao: { ...formData.dadosProducao!, diasValidade: v },
+                                  });
+                                } else {
+                                  setFormData({ ...formData, diasValidade: v });
+                                }
+                              }}
+                              className={`${inputClass} disabled:opacity-50`}
+                              placeholder="Ex: 30"
+                            />
+                            {formData.controlaProducao && (
+                              <p className="text-[10px] text-slate-500 mt-1">Com produção própria, use a validade na etapa 5 (ficha técnica).</p>
+                            )}
+                          </div>
+                          <div>
+                            <label className={labelClass}>Código na balança (até 6 dígitos)</label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={999999}
+                              value={
+                                formData.codigoBalanca == null || formData.codigoBalanca === ''
+                                  ? ''
+                                  : String(formData.codigoBalanca)
+                              }
+                              onChange={(e) =>
+                                setFormData({
+                                  ...formData,
+                                  codigoBalanca: e.target.value === '' ? '' : e.target.value,
+                                })
+                              }
+                              className={inputClass}
+                              placeholder="Ex: 1001"
+                            />
+                          </div>
+                          <div className="sm:col-span-2">
+                            <label className={labelClass}>Peso Padrão para Conferência (Kg)</label>
+                            <input
+                              type="number"
+                              step="0.001"
+                              min={0}
+                              value={
+                                formData.pesoConferencia == null || formData.pesoConferencia === ''
+                                  ? ''
+                                  : String(formData.pesoConferencia)
+                              }
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setFormData((prev) => ({ ...prev, pesoConferencia: v }));
+                              }}
+                              className={inputClass}
+                              placeholder="Ex: 0.500"
+                            />
+                            <p className="text-[10px] text-slate-500 mt-1.5 font-medium">
+                              Opcional. Peso do item embalado (kg) — referência exclusiva do self-checkout; independente do peso bruto da ficha técnica.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
                     {/* 🚀 O BOTÃO DE LIGA/DESLIGA FICA EXATAMENTE AQUI */}
@@ -1320,7 +1484,7 @@ export function Produtos() {
                     {formData.precoCusto && formData.precoVenda && (
                       <div className={`p-6 rounded-[30px] border flex flex-col sm:flex-row gap-5 mt-6 transition-all shadow-[0_20px_50px_rgba(0,0,0,0.35)] ${margemAtual >= margemIdeal ? 'bg-emerald-950/30 border-emerald-500/40' : 'bg-[#08101f]/80 border-indigo-500/40'}`}>
                         <div className="relative shrink-0">
-                          <img src="/Aurya.jpeg" alt="Aurya IA" className="w-14 h-14 rounded-full border-2 border-indigo-400" />
+                          <img src={auryaBrandMark} alt="Aurya IA" className="w-14 h-14 rounded-full border-2 border-indigo-400" />
                           <BrainCircuit className="w-6 h-6 text-violet-300 absolute -bottom-2 -right-2 bg-[#0b1324] rounded-full p-1" />
                         </div>
                         <div className="w-full">

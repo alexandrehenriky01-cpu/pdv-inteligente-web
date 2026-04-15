@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Layout } from '../../../components/Layout';
 import { api } from '../../../services/api';
 import { toast } from 'react-toastify';
@@ -29,7 +29,7 @@ export function WmsArmazenagem() {
   // ==========================================
   // HANDLERS DOS LEITORES DE CÓDIGO DE BARRAS
   // ==========================================
-  const handleBiparLote = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleBiparLote = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && codigoLote.trim() !== '') {
       // Aqui poderíamos bater numa API para validar se o lote existe antes de avançar,
       // mas para otimizar tempo na câmara fria, vamos avançar direto e validar no final.
@@ -37,7 +37,7 @@ export function WmsArmazenagem() {
     }
   };
 
-  const handleBiparEndereco = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleBiparEndereco = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && codigoEndereco.trim() !== '') {
       setEtapa('CONFIRMAR');
     }

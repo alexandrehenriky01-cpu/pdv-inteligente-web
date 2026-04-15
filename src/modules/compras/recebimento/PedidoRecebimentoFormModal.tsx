@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState, type FC, type FormEvent } from 'react';
 import { X, Plus, Trash2, Loader2, Search } from 'lucide-react';
 import { api } from '../../../services/api';
 
@@ -7,7 +7,7 @@ interface Props {
   onSuccess: () => void;
 }
 
-export const PedidoRecebimentoFormModal: React.FC<Props> = ({ onClose, onSuccess }) => {
+export const PedidoRecebimentoFormModal: FC<Props> = ({ onClose, onSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -31,8 +31,8 @@ export const PedidoRecebimentoFormModal: React.FC<Props> = ({ onClose, onSuccess
     try {
       // Busca pessoas e produtos para preencher os selects
       const [resPessoas, resProdutos] = await Promise.all([
-        api.get('/api/pessoas'), // Assumindo que sua rota retorna fornecedores
-        api.get('/api/produtos')
+        api.get('/api/cadastros/pessoas'), // Assumindo que sua rota retorna fornecedores
+        api.get('/api/cadastros/produtos')
       ]);
       setFornecedores(resPessoas.data);
       setProdutos(resProdutos.data);
@@ -55,7 +55,7 @@ export const PedidoRecebimentoFormModal: React.FC<Props> = ({ onClose, onSuccess
     setItens(novosItens);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setErro(null);
 

@@ -1,7 +1,10 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// base relativo: necessário para Electron (file://) e assets em dist/
+/**
+ * Base relativa obrigatória no Electron: `loadFile(dist/index.html)` resolve assets como `./assets/...`,
+ * não `/assets/...` (raiz do disco em file://).
+ */
 export default defineConfig({
   base: './',
   plugins: [react()],

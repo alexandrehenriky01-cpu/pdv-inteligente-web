@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Layout } from '../../components/Layout';
 import { api } from '../../services/api';
 import { 
@@ -9,15 +9,24 @@ import {
 } from 'lucide-react';
 import { AxiosError } from 'axios';
 import { toast } from 'react-toastify';
+import { getCardapioTotem } from '../../services/api/cardapioTotemApi';
+import {
+  aguardarAutorizacaoTefHardware,
+  tefCancelarAutorizacaoPendente,
+  tefFalhaSalvarVendaCnc,
+  tefPosVendaSucessoCnc,
+} from '../../services/tefCncFlow';
 
 // --- INTERFACES ---
 interface IProduto {
   id: string;
+  itemCardapioId: string;
+  produtoId: string;
   nome: string;
   codigo?: string; // 🚀 ADICIONADO: Novo Código Curto
   codigoBarras?: string;
   precoVenda: number;
-  categoria: { nome: string };
+  categoria: string;
 }
 
 interface IItemCarrinho extends IProduto {
@@ -39,6 +48,8 @@ interface IPagamentoParcial {
   id: string;
   tipoPagamento: string;
   valor: number;
+  transacaoTefId?: string;
+  canalAdquirente?: 'POS' | 'TEF';
 }
 
 export function PdvFoodService() {
@@ -68,33 +79,35 @@ export function PdvFoodService() {
   const [pagamentosAdicionados, setPagamentosAdicionados] = useState<IPagamentoParcial[]>([]);
   const [dividirPor, setDividirPor] = useState<number>(1);
   const [finalizando, setFinalizando] = useState(false);
+  const [tefFoodBusy, setTefFoodBusy] = useState(false);
 
   // 🚀 ESTADOS: ESCUDO FISCAL E AUTO-RETENTATIVA
   const [alertaAurya, setAlertaAurya] = useState<string | null>(null);
   const [aguardandoFoco, setAguardandoFoco] = useState(false);
 
-  // --- EFEITOS ---
-  useEffect(() => {
-    carregarProdutos();
-    carregarMesas();
-  }, []);
-
-  const carregarProdutos = async () => {
+  const carregarProdutos = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await api.get('/api/produtos');
-      const prods = response.data;
+      const { itens } = await getCardapioTotem();
+      const prods: IProduto[] = itens.map((item) => ({
+        id: item.id,
+        itemCardapioId: item.id,
+        produtoId: item.produtoId,
+        nome: item.nome,
+        precoVenda: Number(item.precoVenda),
+        categoria: item.categoria || 'Geral',
+      }));
       setProdutos(prods);
-      const cats = Array.from(new Set(prods.map((p: any) => p.categoria?.nome || 'Geral'))) as string[];
+      const cats = Array.from(new Set(prods.map((p) => p.categoria || 'Geral'))) as string[];
       setCategorias(['Todas', ...cats]);
     } catch (error) {
-      console.error("Erro ao carregar produtos", error);
+      console.error('Erro ao carregar produtos', error);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const carregarMesas = async () => {
+  const carregarMesas = useCallback(async () => {
     setRecarregandoMesas(true);
     try {
       const response = await api.get('/api/mesas');
@@ -110,6 +123,8 @@ export function PdvFoodService() {
             status: mesaBanco.status,
             itens: mesaBanco.itens.map((item: any) => ({
               id: item.produto.id,
+              itemCardapioId: item.itemCardapio?.id ?? item.produto.id,
+              produtoId: item.produto.id,
               nome: item.produto.nome,
               codigo: item.produto.codigo, // 🚀 Mapeando o código
               codigoBarras: item.produto.codigoBarras,
@@ -129,15 +144,20 @@ export function PdvFoodService() {
     } finally {
       setRecarregandoMesas(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    void carregarProdutos();
+    void carregarMesas();
+  }, [carregarProdutos, carregarMesas]);
 
   // --- LÓGICA DE CARRINHO ---
-  const getCarrinhoAtual = () => {
+  const getCarrinhoAtual = useCallback(() => {
     if (modoAtendimento === 'MESA' && mesaSelecionada) {
       return mesas.find(m => m.numero === mesaSelecionada)?.itens || [];
     }
     return carrinho;
-  };
+  }, [modoAtendimento, mesaSelecionada, mesas, carrinho]);
 
   const adicionarAoCarrinho = (produto: IProduto) => {
     const atualizarLista = (listaAtual: IItemCarrinho[]) => {
@@ -191,7 +211,7 @@ export function PdvFoodService() {
   };
 
   // --- LÓGICA DE PAGAMENTO (SPLIT BILL) ---
-  const totalCarrinho = useMemo(() => getCarrinhoAtual().reduce((acc, item) => acc + item.subtotal, 0), [carrinho, mesas, modoAtendimento, mesaSelecionada]);
+  const totalCarrinho = useMemo(() => getCarrinhoAtual().reduce((acc, item) => acc + item.subtotal, 0), [getCarrinhoAtual]);
   
   const totalPago = useMemo(() => pagamentosAdicionados.reduce((acc, p) => acc + p.valor, 0), [pagamentosAdicionados]);
   const saldoDevedor = Math.max(0, totalCarrinho - totalPago);
@@ -209,18 +229,54 @@ export function PdvFoodService() {
     }
   }, [modalPagamento, saldoDevedor, dividirPor, valorPorPessoa, pagamentosAdicionados.length]);
 
-  const adicionarPagamentoParcial = () => {
+  const adicionarPagamentoParcial = async () => {
     const valor = Number(valorDigitado.replace(',', '.'));
     if (valor <= 0) return;
+    if (valor > saldoDevedor + 0.009) {
+      alert(
+        `O valor (R$ ${valor.toFixed(2)}) não pode ser maior que o saldo devedor (R$ ${saldoDevedor.toFixed(2)}).`
+      );
+      return;
+    }
 
-    setPagamentosAdicionados(prev => [
-      ...prev, 
-      { id: Date.now().toString(), tipoPagamento: formaPagamentoAtual, valor }
+    if (formaPagamentoAtual === 'CREDITO_TEF' || formaPagamentoAtual === 'DEBITO_TEF') {
+      setTefFoodBusy(true);
+      try {
+        const { transacaoTefId } = await aguardarAutorizacaoTefHardware({
+          valor,
+          tipoCartao: formaPagamentoAtual === 'CREDITO_TEF' ? 'CREDITO' : 'DEBITO',
+          terminal: 'FOOD-SERVICE',
+        });
+        setPagamentosAdicionados((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            tipoPagamento: formaPagamentoAtual === 'CREDITO_TEF' ? 'CARTAO_CREDITO' : 'CARTAO_DEBITO',
+            valor,
+            transacaoTefId,
+            canalAdquirente: 'TEF',
+          },
+        ]);
+      } catch (e) {
+        alert(e instanceof Error ? e.message : 'Falha na autorização TEF.');
+      } finally {
+        setTefFoodBusy(false);
+      }
+      return;
+    }
+
+    setPagamentosAdicionados((prev) => [
+      ...prev,
+      { id: Date.now().toString(), tipoPagamento: formaPagamentoAtual, valor },
     ]);
   };
 
   const removerPagamentoParcial = (id: string) => {
-    setPagamentosAdicionados(prev => prev.filter(p => p.id !== id));
+    const pag = pagamentosAdicionados.find((p) => p.id === id);
+    if (pag?.transacaoTefId) {
+      void tefCancelarAutorizacaoPendente(pag.transacaoTefId).catch(() => undefined);
+    }
+    setPagamentosAdicionados((prev) => prev.filter((p) => p.id !== id));
   };
 
   const abrirModalPagamento = () => {
@@ -230,7 +286,7 @@ export function PdvFoodService() {
   };
 
   // --- FINALIZAÇÃO DE VENDA ---
-  const finalizarVenda = async () => {
+  const finalizarVenda = useCallback(async () => {
     if (getCarrinhoAtual().length === 0 || saldoDevedor > 0.01) return;
     setFinalizando(true);
 
@@ -241,23 +297,54 @@ export function PdvFoodService() {
         if (pagDinheiro) pagDinheiro.valor -= troco;
       }
 
+      const tefIdsSnapshot = pagamentosFinais
+        .map((p) => p.transacaoTefId)
+        .filter((id): id is string => typeof id === 'string' && id.trim().length > 0);
+
       const payload = {
         modo: modoAtendimento,
         mesa: mesaSelecionada,
         clienteDelivery: modoAtendimento === 'DELIVERY' ? clienteDelivery : null,
         itens: getCarrinhoAtual().map(i => ({
-          produtoId: i.id,
+          produtoId: i.produtoId || i.id,
+          itemCardapioId: i.itemCardapioId || i.id,
           quantidade: i.quantidade,
           valorUnitario: i.precoVenda,
           valorTotal: i.subtotal
         })),
         valorTotal: totalCarrinho,
-        pagamentos: pagamentosFinais.map(p => ({ tipoPagamento: p.tipoPagamento, valor: p.valor }))
+        pagamentos: pagamentosFinais.map((p) => ({
+          tipoPagamento: p.tipoPagamento,
+          valor: p.valor,
+          ...(p.transacaoTefId
+            ? { transacaoTefId: p.transacaoTefId, canalAdquirente: 'TEF' as const }
+            : p.tipoPagamento === 'CARTAO_CREDITO' || p.tipoPagamento === 'CARTAO_DEBITO'
+              ? { canalAdquirente: 'POS' as const }
+              : {}),
+        })),
       };
 
       const resVenda = await api.post<{
+        venda?: { id: string };
         auryaCorrecoesTributarias?: { nomeProduto: string; cstAnterior: string; csosnNovo: string }[];
       }>('/api/vendas', payload);
+
+      if (tefIdsSnapshot.length > 0) {
+        try {
+          await tefPosVendaSucessoCnc(tefIdsSnapshot, {
+            vendaId: resVenda.data.venda?.id ?? '',
+            contextoFood:
+              modoAtendimento === 'MESA' && mesaSelecionada != null
+                ? { modo: 'MESA', mesa: mesaSelecionada }
+                : modoAtendimento === 'DELIVERY'
+                  ? { modo: 'DELIVERY' }
+                  : undefined,
+          });
+        } catch (tefErr) {
+          console.error(tefErr);
+          toast.error('Venda gravada, mas a confirmação TEF falhou. Verifique a maquininha e o ERP.');
+        }
+      }
 
       const correcoes = resVenda.data.auryaCorrecoesTributarias ?? [];
       for (const c of correcoes) {
@@ -282,7 +369,14 @@ export function PdvFoodService() {
     } catch (err) {
       const error = err as AxiosError<{error?: string}>;
       const mensagemErro = error.response?.data?.error || 'Erro desconhecido ao finalizar venda.';
-      
+
+      const tefIdsRollback = pagamentosAdicionados
+        .map((p) => p.transacaoTefId)
+        .filter((id): id is string => typeof id === 'string' && id.trim().length > 0);
+      if (tefIdsRollback.length > 0) {
+        void tefFalhaSalvarVendaCnc(tefIdsRollback).catch(() => undefined);
+      }
+
       if (mensagemErro.includes('Rejeição Sefaz Evitada')) {
         setAlertaAurya(mensagemErro);
       } else {
@@ -291,7 +385,17 @@ export function PdvFoodService() {
     } finally {
       setFinalizando(false);
     }
-  };
+  }, [
+    getCarrinhoAtual,
+    saldoDevedor,
+    troco,
+    pagamentosAdicionados,
+    modoAtendimento,
+    mesaSelecionada,
+    clienteDelivery,
+    totalCarrinho,
+    carregarMesas,
+  ]);
 
   // ============================================================================
   // 🚀 MÁGICA DA AURYA: AUTO-RETENTATIVA APÓS CORREÇÃO EM OUTRA ABA
@@ -300,7 +404,7 @@ export function PdvFoodService() {
   const finalizarVendaRef = useRef(finalizarVenda);
   useEffect(() => {
     finalizarVendaRef.current = finalizarVenda;
-  });
+  }, [finalizarVenda]);
 
   useEffect(() => {
     const handleFocus = () => {
@@ -342,7 +446,7 @@ export function PdvFoodService() {
   // ============================================================================
 
   const produtosFiltrados = produtos.filter(p => {
-    const matchCategoria = categoriaAtiva === 'Todas' || (p.categoria?.nome || 'Geral') === categoriaAtiva;
+    const matchCategoria = categoriaAtiva === 'Todas' || (p.categoria || 'Geral') === categoriaAtiva;
     const matchBusca = p.nome.toLowerCase().includes(busca.toLowerCase()) || 
                        p.codigoBarras?.includes(busca) ||
                        p.codigo?.includes(busca); // 🚀 Permite filtrar pelo código curto
@@ -350,7 +454,7 @@ export function PdvFoodService() {
   });
 
   // 🚀 Bipagem rápida / Digitar código e dar Enter
-  const handleKeyDownBusca = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDownBusca = async (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && busca.trim().length > 0) {
       e.preventDefault();
       
@@ -369,7 +473,7 @@ export function PdvFoodService() {
       } else {
         // Se não achou, tenta bater na API (Fallback de segurança)
         try {
-          const response = await api.get<IProduto[]>(`/api/produtos?busca=${encodeURIComponent(busca)}`);
+          const response = await api.get<IProduto[]>(`/api/cadastros/produtos?busca=${encodeURIComponent(busca)}`);
           const matchExatoApi = response.data.find(p => p.codigo === busca || p.codigoBarras === busca);
           
           if (matchExatoApi) {
@@ -390,7 +494,20 @@ export function PdvFoodService() {
   };
 
   const nomesFormasPagamento: Record<string, string> = {
-    'DINHEIRO': 'Dinheiro', 'PIX': 'PIX', 'CARTAO_CREDITO': 'Crédito', 'CARTAO_DEBITO': 'Débito'
+    DINHEIRO: 'Dinheiro',
+    PIX: 'PIX',
+    CARTAO_CREDITO: 'Crédito (POS)',
+    CARTAO_DEBITO: 'Débito (POS)',
+    CREDITO_TEF: 'CREDITO TEF',
+    DEBITO_TEF: 'DEBITO TEF',
+  };
+
+  const rotuloPagamento = (pag: IPagamentoParcial) => {
+    if (pag.transacaoTefId) {
+      if (pag.tipoPagamento === 'CARTAO_CREDITO') return 'CREDITO TEF';
+      if (pag.tipoPagamento === 'CARTAO_DEBITO') return 'DEBITO TEF';
+    }
+    return nomesFormasPagamento[pag.tipoPagamento] || pag.tipoPagamento;
   };
 
   return (
@@ -515,7 +632,7 @@ export function PdvFoodService() {
                       className="bg-[#0b1324]/70 border border-white/10 rounded-2xl p-3 flex flex-col items-center text-center hover:bg-white/5 hover:border-violet-500/20 transition-all group"
                     >
                       <div className="w-12 h-12 bg-[#08101f] rounded-full flex items-center justify-center mb-3 group-hover:scale-110 transition-transform shadow-inner border border-white/10">
-                        {produto.categoria?.nome?.toLowerCase().includes('bebida') ? <Coffee className="w-6 h-6 text-violet-300" /> : <Pizza className="w-6 h-6 text-amber-300" />}
+                        {produto.categoria?.toLowerCase().includes('bebida') ? <Coffee className="w-6 h-6 text-violet-300" /> : <Pizza className="w-6 h-6 text-amber-300" />}
                       </div>
                       <span className="text-white text-sm font-bold line-clamp-2 leading-tight mb-1">
                         {/* 🚀 EXIBE O CÓDIGO CURTO NO BOTÃO */}
@@ -599,7 +716,17 @@ export function PdvFoodService() {
 
       {/* MODAL DE PAGAMENTO (SPLIT BILL) */}
       {modalPagamento && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-[#020617]/80 backdrop-blur-sm">
+        <div className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-[#020617]/80 backdrop-blur-sm relative">
+          {tefFoodBusy && (
+            <div
+              className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 rounded-[30px] bg-[#020617]/85 px-6 text-center"
+              role="status"
+              aria-live="polite"
+            >
+              <CreditCard className="h-10 w-10 text-violet-400 animate-pulse" aria-hidden />
+              <p className="text-sm font-bold text-white">CREDITO TEF / DEBITO TEF — aguarde o PinPad (CNC).</p>
+            </div>
+          )}
           <div className="bg-[#08101f] border border-white/10 rounded-[30px] w-full max-w-2xl overflow-hidden shadow-[0_25px_80px_rgba(0,0,0,0.60)] animate-in zoom-in-95 duration-200 flex flex-col md:flex-row">
             
             {/* Lado Esquerdo do Modal: Calculadora e Formas de Pagamento */}
@@ -633,15 +760,20 @@ export function PdvFoodService() {
               <div className="grid grid-cols-2 gap-3 mb-6">
                 {[
                   { id: 'PIX', label: 'PIX', icon: QrCode },
-                  { id: 'CARTAO_CREDITO', label: 'Crédito', icon: CreditCard },
-                  { id: 'CARTAO_DEBITO', label: 'Débito', icon: CreditCard },
-                  { id: 'DINHEIRO', label: 'Dinheiro', icon: Banknote }
+                  { id: 'CREDITO_TEF', label: 'CREDITO TEF', icon: CreditCard },
+                  { id: 'DEBITO_TEF', label: 'DEBITO TEF', icon: CreditCard },
+                  { id: 'CARTAO_CREDITO', label: 'Crédito (POS)', icon: CreditCard },
+                  { id: 'CARTAO_DEBITO', label: 'Débito (POS)', icon: CreditCard },
+                  { id: 'DINHEIRO', label: 'Dinheiro', icon: Banknote },
                 ].map(forma => {
                   const Icon = forma.icon;
                   return (
                     <button
                       key={forma.id}
-                      onClick={() => setFormaPagamentoAtual(forma.id)}
+                      onClick={() => {
+                        setFormaPagamentoAtual(forma.id);
+                        setValorDigitado(saldoDevedor.toFixed(2));
+                      }}
                       className={`p-3 rounded-xl border flex flex-col items-center gap-2 transition-all ${
                         formaPagamentoAtual === forma.id 
                           ? 'bg-violet-500/15 border-violet-500/30 text-violet-300 shadow-[0_0_15px_rgba(139,92,246,0.20)]' 
@@ -667,11 +799,11 @@ export function PdvFoodService() {
                   />
                 </div>
                 <button 
-                  onClick={adicionarPagamentoParcial}
-                  disabled={Number(valorDigitado) <= 0 || saldoDevedor <= 0}
+                  onClick={() => void adicionarPagamentoParcial()}
+                  disabled={tefFoodBusy || Number(valorDigitado) <= 0 || saldoDevedor <= 0}
                   className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white rounded-xl px-6 font-bold disabled:opacity-50 transition-colors"
                 >
-                  Adicionar
+                  {tefFoodBusy ? 'PinPad…' : 'Adicionar'}
                 </button>
               </div>
             </div>
@@ -695,7 +827,7 @@ export function PdvFoodService() {
                       <div key={pag.id} className="flex justify-between items-center bg-[#08101f] border border-white/10 rounded-lg p-3">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-bold text-slate-300 uppercase bg-white/5 border border-white/10 px-2 py-1 rounded">
-                            {nomesFormasPagamento[pag.tipoPagamento]}
+                            {rotuloPagamento(pag)}
                           </span>
                         </div>
                         <div className="flex items-center gap-3">

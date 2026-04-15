@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState, type ChangeEvent, type FC } from 'react';
 import {
   Loader2,
   MapPin,
@@ -16,7 +16,7 @@ import {
   IViaCepResponse
 } from '../../types/pessoa';
 
-export const FormEndereco: React.FC<IFormPessoaProps> = ({
+export const FormEndereco: FC<IFormPessoaProps> = ({
   formData,
   setFormData,
   inputClass,
@@ -25,7 +25,7 @@ export const FormEndereco: React.FC<IFormPessoaProps> = ({
   const [cepLoading, setCepLoading] = useState<boolean>(false);
 
   // 💡 CEP MASK
-  const handleCepChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCepChange = (e: ChangeEvent<HTMLInputElement>) => {
     let value = e.target.value.replace(/\D/g, '');
 
     if (value.length > 8) value = value.slice(0, 8);
@@ -38,7 +38,7 @@ export const FormEndereco: React.FC<IFormPessoaProps> = ({
   };
 
   // 💡 UF SANITIZE
-  const handleEstadoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleEstadoChange = (e: ChangeEvent<HTMLInputElement>) => {
     let value = e.target.value.replace(/[^a-zA-Z]/g, '').toUpperCase();
     if (value.length > 2) value = value.slice(0, 2);
 

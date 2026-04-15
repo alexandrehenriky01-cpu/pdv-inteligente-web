@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../../../services/api';
 import { Layout } from '../../../components/Layout';
 import {
@@ -13,6 +13,7 @@ import {
   Landmark,
 } from 'lucide-react';
 import { AxiosError } from 'axios';
+import { auryaBrandMark } from '../../../assets/branding';
 
 export interface IDadosBrutosFinanceiro {
   saldoCaixa: number;
@@ -109,7 +110,7 @@ export function DashboardFinanceiro() {
         <div className="flex h-[80vh] flex-col items-center justify-center space-y-6">
           <div className="relative">
             <img
-              src="/Aurya.jpeg"
+              src={auryaBrandMark}
               alt="Aurya IA"
               className="h-24 w-24 rounded-full border-4 border-[#0b1020] object-cover shadow-[0_0_30px_rgba(6,182,212,0.35)] animate-pulse grayscale-[10%]"
             />
@@ -149,10 +150,12 @@ export function DashboardFinanceiro() {
 
   const { dadosBrutos, analiseIA } = dados;
 
+  const saudeFinanceira = analiseIA?.saudeFinanceira || '';
+
   const corSaude =
-    analiseIA.saudeFinanceira.includes('Precária') ||
-    analiseIA.saudeFinanceira.includes('Crítica') ||
-    analiseIA.saudeFinanceira.includes('Critica')
+    saudeFinanceira.includes('Precária') ||
+    saudeFinanceira.includes('Crítica') ||
+    saudeFinanceira.includes('Critica')
       ? {
           bg: 'bg-rose-500/10',
           border: 'border-rose-400/20',
@@ -160,8 +163,8 @@ export function DashboardFinanceiro() {
           shadow: 'shadow-[0_0_30px_rgba(244,63,94,0.16)]',
           icon: <TrendingDown className="h-5 w-5 text-rose-300" />,
         }
-      : analiseIA.saudeFinanceira.includes('Atenção') ||
-          analiseIA.saudeFinanceira.includes('Atencao')
+      : saudeFinanceira.includes('Atenção') ||
+          saudeFinanceira.includes('Atencao')
         ? {
             bg: 'bg-amber-500/10',
             border: 'border-amber-400/20',
@@ -229,7 +232,7 @@ export function DashboardFinanceiro() {
               className={`inline-flex items-center gap-2 rounded-2xl border px-5 py-3 text-sm font-black uppercase tracking-[0.16em] backdrop-blur-md ${corSaude.bg} ${corSaude.border} ${corSaude.text} ${corSaude.shadow}`}
             >
               {corSaude.icon}
-              Saúde: {analiseIA.saudeFinanceira}
+              Saúde: {saudeFinanceira || 'Carregando...'}
             </span>
           </div>
         </div>
@@ -334,7 +337,7 @@ export function DashboardFinanceiro() {
             <div className="relative z-10 mb-8 flex items-center gap-5 border-b border-white/10 pb-8">
               <div className="relative shrink-0">
                 <img
-                  src="/Aurya.jpeg"
+                  src={auryaBrandMark}
                   alt="Aurya IA"
                   className="h-20 w-20 rounded-full border-2 border-cyan-400/20 object-cover shadow-[0_0_24px_rgba(6,182,212,0.24)] grayscale-[10%]"
                 />
@@ -356,7 +359,7 @@ export function DashboardFinanceiro() {
             <div className="relative z-10 mb-8 rounded-[24px] border border-cyan-400/15 bg-cyan-500/10 p-6 shadow-inner">
               <div className="absolute inset-y-0 left-0 w-1.5 rounded-l-[24px] bg-gradient-to-b from-cyan-400 to-blue-600" />
               <p className="pl-5 text-lg font-medium italic leading-8 text-white md:text-xl">
-                "{analiseIA.resumoExecutivo}"
+                "{analiseIA?.resumoExecutivo || 'Carregando análise...'}"
               </p>
             </div>
 
@@ -367,7 +370,7 @@ export function DashboardFinanceiro() {
                   Análise de Fluxo de Caixa
                 </h3>
                 <p className="text-base font-medium leading-8 text-slate-300">
-                  {analiseIA.analiseFluxoCaixa}
+                  {analiseIA?.analiseFluxoCaixa || 'Aguardando dados...'}
                 </p>
               </div>
 
@@ -377,7 +380,7 @@ export function DashboardFinanceiro() {
                   Alerta de Estoque e Compras
                 </h3>
                 <p className="text-base font-medium leading-8 text-slate-300">
-                  {analiseIA.alertaEstoque}
+                  {analiseIA?.alertaEstoque || 'Aguardando dados...'}
                 </p>
               </div>
             </div>
@@ -389,7 +392,7 @@ export function DashboardFinanceiro() {
               </h3>
 
               <ul className="space-y-4">
-                {analiseIA.recomendacoes.map((rec: string | IRecomendacaoFinanceiraIA, index: number) => {
+                {(analiseIA?.recomendacoes || []).map((rec: string | IRecomendacaoFinanceiraIA, index: number) => {
                   const textoRecomendacao =
                     typeof rec === 'string'
                       ? rec

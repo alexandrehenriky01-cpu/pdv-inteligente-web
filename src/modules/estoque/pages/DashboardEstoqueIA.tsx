@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../../../services/api';
 import { Layout } from '../../../components/Layout';
 import {
@@ -13,6 +13,7 @@ import {
   Activity,
 } from 'lucide-react';
 import { AxiosError } from 'axios';
+import { auryaBrandMark } from '../../../assets/branding';
 
 export interface IDadosBrutosEstoque {
   totalItens: number;
@@ -30,8 +31,8 @@ export interface IRecomendacaoIA {
 export interface IAnaliseIAEstoque {
   saudeEstoque: string;
   resumoExecutivo: string;
-  produtosCriticosParaComprar: string[];
-  sugestoesPromocao: string[];
+  produtosCriticosParaComprar: (string | IRecomendacaoIA)[];
+  sugestoesPromocao: (string | IRecomendacaoIA)[];
   recomendacoes: (string | IRecomendacaoIA)[];
 }
 
@@ -110,7 +111,7 @@ export function DashboardEstoqueIA() {
         <div className="flex h-[80vh] flex-col items-center justify-center space-y-6">
           <div className="relative">
             <img
-              src="/Aurya.jpeg"
+              src={auryaBrandMark}
               alt="Aurya IA"
               className="h-24 w-24 rounded-full border-4 border-[#0b1020] object-cover shadow-[0_0_30px_rgba(59,130,246,0.35)] animate-pulse"
             />
@@ -283,7 +284,7 @@ export function DashboardEstoqueIA() {
           <div className="relative z-10 mb-8 flex items-center gap-5 border-b border-white/10 pb-8">
             <div className="relative shrink-0">
               <img
-                src="/Aurya.jpeg"
+                src={auryaBrandMark}
                 alt="Aurya IA"
                 className="h-20 w-20 rounded-full border-2 border-sky-400/20 object-cover shadow-[0_0_24px_rgba(59,130,246,0.24)] grayscale-[10%]"
               />
@@ -318,15 +319,18 @@ export function DashboardEstoqueIA() {
 
               <ul className="space-y-4">
                 {analiseIA.produtosCriticosParaComprar?.length > 0 ? (
-                  analiseIA.produtosCriticosParaComprar.map((prod: string, i: number) => (
-                    <li
-                      key={i}
-                      className="flex items-start gap-4 rounded-2xl border border-white/10 bg-[#0b1324] p-4 text-base font-medium text-slate-200 shadow-inner"
-                    >
-                      <span className="mt-2 h-2.5 w-2.5 shrink-0 rounded-full bg-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.8)]" />
-                      <span className="leading-tight">{prod}</span>
-                    </li>
-                  ))
+                  analiseIA.produtosCriticosParaComprar.map((prod: string | IRecomendacaoIA, i: number) => {
+                    const texto = typeof prod === 'string' ? prod : `${prod.nome || 'Produto'}: ${prod.observacao || ''}`;
+                    return (
+                      <li
+                        key={i}
+                        className="flex items-start gap-4 rounded-2xl border border-white/10 bg-[#0b1324] p-4 text-base font-medium text-slate-200 shadow-inner"
+                      >
+                        <span className="mt-2 h-2.5 w-2.5 shrink-0 rounded-full bg-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.8)]" />
+                        <span className="leading-tight">{texto}</span>
+                      </li>
+                    );
+                  })
                 ) : (
                   <li className="flex items-center gap-3 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-4 text-base font-bold text-emerald-300">
                     <CheckCircle2 className="h-6 w-6" />
@@ -344,15 +348,18 @@ export function DashboardEstoqueIA() {
 
               <ul className="space-y-4">
                 {analiseIA.sugestoesPromocao?.length > 0 ? (
-                  analiseIA.sugestoesPromocao.map((prod: string, i: number) => (
-                    <li
-                      key={i}
-                      className="flex items-start gap-4 rounded-2xl border border-white/10 bg-[#0b1324] p-4 text-base font-medium text-slate-200 shadow-inner"
-                    >
-                      <span className="mt-2 h-2.5 w-2.5 shrink-0 rounded-full bg-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.8)]" />
-                      <span className="leading-tight">{prod}</span>
-                    </li>
-                  ))
+                  analiseIA.sugestoesPromocao.map((prod: string | IRecomendacaoIA, i: number) => {
+                    const texto = typeof prod === 'string' ? prod : `${prod.nome || 'Produto'}: ${prod.observacao || ''}`;
+                    return (
+                      <li
+                        key={i}
+                        className="flex items-start gap-4 rounded-2xl border border-white/10 bg-[#0b1324] p-4 text-base font-medium text-slate-200 shadow-inner"
+                      >
+                        <span className="mt-2 h-2.5 w-2.5 shrink-0 rounded-full bg-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.8)]" />
+                        <span className="leading-tight">{texto}</span>
+                      </li>
+                    );
+                  })
                 ) : (
                   <li className="flex items-center gap-3 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 p-4 text-base font-bold text-emerald-300">
                     <CheckCircle2 className="h-6 w-6" />

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../../../services/api';
 import { Layout } from '../../../components/Layout';
 import {
@@ -14,6 +14,7 @@ import {
   Landmark,
 } from 'lucide-react';
 import { AxiosError } from 'axios';
+import { auryaBrandMark } from '../../../assets/branding';
 
 export interface IDadosBrutosContabeis {
   isPartidasDobradasOk: boolean;
@@ -242,7 +243,7 @@ export function DashboardContabil() {
         <div className="flex h-[80vh] flex-col items-center justify-center space-y-6">
           <div className="relative">
             <img
-              src="/Aurya.jpeg"
+              src={auryaBrandMark}
               alt="Aurya IA"
               className="h-24 w-24 rounded-full border-4 border-[#0b1020] object-cover shadow-[0_0_30px_rgba(139,92,246,0.35)] animate-pulse grayscale-[15%]"
             />
@@ -484,7 +485,7 @@ export function DashboardContabil() {
             <div className="relative z-10 mb-8 flex items-center gap-5 border-b border-white/10 pb-8">
               <div className="relative shrink-0">
                 <img
-                  src="/Aurya.jpeg"
+                  src={auryaBrandMark}
                   alt="Aurya IA"
                   className="h-20 w-20 rounded-full border-2 border-violet-500/30 object-cover shadow-[0_0_24px_rgba(139,92,246,0.25)] grayscale-[10%]"
                 />

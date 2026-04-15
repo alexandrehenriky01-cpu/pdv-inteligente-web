@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
 import { Layout } from '../../../components/Layout';
 import { api } from '../../../services/api';
 import {
@@ -18,6 +18,7 @@ import {
   Pencil,
 } from 'lucide-react';
 import { AxiosError } from 'axios';
+import { MODULES_CONFIG, permissionsForModules } from '../../../config/permissions';
 
 export interface IUsuarioLoja {
   id: string;
@@ -26,6 +27,7 @@ export interface IUsuarioLoja {
   email: string;
   username: string | null;
   role: string;
+  permissoes?: string[];
   ativo: boolean;
   createdAt: string;
 }
@@ -41,6 +43,7 @@ export function GestaoUsuariosPage() {
   const [modalMode, setModalMode] = useState<ModalMode>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState<'dados' | 'permissoes'>('dados');
 
   const [formData, setFormData] = useState({
     codigo: '',
@@ -49,11 +52,22 @@ export function GestaoUsuariosPage() {
     email: '',
     senha: '',
     role: 'CAIXA',
+    permissoes: [] as string[],
     ativo: true,
   });
+  const [modulosLoja, setModulosLoja] = useState<string[]>([]);
 
   useEffect(() => {
     void carregarUsuarios();
+    try {
+      const raw = localStorage.getItem('@PDVUsuario');
+      if (raw) {
+        const u = JSON.parse(raw) as { loja?: { modulosAtivos?: string[] } };
+        setModulosLoja((u.loja?.modulosAtivos ?? []).map((m) => String(m).toUpperCase()));
+      }
+    } catch {
+      setModulosLoja([]);
+    }
   }, []);
 
   const carregarUsuarios = async () => {
@@ -94,6 +108,7 @@ export function GestaoUsuariosPage() {
       email: '',
       senha: '',
       role: 'CAIXA',
+      permissoes: [],
       ativo: true,
     });
     setEditingId(null);
@@ -113,6 +128,7 @@ export function GestaoUsuariosPage() {
       email: user.email,
       senha: '',
       role: user.role,
+      permissoes: user.permissoes ?? [],
       ativo: user.ativo,
     });
     setModalMode('edit');
@@ -123,7 +139,7 @@ export function GestaoUsuariosPage() {
     resetForm();
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleInputChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
     if (type === 'checkbox') {
       const checked = (e.target as HTMLInputElement).checked;
@@ -133,7 +149,19 @@ export function GestaoUsuariosPage() {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const permissoesDisponiveis = permissionsForModules(modulosLoja);
+
+  const togglePermissao = (code: string) => {
+    setFormData((prev) => {
+      const exists = prev.permissoes.includes(code);
+      return {
+        ...prev,
+        permissoes: exists ? prev.permissoes.filter((p) => p !== code) : [...prev.permissoes, code],
+      };
+    });
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
 
     if (!formData.codigo.trim()) {
@@ -167,6 +195,7 @@ export function GestaoUsuariosPage() {
           email: formData.email.trim(),
           senha: formData.senha.trim(),
           role: formData.role,
+          permissoes: formData.permissoes,
           ativo: formData.ativo,
         });
       } else if (modalMode === 'edit' && editingId) {
@@ -176,6 +205,7 @@ export function GestaoUsuariosPage() {
           nome: formData.nome.trim(),
           email: formData.email.trim(),
           role: formData.role,
+          permissoes: formData.permissoes,
           ativo: formData.ativo,
         };
         const senhaTrim = formData.senha.trim();
@@ -363,10 +393,10 @@ export function GestaoUsuariosPage() {
 
         {modalMode && (
           <div className="fixed inset-0 bg-[#020617]/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-[#08101f] border border-white/10 rounded-[30px] w-full max-w-md overflow-hidden shadow-[0_25px_80px_rgba(0,0,0,0.8)]">
+            <div className="bg-[#08101f] border border-white/10 rounded-[30px] w-full max-w-2xl max-h-[85vh] flex flex-col shadow-[0_25px_80px_rgba(0,0,0,0.8)]">
               <div className="h-1.5 w-full bg-gradient-to-r from-violet-600 to-fuchsia-600" />
 
-              <div className="p-6 border-b border-white/10 flex justify-between items-center bg-black/20">
+              <div className="p-6 border-b border-white/10 flex justify-between items-center bg-black/20 shrink-0">
                 <h2 className="text-xl font-black text-white flex items-center gap-2">
                   <User className="w-6 h-6 text-violet-400" />
                   {modalMode === 'create' ? 'Novo Usuário' : 'Editar usuário'}
@@ -380,125 +410,191 @@ export function GestaoUsuariosPage() {
                 </button>
               </div>
 
-              <form onSubmit={handleSubmit} className="p-6 space-y-5">
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 pl-1">
-                    Nome de usuário (login) *
-                  </label>
-                  <input
-                    required
-                    name="username"
-                    value={formData.username}
-                    onChange={handleInputChange}
-                    placeholder="joao.caixa"
-                    autoComplete="off"
-                    className={`${inputClass} font-mono`}
-                  />
-                  <p className="text-[10px] text-slate-500 mt-1.5 pl-1">
-                    Usado no login junto com o e-mail. Apenas letras, números, ponto, _ e hífen.
-                  </p>
+              <div className="flex border-b border-white/10 bg-black/10 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('dados')}
+                  className={`flex-1 py-3.5 text-sm font-bold uppercase tracking-wider transition-colors ${
+                    activeTab === 'dados'
+                      ? 'text-violet-300 border-b-2 border-violet-500 bg-violet-500/10'
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  Dados Gerais
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('permissoes')}
+                  className={`flex-1 py-3.5 text-sm font-bold uppercase tracking-wider transition-colors ${
+                    activeTab === 'permissoes'
+                      ? 'text-violet-300 border-b-2 border-violet-500 bg-violet-500/10'
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  Permissões
+                </button>
+              </div>
+
+              <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
+                <div className="flex-1 overflow-y-auto p-6 space-y-5">
+                  {activeTab === 'dados' && (
+                    <>
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 pl-1">
+                          Nome de usuário (login) *
+                        </label>
+                        <input
+                          required
+                          name="username"
+                          value={formData.username}
+                          onChange={handleInputChange}
+                          placeholder="joao.caixa"
+                          autoComplete="off"
+                          className={`${inputClass} font-mono`}
+                        />
+                        <p className="text-[10px] text-slate-500 mt-1.5 pl-1">
+                          Usado no login junto com o e-mail. Apenas letras, números, ponto, _ e hífen.
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 pl-1">
+                          Código de Acesso (PDV) *
+                        </label>
+                        <input
+                          required
+                          name="codigo"
+                          value={formData.codigo}
+                          onChange={handleInputChange}
+                          placeholder="Ex: 001, JOAO123"
+                          className={`${inputClass} font-mono uppercase`}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 pl-1">
+                          Nome completo *
+                        </label>
+                        <input
+                          required
+                          name="nome"
+                          value={formData.nome}
+                          onChange={handleInputChange}
+                          placeholder="Nome do funcionário"
+                          className={inputClass}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 pl-1">
+                          E-mail *
+                        </label>
+                        <input
+                          required
+                          type="email"
+                          name="email"
+                          value={formData.email}
+                          onChange={handleInputChange}
+                          placeholder="email@empresa.com"
+                          className={inputClass}
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="min-w-0 sm:col-span-2">
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 pl-1">
+                            {modalMode === 'create' ? 'Senha inicial *' : 'Nova senha'}
+                          </label>
+                          <input
+                            type="password"
+                            name="senha"
+                            value={formData.senha}
+                            onChange={handleInputChange}
+                            placeholder={modalMode === 'edit' ? 'Deixe em branco para manter' : 'Mín. 6 caracteres'}
+                            minLength={modalMode === 'create' ? 6 : undefined}
+                            required={modalMode === 'create'}
+                            autoComplete="new-password"
+                            className={inputClass}
+                          />
+                          <p className="text-[10px] text-slate-500 mt-1.5 pl-1 leading-relaxed">
+                            Na edição, deixe em branco para manter a senha atual. Para alterar, use no mínimo 6 caracteres.
+                          </p>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 pl-1">
+                            Nível de acesso *
+                          </label>
+                          <select
+                            name="role"
+                            value={formData.role}
+                            onChange={handleInputChange}
+                            className={`${inputClass} font-bold`}
+                          >
+                            <option value="CAIXA">Operador de Caixa</option>
+                            <option value="VENDEDOR">Vendedor</option>
+                            <option value="GERENTE">Gerente</option>
+                            <option value="DIRETOR">Diretor</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between rounded-xl border border-white/10 bg-[#0b1324] px-4 py-3">
+                        <div>
+                          <p className="text-sm font-bold text-white">Usuário ativo</p>
+                          <p className="text-[11px] text-slate-500">Desligue para bloquear o login deste usuário.</p>
+                        </div>
+                        <label className="relative inline-flex cursor-pointer items-center">
+                          <input
+                            type="checkbox"
+                            name="ativo"
+                            checked={formData.ativo}
+                            onChange={handleInputChange}
+                            className="peer sr-only"
+                          />
+                          <div className="h-7 w-12 rounded-full bg-slate-700 peer-checked:bg-emerald-600 transition-colors peer-focus:ring-2 peer-focus:ring-violet-500/40 after:absolute after:top-0.5 after:left-0.5 after:h-6 after:w-6 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-5" />
+                        </label>
+                      </div>
+                    </>
+                  )}
+
+                  {activeTab === 'permissoes' && (
+                    <div className="rounded-xl border border-white/10 bg-[#0b1324] p-4">
+                      <p className="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                        Permissões granulares por módulo
+                      </p>
+                      {MODULES_CONFIG.filter((m) => modulosLoja.includes(m.id)).map((moduleDef) => (
+                        <div key={moduleDef.id} className="mb-3">
+                          <p className="mb-1 text-xs font-bold text-violet-300">{moduleDef.label}</p>
+                          <div className="flex flex-wrap gap-2">
+                            {moduleDef.permissions.map((perm) => {
+                              const checked = formData.permissoes.includes(perm.code);
+                              return (
+                                <button
+                                  key={perm.code}
+                                  type="button"
+                                  onClick={() => togglePermissao(perm.code)}
+                                  className={`rounded-lg border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
+                                    checked
+                                      ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-200'
+                                      : 'border-white/10 bg-white/5 text-slate-300'
+                                  }`}
+                                >
+                                  {perm.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                      {permissoesDisponiveis.length === 0 && (
+                        <p className="text-xs text-slate-500">Nenhum módulo ativo na loja para delegar permissões.</p>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 pl-1">
-                    Código de Acesso (PDV) *
-                  </label>
-                  <input
-                    required
-                    name="codigo"
-                    value={formData.codigo}
-                    onChange={handleInputChange}
-                    placeholder="Ex: 001, JOAO123"
-                    className={`${inputClass} font-mono uppercase`}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 pl-1">
-                    Nome completo *
-                  </label>
-                  <input
-                    required
-                    name="nome"
-                    value={formData.nome}
-                    onChange={handleInputChange}
-                    placeholder="Nome do funcionário"
-                    className={inputClass}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 pl-1">
-                    E-mail *
-                  </label>
-                  <input
-                    required
-                    type="email"
-                    name="email"
-                    value={formData.email}
-                    onChange={handleInputChange}
-                    placeholder="email@empresa.com"
-                    className={inputClass}
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="min-w-0 sm:col-span-2">
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 pl-1">
-                      {modalMode === 'create' ? 'Senha inicial *' : 'Nova senha'}
-                    </label>
-                    <input
-                      type="password"
-                      name="senha"
-                      value={formData.senha}
-                      onChange={handleInputChange}
-                      placeholder={modalMode === 'edit' ? 'Deixe em branco para manter' : 'Mín. 6 caracteres'}
-                      minLength={modalMode === 'create' ? 6 : undefined}
-                      required={modalMode === 'create'}
-                      autoComplete="new-password"
-                      className={inputClass}
-                    />
-                    <p className="text-[10px] text-slate-500 mt-1.5 pl-1 leading-relaxed">
-                      Na edição, deixe em branco para manter a senha atual. Para alterar, use no mínimo 6 caracteres.
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 pl-1">
-                      Nível de acesso *
-                    </label>
-                    <select
-                      name="role"
-                      value={formData.role}
-                      onChange={handleInputChange}
-                      className={`${inputClass} font-bold`}
-                    >
-                      <option value="CAIXA">Operador de Caixa</option>
-                      <option value="VENDEDOR">Vendedor</option>
-                      <option value="GERENTE">Gerente</option>
-                      <option value="DIRETOR">Diretor</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between rounded-xl border border-white/10 bg-[#0b1324] px-4 py-3">
-                  <div>
-                    <p className="text-sm font-bold text-white">Usuário ativo</p>
-                    <p className="text-[11px] text-slate-500">Desligue para bloquear o login deste usuário.</p>
-                  </div>
-                  <label className="relative inline-flex cursor-pointer items-center">
-                    <input
-                      type="checkbox"
-                      name="ativo"
-                      checked={formData.ativo}
-                      onChange={handleInputChange}
-                      className="peer sr-only"
-                    />
-                    <div className="h-7 w-12 rounded-full bg-slate-700 peer-checked:bg-emerald-600 transition-colors peer-focus:ring-2 peer-focus:ring-violet-500/40 after:absolute after:top-0.5 after:left-0.5 after:h-6 after:w-6 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-5" />
-                  </label>
-                </div>
-
-                <div className="pt-4 mt-2 border-t border-white/10 flex gap-3">
+                <div className="p-6 pt-4 mt-auto border-t border-white/10 bg-[#08101f]/50 flex gap-3 shrink-0">
                   <button
                     type="button"
                     onClick={fecharModal}

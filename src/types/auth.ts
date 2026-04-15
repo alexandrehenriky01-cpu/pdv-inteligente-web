@@ -8,6 +8,11 @@ export interface IUsuario {
   username?: string | null;
   ativo?: boolean;
   role?: 'SUPER_ADMIN' | 'SUPORTE_MASTER' | 'DIRETOR' | 'GERENTE' | 'VENDEDOR' | 'CAIXA' | string;
+  permissoes?: string[];
+  loja?: {
+    modulosAtivos?: string[];
+    nome?: string;
+  };
   lojaId: string;
 }
 

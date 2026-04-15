@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { Layout } from '../../../components/Layout';
 import { api } from '../../../services/api';
+import { auryaBrandMark } from '../../../assets/branding';
 import { 
   AlertTriangle, 
   ShoppingCart, 
@@ -42,7 +43,7 @@ export default function PainelComprasIA() {
 
   const carregarDados = async () => {
     try {
-      const response = await api.get('/api/compras/inteligencia');
+      const response = await api.get('/api/ia/compras/analise');
       setData(response.data);
     } catch (error) {
       console.error("Erro ao carregar inteligência de compras:", error);
@@ -64,12 +65,24 @@ export default function PainelComprasIA() {
   if (loading) {
     return (
       <Layout>
-        <div className="flex h-[80vh] flex-col items-center justify-center gap-4 bg-[#060816] rounded-[40px]">
+        <div className="flex h-[80vh] flex-col items-center justify-center space-y-6">
           <div className="relative">
-            <div className="absolute inset-0 bg-cyan-400 blur-xl opacity-20 rounded-full animate-pulse"></div>
-            <BrainCircuit className="w-20 h-20 text-cyan-400 animate-pulse relative z-10" />
+            <img
+              src={auryaBrandMark}
+              alt="Aurya IA"
+              className="h-24 w-24 rounded-full border-4 border-[#0b1020] object-cover shadow-[0_0_30px_rgba(59,130,246,0.35)] animate-pulse"
+            />
+            <div className="absolute -bottom-2 -right-2 rounded-full border border-white/10 bg-[#0b1020] p-2 shadow-lg">
+              <BrainCircuit className="h-10 w-10 text-sky-300" />
+            </div>
           </div>
-          <p className="text-cyan-400 font-bold uppercase tracking-widest mt-4">A Aurya está calculando seu estoque...</p>
+
+          <p className="max-w-md text-center text-xl font-medium text-slate-200">
+            Olá, eu sou a <span className="font-bold text-sky-300">Aurya (Compras)</span>.
+            <span className="mt-2 block text-sm font-normal text-slate-400">
+              Estou analisando suas compras, fornecedores e estoque para gerar sugestões de reposição...
+            </span>
+          </p>
         </div>
       </Layout>
     );
@@ -224,19 +237,19 @@ export default function PainelComprasIA() {
                 </h3>
                 <p className="text-2xl text-slate-300 leading-relaxed">
                   {hasData ? (
-                    <React.Fragment>
+                    <Fragment>
                       O produto mais crítico<br/>esgota seu estoque
                       <span className="text-cyan-400 font-black text-5xl glow-text block mt-4">
                         {diasCriticos !== null && diasCriticos > 0 ? `em ${Number(diasCriticos).toFixed(0)} dias` : 'IMEDIATO'}
                       </span>
-                    </React.Fragment>
+                    </Fragment>
                   ) : (
-                    <React.Fragment>
+                    <Fragment>
                       Sua operação está sob<br/>controle absoluto.
                       <span className="text-emerald-400 font-black text-5xl glow-text-emerald block mt-4 tracking-widest">
                         SAUDÁVEL
                       </span>
-                    </React.Fragment>
+                    </Fragment>
                   )}
                 </p>
 

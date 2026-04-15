@@ -1,4 +1,4 @@
-import React, { useState, useEffect, ChangeEvent, FormEvent, useCallback } from 'react';
+import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import { X, Scale, Settings2, Network, Usb, Keyboard, ChevronDown, ChevronUp, Radio } from 'lucide-react';
 import { AxiosError } from 'axios';
 import { api } from '../../../services/api';

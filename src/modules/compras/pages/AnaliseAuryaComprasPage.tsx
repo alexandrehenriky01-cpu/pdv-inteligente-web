@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Layout } from '../../../components/Layout';
 import { api } from '../../../services/api';
 import {
@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { AxiosError } from 'axios';
+import { auryaBrandMark } from '../../../assets/branding';
 
 export interface IAnaliseComprasResponse {
   analise: string;
@@ -88,7 +89,7 @@ export function AnaliseAuryaComprasPage() {
           <div className="relative z-10 flex flex-col gap-5 sm:flex-row sm:items-center">
             <div className="relative hidden shrink-0 sm:block">
               <img
-                src="/Aurya.jpeg"
+                src={auryaBrandMark}
                 alt="Aurya IA"
                 className="h-20 w-20 rounded-2xl border border-violet-500/30 object-cover shadow-[0_0_25px_rgba(139,92,246,0.25)]"
               />
@@ -125,7 +126,7 @@ export function AnaliseAuryaComprasPage() {
             <div className="relative z-10 flex h-full flex-col items-center justify-center space-y-6 py-20">
               <div className="relative">
                 <img
-                  src="/Aurya.jpeg"
+                  src={auryaBrandMark}
                   alt="Aurya IA"
                   className="h-28 w-28 rounded-full border-4 border-[#0b1020] object-cover shadow-[0_0_40px_rgba(139,92,246,0.25)] animate-pulse"
                 />

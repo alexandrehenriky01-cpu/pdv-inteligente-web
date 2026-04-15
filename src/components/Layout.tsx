@@ -1,4 +1,4 @@
-import { ReactNode, useState, useEffect } from 'react';
+import { useEffect, useState, type ElementType, type ReactNode } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import {
   ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight,
@@ -6,8 +6,9 @@ import {
   Scale, Settings, Monitor, ShoppingCart, ShoppingBag, ClipboardList,
   AlertTriangle, Inbox, FileText, BrainCircuit, Receipt, FileUp,
   Wallet, TrendingUp, CheckSquare, Landmark, CreditCard, BookOpen,
-  ScanSearch, Smartphone, LogOut, Sparkles, ShieldCheck, Building2, UtensilsCrossed,
-  ListOrdered, Network, Factory, Printer, ArrowRightLeft, Map, Layers, Truck, Box, Radar, PackageCheck
+  ScanSearch, Smartphone, LogOut, Sparkles, ShieldCheck, Building2, UtensilsCrossed, BadgePercent,
+  ListOrdered, Network, Factory, Printer, ArrowRightLeft, Map, Layers, Truck, Box, Radar, PackageCheck,
+  Banknote, ScanLine, Timer, PackageSearch, Pizza, ChefHat
 } from 'lucide-react'; // ✅ NOVO: Adicionado ícone Truck
 
 import { IUsuario } from '../types/auth';
@@ -15,6 +16,9 @@ import { AUTH_USER_KEY } from '../services/authStorage';
 import { clearAuthSessionAndAxios } from '../services/authSession';
 import { useAuryaTheme } from '../theme/ThemeContext';
 import { ThemeToggle } from '../theme/ThemeToggle';
+import { auryaBrandMark } from '../assets/branding';
+import { RenderIfModule } from './RenderIfModule';
+import { permissionsForModules } from '../config/permissions';
 
 interface LayoutProps {
   children: ReactNode;
@@ -45,7 +49,7 @@ type MenuSectionId =
 
 interface MenuItemProps {
   to: string;
-  icon: React.ElementType;
+  icon: ElementType;
   label: string;
   target?: string;
   isAi?: boolean;
@@ -92,7 +96,7 @@ const MenuItem = ({ to, icon: Icon, label, target, isAi = false, isActive, colla
 interface SectionHeaderProps {
   id: MenuSectionId;
   title: string;
-  icon: React.ElementType;
+  icon: ElementType;
   isAi?: boolean;
   isOpen: boolean;
   collapsed: boolean;
@@ -151,16 +155,36 @@ export function Layout({ children }: LayoutProps) {
   const temPermissao = (modulo: string) => {
     if (usuario?.role === 'SUPER_ADMIN' || usuario?.role === 'SUPORTE_MASTER') return true;
 
-    const modulosLoja = (usuario?.loja?.modulosAtivos as string[]) || [];
-    const permissoesUser = usuario?.permissoes || [];
-    
-    const acessos = [...modulosLoja, ...permissoesUser].map(a => String(a).toUpperCase());
+    const modulosLoja = ((usuario?.loja?.modulosAtivos as string[]) || []).map((m) =>
+      String(m).toUpperCase()
+    );
+    const permissoesDiretas = (usuario?.permissoes || []).map((p) => String(p).toUpperCase());
+    const permissoesPorModulo = permissionsForModules(modulosLoja).map((p) => p.toUpperCase());
+    const permissaoEfetiva = new Set([...permissoesPorModulo, ...permissoesDiretas]);
     const modReq = modulo.toUpperCase();
 
-    if (modReq === 'DASHBOARD' || modReq === 'IA' || modReq === 'ESTRUTURA' || modReq === 'PRODUCAO') return true; 
-    if (modReq === 'FISCAL' && acessos.includes('NFE')) return true; 
-    
-    return acessos.includes(modReq);
+    const regra: Record<string, { module?: string; permission?: string; aliases?: string[] }> = {
+      DASHBOARD: {},
+      IA: { module: 'IA', permission: 'IA_USAR' },
+      ESTRUTURA: { module: 'ESTRUTURA', permission: 'MANUTENCAO_PRODUTOS', aliases: ['ESTRUTURA', 'MANUTENCAO', 'PDV'] },
+      PDV: { module: 'PDV', permission: 'VENDAS_VAREJO_PDV', aliases: ['PDV', 'VENDAS_VAREJO'] },
+      FOOD_SERVICE: { module: 'FOOD_SERVICE', permission: 'FOOD_SERVICE_PDV' },
+      COMERCIAL: { module: 'COMERCIAL', permission: 'COMERCIAL_CAMPANHAS' },
+      ESTOQUE: { module: 'ESTOQUE', permission: 'ESTOQUE_GESTAO' },
+      COMPRAS: { module: 'COMPRAS', permission: 'COMPRAS_SOLICITACOES' },
+      FISCAL: { module: 'FISCAL', permission: 'FISCAL_NFE' },
+      FINANCEIRO: { module: 'FINANCEIRO', permission: 'FINANCEIRO_TITULOS' },
+      CONTABIL: { module: 'CONTABIL', permission: 'CONTABIL_PLANO_CONTAS' },
+      PRODUCAO: { module: 'PRODUCAO', permission: 'PRODUCAO_ORDENS' },
+      WMS: { module: 'WMS', permission: 'WMS_RECEBIMENTO' },
+    };
+    const r = regra[modReq];
+    if (!r) return false;
+    if (!r.module && !r.permission) return true;
+    const aliases = r.aliases || [];
+    const hasModule = r.module ? modulosLoja.includes(r.module) || aliases.some(a => modulosLoja.includes(a)) : true;
+    const hasPermission = r.permission ? permissaoEfetiva.has(r.permission) : true;
+    return hasModule && hasPermission;
   };
 
   const role = usuario?.role ? String(usuario.role).toUpperCase() : '';
@@ -193,14 +217,27 @@ export function Layout({ children }: LayoutProps) {
     const path = location.pathname;
     setMenusAbertos(prev => ({
       ...prev,
-      centralAurya: prev.centralAurya || path.includes('/aurya'),
-      estruturaNegocio: prev.estruturaNegocio || path.includes('/produtos') || path.includes('/categorias') || path.includes('/embalagens') || path.includes('/pessoas') || path.includes('/equipe') || path.includes('/permissoes') || path.includes('/configuracoes-loja') || path.includes('/layout-etiquetas') || path.includes('/estacoes-trabalho') || path.includes('/balancas'),
-      operacaoVendas: prev.operacaoVendas || path.includes('/frente-caixa') || path.includes('/pdv-food'),
+      centralAurya: prev.centralAurya || path.includes('/aurya') || path.includes('/dashboard-food'),
+      estruturaNegocio: prev.estruturaNegocio || path.includes('/produtos') || path.includes('/categorias') || path.includes('/embalagens') || path.includes('/pessoas') || path.includes('/equipe') || path.includes('/permissoes') || path.includes('/configuracoes-loja') || path.includes('/layout-etiquetas') || path.includes('/estacoes-trabalho') || path.includes('/locais-cobranca') || path.includes('/configuracao-caixas-pdv') || path.includes('/configuracao-tef') || path.includes('/balancas'),
+      operacaoVendas:
+        prev.operacaoVendas ||
+        path.includes('/frente-caixa') ||
+        path.includes('/self-checkout') ||
+        path.includes('/pdv-food') ||
+        path.includes('/cardapio/gestao') ||
+        path.includes('/gestao-food') ||
+        path.includes('/garcom') ||
+        path.includes('/vendas/campanhas-promocionais') ||
+        path.includes('/vendas/gestao-turnos-caixa'),
       comprasSuprimentos: prev.comprasSuprimentos || path.includes('/compras') || path.includes('/entrada-notas') || path.includes('/ListarNfe'),
       fiscalInteligente: prev.fiscalInteligente || path.includes('/notas') || path.includes('/notas-fiscais') || path.includes('/regras-fiscais') || path.includes('/cadastrocfop'),
       financeiroInteligente: prev.financeiroInteligente || path.includes('/financeiro'),
       contabilidadeAnalise: prev.contabilidadeAnalise || path.includes('/contabil') || path.includes('/dre'),
-      estoqueInteligente: prev.estoqueInteligente || path.includes('/estoque'),
+      estoqueInteligente:
+        prev.estoqueInteligente ||
+        path.includes('/estoque') ||
+        path.includes('/estoque/listas-preco') ||
+        path.includes('/estoque/carga-balancas'),
       logisticaWms: prev.logisticaWms || path.includes('/wms'),
       producaoIndustria: prev.producaoIndustria || path.includes('/producao'),
       adminSaaS: prev.adminSaaS || path.includes('/admin'),
@@ -232,7 +269,7 @@ export function Layout({ children }: LayoutProps) {
 
         <div className={`relative z-10 ${sidebarCollapsed ? 'px-3 py-5' : 'px-5 py-5'} flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between gap-3'} ${mode === "dark" ? "border-b border-white/10 bg-[#08101f]/30" : "border-b border-slate-200 bg-slate-50/80"}`}>
           <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'gap-3'} min-w-0`}>
-            <img src="/Aurya.jpeg" alt="Aurya Logo" className="h-11 w-11 shrink-0 rounded-xl border border-violet-500/30 object-cover shadow-[0_0_20px_rgba(139,92,246,0.25)]" />
+            <img src={auryaBrandMark} alt="Aurya Logo" className="h-11 w-11 shrink-0 rounded-xl border border-violet-500/30 object-cover shadow-[0_0_20px_rgba(139,92,246,0.25)]" />
             {!sidebarCollapsed && (
               <div className="flex min-w-0 flex-col">
                 <span className="truncate bg-gradient-to-r from-violet-200 via-fuchsia-300 to-purple-400 bg-clip-text text-lg font-black tracking-[0.18em] text-transparent drop-shadow-[0_0_14px_rgba(139,92,246,0.35)]">AURYA</span>
@@ -270,6 +307,33 @@ export function Layout({ children }: LayoutProps) {
             </Link>
           )}
 
+          {temPermissao('dashboard') && temPermissao('pdv') && (
+            <Link
+              to="/dashboard-food"
+              title="BI Food Service"
+              className={`group mb-2 flex items-center ${sidebarCollapsed ? 'justify-center px-2' : 'gap-3 px-3'} overflow-hidden rounded-xl border py-3 text-sm font-semibold backdrop-blur-md transition-all ${
+                location.pathname.includes('/dashboard-food')
+                  ? mode === 'dark'
+                    ? 'bg-gradient-to-r from-orange-600/50 to-violet-600/50 text-white border-orange-400/30 shadow-[0_0_20px_rgba(249,115,22,0.18)]'
+                    : 'bg-gradient-to-r from-orange-50 to-violet-50 text-slate-900 border-orange-200'
+                  : `${theme.classes.sidebarText} ${theme.classes.sidebarHover} border-transparent`
+              }`}
+            >
+              <Pizza
+                className={`h-5 w-5 shrink-0 ${
+                  location.pathname.includes('/dashboard-food')
+                    ? mode === 'dark'
+                      ? 'text-orange-200'
+                      : 'text-orange-600'
+                    : mode === 'dark'
+                      ? 'text-slate-500 group-hover:text-orange-300'
+                      : 'text-slate-500 group-hover:text-orange-600'
+                }`}
+              />
+              {!sidebarCollapsed && <span className="truncate flex-1">BI Food Service</span>}
+            </Link>
+          )}
+
           {temPermissao('ia') && (
             <>
               <SectionHeader id="centralAurya" mode={mode} theme={theme} title="Central Aurya" icon={BrainCircuit} isAi={true} isOpen={menusAbertos.centralAurya} collapsed={sidebarCollapsed} onToggle={toggleMenu} />
@@ -302,6 +366,9 @@ export function Layout({ children }: LayoutProps) {
                       <MenuItem to="/configuracoes-loja" icon={Settings} label="Minha Loja" isActive={location.pathname.includes('/configuracoes-loja')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
                       <MenuItem to="/layout-etiquetas" icon={Printer} label="Layout Etiquetas" isActive={location.pathname.includes('/layout-etiquetas')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
                       <MenuItem to="/estacoes-trabalho" icon={Monitor} label="Estações de Trabalho" isActive={location.pathname.includes('/estacoes-trabalho')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
+                      <MenuItem to="/locais-cobranca" icon={BadgePercent} label="Locais de cobrança" isActive={location.pathname.includes('/locais-cobranca')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
+                      <MenuItem to="/configuracao-caixas-pdv" icon={Banknote} label="Caixas PDV" isActive={location.pathname.includes('/configuracao-caixas-pdv')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
+                      <MenuItem to="/configuracao-tef" icon={CreditCard} label="Gestão TEF" isActive={location.pathname.includes('/configuracao-tef')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
                       <MenuItem to="/balancas" icon={Scale} label="Balanças" isActive={location.pathname.includes('/balancas')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
                     </>
                   )}
@@ -330,8 +397,46 @@ export function Layout({ children }: LayoutProps) {
               {menusAbertos.operacaoVendas && (
                 <div className={`space-y-1 mt-1 mb-2 ${sidebarCollapsed ? 'p-1' : 'pl-1'} animate-in slide-in-from-top-2 fade-in duration-200`}>
                   <MenuItem to="/frente-caixa" icon={ShoppingCart} label="PDV Varejo" isActive={location.pathname.includes('/frente-caixa')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
+                  <MenuItem to="/self-checkout" icon={ScanLine} label="Autoatendimento" isActive={location.pathname.includes('/self-checkout')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
                   <MenuItem to="/pdv-food" icon={UtensilsCrossed} label="PDV Food" isActive={location.pathname.includes('/pdv-food')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
+                  <RenderIfModule module="FOOD_SERVICE">
+                    <MenuItem
+                      to="/cardapio/gestao"
+                      icon={Pizza}
+                      label="Cadastro de Cardápio"
+                      isActive={location.pathname.includes('/cardapio/gestao')}
+                      collapsed={sidebarCollapsed}
+                      mode={mode}
+                      theme={theme}
+                    />
+                  </RenderIfModule>
+                  <RenderIfModule module="FOOD_SERVICE.KDS">
+                    <MenuItem
+                      to="/kds"
+                      icon={ChefHat}
+                      label="KDS (Cozinha)"
+                      isActive={location.pathname.includes('/kds')}
+                      collapsed={sidebarCollapsed}
+                      mode={mode}
+                      theme={theme}
+                    />
+                  </RenderIfModule>
+                  <RenderIfModule module="FOOD_SERVICE.DELIVERY">
+                    <MenuItem
+                      to="/gestao-food"
+                      icon={Truck}
+                      label="Gestão Delivery / Pedidos"
+                      isActive={location.pathname.includes('/gestao-food')}
+                      collapsed={sidebarCollapsed}
+                      mode={mode}
+                      theme={theme}
+                    />
+                  </RenderIfModule>
+                  <MenuItem to="/gestao-food" icon={PackageSearch} label="Gestão Food / Expedição" isActive={location.pathname.includes('/gestao-food')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
                   <MenuItem to="/comanda-mobile" icon={Smartphone} label="Comanda Mobile" isActive={location.pathname.includes('/comanda-mobile')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
+                  <MenuItem to="/garcom/mesas" icon={UtensilsCrossed} label="Garçom (mesas)" isActive={location.pathname.includes('/garcom')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
+                  <MenuItem to="/vendas/campanhas-promocionais" icon={Sparkles} label="Campanhas e promoções" isActive={location.pathname.includes('/vendas/campanhas-promocionais')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
+                  <MenuItem to="/vendas/gestao-turnos-caixa" icon={Timer} label="Gestão de turnos / caixa" isActive={location.pathname.includes('/vendas/gestao-turnos-caixa')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
                 </div>
               )}
             </>
@@ -376,6 +481,8 @@ export function Layout({ children }: LayoutProps) {
                   <MenuItem to="/estoque" icon={ClipboardList} label="Gestão" isActive={location.pathname.includes('/estoque')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
                   <MenuItem to="/estoque/inventario" icon={ScanSearch} label="Inventário" isActive={location.pathname.includes('/estoque/inventario')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
                   <MenuItem to="/estoque/bipador" icon={Smartphone} label="Bipador" target="_blank" isActive={location.pathname.includes('/estoque/bipador')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
+                  <MenuItem to="/estoque/listas-preco" icon={ListOrdered} label="Listas de preços" isActive={location.pathname.includes('/estoque/listas-preco')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
+                  <MenuItem to="/estoque/carga-balancas" icon={Scale} label="Carga de balanças" isActive={location.pathname.includes('/estoque/carga-balancas')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
                 </div>
               )}
             </>

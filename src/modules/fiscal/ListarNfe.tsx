@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../../services/api';
 import { Layout } from '../../components/Layout';
 import { useNavigate } from 'react-router-dom';
@@ -144,7 +144,7 @@ export function ListarNfe() {
       const params = new URLSearchParams();
       params.append('tipo', 'FORNECEDOR');
       if (termo.trim()) params.append('busca', termo.trim());
-      const res = await api.get<IPessoaLookup[]>(`/api/pessoas?${params.toString()}`);
+      const res = await api.get<IPessoaLookup[]>(`/api/cadastros/pessoas?${params.toString()}`);
       setListaFornecedorModal(Array.isArray(res.data) ? res.data : []);
     } catch {
       setListaFornecedorModal([]);
@@ -158,7 +158,7 @@ export function ListarNfe() {
     try {
       const params = new URLSearchParams();
       if (termo.trim()) params.append('busca', termo.trim());
-      const res = await api.get<IProdutoLookup[]>(`/api/produtos?${params.toString()}`);
+      const res = await api.get<IProdutoLookup[]>(`/api/cadastros/produtos?${params.toString()}`);
       setListaProdutoModal(Array.isArray(res.data) ? res.data : []);
     } catch {
       setListaProdutoModal([]);
@@ -817,10 +817,14 @@ export function ListarNfe() {
           className="fixed inset-0 z-[90] flex items-center justify-center bg-[#020617]/85 p-4 backdrop-blur-md"
           role="dialog"
           aria-modal="true"
+          aria-labelledby="listar-nfe-estorno-titulo"
         >
           <div className="w-full max-w-md overflow-hidden rounded-[24px] border border-rose-500/30 bg-[#08101f] shadow-[0_25px_80px_rgba(0,0,0,0.6)]">
             <div className="border-b border-rose-500/20 bg-rose-500/10 px-5 py-4">
-              <h3 className="text-sm font-black uppercase tracking-[0.16em] text-rose-200">
+              <h3
+                id="listar-nfe-estorno-titulo"
+                className="text-sm font-black uppercase tracking-[0.16em] text-rose-200"
+              >
                 Estorno irreversível
               </h3>
             </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Layout } from '../../../components/Layout';
 import { api } from '../../../services/api';
 import {
@@ -483,7 +483,7 @@ export function PesagemProducao() {
     await registrarPesoNoBanco(produtoSelecionadoId, pesoNum);
   };
 
-  const handleAutoBarcodeKeyPress = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleAutoBarcodeKeyPress = async (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && codigoBarrasLido) {
       const codigoBipado = codigoBarrasLido.trim();
       setCodigoBarrasLido('');
@@ -511,7 +511,7 @@ export function PesagemProducao() {
     }
   };
 
-  const handleBipadorPesoKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleBipadorPesoKeyPress = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && codigoBarrasLido) {
       if (codigoBarrasLido.startsWith('2') && codigoBarrasLido.length === 13) {
         const pesoExtraido = parseInt(codigoBarrasLido.substring(7, 12)) / 1000;

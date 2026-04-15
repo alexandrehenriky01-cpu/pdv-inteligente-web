@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Layout } from '../../../components/Layout';
 import { api } from '../../../services/api';
 import {
@@ -127,7 +127,7 @@ export function SolicitacoesCompraPage() {
     try {
       const [resSol, resProd] = await Promise.all([
         api.get<ISolicitacaoCompra[]>('/api/compras/solicitacoes'),
-        api.get<IProdutoResumo[]>('/api/produtos')
+        api.get<IProdutoResumo[]>('/api/cadastros/produtos')
       ]);
       setSolicitacoes(resSol.data);
       setProdutos(resProd.data);

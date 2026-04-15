@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../../services/api';
 import { Layout } from '../../components/Layout';
 import { Link } from 'react-router-dom';
@@ -27,7 +27,7 @@ export function ListaPessoas() {
     setLoading(true);
     try {
       const token = localStorage.getItem('@PDVToken');
-      const response = await api.get('/api/pessoas', {
+      const response = await api.get('/api/cadastros/pessoas', {
         headers: { Authorization: `Bearer ${token}` },
         params: {
           busca: busca || undefined,

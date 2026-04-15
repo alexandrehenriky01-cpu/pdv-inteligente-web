@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { api } from '../../../services/api';
 import { Layout } from '../../../components/Layout';
 import {
@@ -43,7 +43,7 @@ export function Estoque() {
 
   const carregarEstoque = async () => {
     try {
-      const response = await api.get<IProdutoEstoque[]>('/api/produtos');
+      const response = await api.get<IProdutoEstoque[]>('/api/cadastros/produtos');
       setProdutos(response.data);
     } catch (err) {
       const error = err as AxiosError<{ error?: string }>;
@@ -57,7 +57,7 @@ export function Estoque() {
     carregarEstoque();
   }, []);
 
-  const handleEntradaEstoque = async (e: React.FormEvent) => {
+  const handleEntradaEstoque = async (e: FormEvent) => {
     e.preventDefault();
     if (!produtoSelecionado || !quantidadeAdicionar) return;
 

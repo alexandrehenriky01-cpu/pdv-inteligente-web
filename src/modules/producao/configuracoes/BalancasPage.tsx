@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Plus, Search, Edit2, Trash2, Power, PowerOff } from 'lucide-react';
 import { api } from '../../../services/api';
 import { Balanca, TipoConexaoBalanca, StatusBalanca } from './../types/balanca';

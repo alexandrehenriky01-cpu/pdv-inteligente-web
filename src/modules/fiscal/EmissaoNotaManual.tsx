@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
 import { Layout } from '../../components/Layout';
@@ -116,7 +116,7 @@ export function EmissaoNotaManual() {
   useEffect(() => {
     const carregarClientes = async () => {
       try {
-        const response = await api.get<IPessoaLista[]>('/api/pessoas', {
+        const response = await api.get<IPessoaLista[]>('/api/cadastros/pessoas', {
           params: { tipo: 'CLIENTE' },
         });
         setListaPessoas(Array.isArray(response.data) ? response.data : []);
