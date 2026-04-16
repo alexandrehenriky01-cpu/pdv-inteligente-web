@@ -1,7 +1,7 @@
 {
   "name": "pdv-inteligente-web",
   "private": true,
-  "version": "2.1.1",
+  "version": "2.2.0",
   "type": "module",
   "main": "electron/main.js",
   "description": "Aurya ERP — frontend desktop (Electron) e web (Vite/React)",
