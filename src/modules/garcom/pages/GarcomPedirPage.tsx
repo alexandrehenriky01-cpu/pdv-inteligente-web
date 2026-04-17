@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { ArrowLeft, Loader2, ChefHat } from 'lucide-react';
+import { ArrowLeft, Loader2, ChefHat, Plus } from 'lucide-react';
 import { ProductModal } from '../../totem/components/ProductModal';
 import type { TotemMockCategoria, TotemMockProduto } from '../../totem/types';
 import {
@@ -18,6 +18,10 @@ import {
 
 function formatBrl(n: number): string {
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function isRealImage(url: string): boolean {
+  return Boolean(url && !url.startsWith('data:') && !url.includes('placeholder') && !url.includes('fallback'));
 }
 
 export function GarcomPedirPage() {
@@ -179,25 +183,46 @@ export function GarcomPedirPage() {
           <p className="text-white/50">Carregando cardápio…</p>
         </div>
       ) : (
-        <ul className="divide-y divide-white/10 px-3 pb-32">
-          {produtosFiltrados.map((p) => (
-            <li key={p.id}>
-              <button
-                type="button"
-                onClick={() => abrirProduto(p)}
-                className="flex w-full gap-3 py-4 text-left transition active:bg-white/[0.04]"
-              >
-                <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
-                  <img src={p.imagemUrl} alt="" className="h-full w-full object-cover" />
-                </div>
-                <div className="min-w-0 flex-1 py-0.5">
-                  <p className="font-semibold text-white">{p.nome}</p>
-                  <p className="mt-1 line-clamp-2 text-sm text-white/50">{p.descricaoCurta}</p>
-                  <p className="mt-2 text-base font-semibold text-emerald-200">{formatBrl(p.precoBase)}</p>
-                </div>
-              </button>
-            </li>
-          ))}
+        <ul className="grid grid-cols-1 gap-4 px-3 py-4 sm:grid-cols-2 pb-32">
+          {produtosFiltrados.map((p) => {
+            const temImagem = isRealImage(p.imagemUrl);
+            return (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  onClick={() => abrirProduto(p)}
+                  className="group relative flex w-full flex-col overflow-hidden rounded-[24px] border border-white/10 bg-[#08101f] text-left shadow-[0_20px_50px_rgba(0,0,0,0.35)] transition-all duration-500 hover:border-emerald-400/40 hover:shadow-[0_28px_60px_rgba(16,185,129,0.12)] active:scale-[0.98]"
+                >
+                  <div className="relative h-36 w-full overflow-hidden">
+                    {temImagem ? (
+                      <img
+                        src={p.imagemUrl}
+                        alt=""
+                        className="h-full w-full object-cover transition-all duration-700 group-hover:scale-110 group-hover:saturate-110"
+                      />
+                    ) : (
+                      <div className="h-full w-full bg-gradient-to-br from-slate-800 via-slate-800/90 to-emerald-900/20">
+                        <div className="flex h-full w-full items-center justify-center">
+                          <ChefHat className="h-12 w-12 text-white/10" />
+                        </div>
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-[#060816]/90 via-transparent to-transparent" />
+                  </div>
+                  <div className="flex flex-1 flex-col gap-1.5 p-4">
+                    <p className="line-clamp-2 text-lg font-bold leading-tight text-white">{p.nome}</p>
+                    <p className="line-clamp-2 text-sm leading-relaxed text-white/45">{p.descricaoCurta}</p>
+                    <div className="mt-auto flex items-end justify-between pt-1.5">
+                      <p className="text-xl font-black text-emerald-400">{formatBrl(p.precoBase)}</p>
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-emerald-600 to-teal-600 text-white shadow-lg transition-transform duration-300 group-hover:scale-110">
+                        <Plus className="h-4 w-4" strokeWidth={2.5} />
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
 

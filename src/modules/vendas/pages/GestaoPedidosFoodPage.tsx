@@ -5,6 +5,7 @@ import {
   Bell,
   CreditCard,
   DollarSign,
+  ImageIcon,
   Loader2,
   PackageSearch,
   Printer,
@@ -36,6 +37,19 @@ interface LojaResumoApi {
 interface PagamentoApi {
   tipoPagamento?: string;
   valor?: unknown;
+}
+
+interface ItemCardapioComImagem {
+  id: string;
+  nome: string;
+  imagemUrl: string | null;
+}
+
+interface ItemPedidoExibicao {
+  nome: string;
+  quantidade: number;
+  imagemUrl: string | null;
+  sincronizado: boolean;
 }
 
 export interface VendaGestaoFoodApi {
@@ -272,6 +286,7 @@ export function GestaoPedidosFoodPage() {
   const [formaPagamentoMesa, setFormaPagamentoMesa] = useState<FormaPagamentoMesaCaixa>('DINHEIRO');
   const [liberandoMesa, setLiberandoMesa] = useState(false);
   const [isentarTaxaServico, setIsentarTaxaServico] = useState(false);
+  const [cardapioProdutos, setCardapioProdutos] = useState<ItemCardapioComImagem[]>([]);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
@@ -309,9 +324,27 @@ export function GestaoPedidosFoodPage() {
     }
   }, []);
 
+  const carregarCardapio = useCallback(async () => {
+    try {
+      const { data } = await api.get<{ dados?: { itens?: Array<{ id: string; nome: string; imagemUrl?: string | null }> } }>('/api/cardapio/gestao');
+      const itens = data?.dados?.itens ?? [];
+      setCardapioProdutos(itens.map((item) => ({
+        id: item.id,
+        nome: item.nome,
+        imagemUrl: item.imagemUrl ?? null,
+      })));
+    } catch {
+      console.error('Gestão food: falha ao carregar cardápio');
+    }
+  }, []);
+
   useEffect(() => {
     void carregar();
   }, [carregar]);
+
+  useEffect(() => {
+    void carregarCardapio();
+  }, [carregarCardapio]);
 
   useEffect(() => {
     if (aba === 'mesas') void carregarMesas();
@@ -350,6 +383,29 @@ export function GestaoPedidosFoodPage() {
     const n = Math.max(1, Math.floor(Number(resumoPagamentoModal.pessoas)) || 1);
     return round2(totalPagarModal / n);
   }, [resumoPagamentoModal, totalPagarModal]);
+
+  const cardapioMap = useMemo(() => {
+    const map = new Map<string, ItemCardapioComImagem>();
+    for (const p of cardapioProdutos) {
+      map.set(p.nome.toLowerCase().trim(), p);
+    }
+    return map;
+  }, [cardapioProdutos]);
+
+  function obterItensComImagens(itensRaw: unknown): ItemPedidoExibicao[] {
+    if (!Array.isArray(itensRaw)) return [];
+    return itensRaw.map((item: Record<string, unknown>) => {
+      const nome = String(item.nome ?? '').toLowerCase().trim();
+      const match = cardapioMap.get(nome);
+      const quantidade = num(item.quantidade);
+      return {
+        nome: String(item.nome ?? ''),
+        quantidade,
+        imagemUrl: match?.imagemUrl ?? null,
+        sincronizado: !!match?.imagemUrl,
+      };
+    });
+  }
 
   useEffect(() => {
     const auth = buildKdsSocketAuth();
@@ -645,6 +701,7 @@ export function GestaoPedidosFoodPage() {
                       <th className="px-4 py-4">Senha / ID</th>
                       <th className="px-4 py-4">Origem</th>
                       <th className="px-4 py-4">Cliente / endereço</th>
+                      <th className="px-4 py-4">Itens</th>
                       <th className="px-4 py-4">Status</th>
                       <th className="px-4 py-4 text-right">Total</th>
                       <th className="px-4 py-4 text-right">Ações</th>
@@ -696,6 +753,48 @@ export function GestaoPedidosFoodPage() {
                             ) : (
                               <span className="text-slate-500 text-xs">Retirada no balcão (Totem)</span>
                             )}
+                          </td>
+                          <td className="px-4 py-4">
+                            {(() => {
+                              const itensExibicao = obterItensComImagens(row.itens);
+                              if (itensExibicao.length === 0) {
+                                return <span className="text-slate-500 text-xs">Sem itens</span>;
+                              }
+                              return (
+                                <div className="flex flex-wrap gap-1.5 max-w-[180px]">
+                                  {itensExibicao.slice(0, 4).map((item, idx) => (
+                                    <div key={idx} className="relative">
+                                      {item.imagemUrl ? (
+                                        <div className="relative">
+                                          <img
+                                            src={item.imagemUrl}
+                                            alt={item.nome}
+                                            className="w-12 h-12 rounded-lg border border-white/10 object-cover shadow-sm"
+                                            onError={(e) => {
+                                              (e.target as HTMLImageElement).style.display = 'none';
+                                            }}
+                                          />
+                                          {item.sincronizado && (
+                                            <span className="absolute -top-1 -right-1 text-[8px] bg-emerald-600/20 text-emerald-400 px-1 py-0.5 rounded-full border border-emerald-500/30">
+                                              Sinc
+                                            </span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <div className="w-12 h-12 rounded-lg bg-slate-800 border border-white/10 flex items-center justify-center">
+                                          <ImageIcon size={14} className="text-slate-500" />
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                  {itensExibicao.length > 4 && (
+                                    <div className="w-12 h-12 rounded-lg bg-slate-800/80 border border-white/10 flex items-center justify-center">
+                                      <span className="text-[10px] text-slate-400 font-bold">+{itensExibicao.length - 4}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </td>
                           <td className="px-4 py-4">
                             <span

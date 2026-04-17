@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useOutletContext, useParams } from 'react-router-dom';
 import { io, type Socket } from 'socket.io-client';
-import { Check, Loader2, MapPin, Package, Radio } from 'lucide-react';
+import { Check, Loader2, MapPin, Package, Radio, Store } from 'lucide-react';
 import { resolveApiBaseUrl } from '../../services/api';
 import { getDeliveryPedidoTracking, type DeliveryPedidoTrackingDTO } from '../../services/api/deliveryTrackingApi';
 import { buildDeliveryTrackingSocketAuth } from '../../services/socket/deliveryTrackingSocketAuth';
@@ -85,6 +85,7 @@ export function DeliveryTrackingPage() {
       setErro(null);
       try {
         const data = await getDeliveryPedidoTracking(pedidoId);
+        console.log('DEBUG ITENS:', JSON.stringify(data.itens, null, 2));
         if (!ativo) return;
         if (idLojaParaChecagem && data.lojaId !== idLojaParaChecagem) {
           setErro('Este pedido não pertence a este link de loja.');
@@ -156,7 +157,7 @@ export function DeliveryTrackingPage() {
       <div className="px-6 py-16 text-center">
         <p className="text-white/65">{erro ?? 'Pedido não encontrado.'}</p>
         <Link
-          to={`/delivery/${encodeURIComponent(lojaPublicKey)}`}
+          to={`/menu/${encodeURIComponent(lojaPublicKey)}`}
           className="mt-4 inline-block text-violet-300 underline"
         >
           Voltar ao cardápio
@@ -169,9 +170,26 @@ export function DeliveryTrackingPage() {
 
   return (
     <div className="px-4 pb-24 pt-2">
+      {/* Header com branding da loja */}
+      {loja && (
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] p-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-violet-500/30 bg-[#0b1324]">
+            {loja.logoUrl ? (
+              <img src={loja.logoUrl} alt="" className="h-full w-full object-cover rounded-full" />
+            ) : (
+              <Store className="h-5 w-5 text-violet-300" />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-white">{loja.nome}</p>
+            <p className="text-xs text-white/50">Pedido #{senha}</p>
+          </div>
+        </div>
+      )}
+
       <div className="mb-2 flex items-center justify-between gap-2">
         <Link
-          to={`/delivery/${encodeURIComponent(lojaPublicKey)}`}
+          to={`/menu/${encodeURIComponent(lojaPublicKey)}`}
           className="text-sm text-violet-300/90 underline"
         >
           Cardápio
@@ -261,14 +279,25 @@ export function DeliveryTrackingPage() {
       <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
         <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-white/80">
           <Package className="h-4 w-4 text-violet-300" />
-          Resumo
+          Itens do pedido
         </h3>
-        <ul className="space-y-2 text-sm">
+        <ul className="space-y-0 text-sm">
           {pedido.itens.map((it, i) => (
-            <li key={i} className="flex justify-between gap-3 text-white/85">
-              <span className="min-w-0">
-                <span className="font-semibold tabular-nums">{it.quantidade}×</span> {it.nome}
+            <li
+              key={i}
+              className={`flex flex-col justify-between gap-1 py-2.5 text-white/85 ${
+                i < pedido.itens.length - 1 ? 'border-b border-white/5' : ''
+              }`}
+            >
+              <span className="min-w-0 flex items-start gap-2">
+                <span className="font-semibold tabular-nums text-violet-200">{it.quantidade}×</span>
+                <span className="leading-tight">{it.nome}</span>
               </span>
+              {it.descricao && (
+                <span className="text-[10px] italic leading-tight text-slate-400 ml-6 mt-0.5">
+                  {it.descricao}
+                </span>
+              )}
             </li>
           ))}
         </ul>

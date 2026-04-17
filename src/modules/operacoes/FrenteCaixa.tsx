@@ -69,9 +69,11 @@ export interface IClientePDV {
   numero?: string;     
 }
 
-export interface IUsuarioStorage extends IUsuario {
+export interface IUsuarioStorage extends Omit<IUsuario, 'loja'> {
   loja?: {
     regimeTributario?: string;
+    modulosAtivos?: string[];
+    nome?: string;
     [key: string]: unknown;
   }
 }

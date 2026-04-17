@@ -216,7 +216,7 @@ export const FormEndereco: FC<IFormPessoaProps> = ({
           <div>
             <label className={`${labelClass} flex items-center gap-2`}>
               <Building className="w-4 h-4 text-emerald-300" />
-              Cidade
+              Cidade <span className="text-red-400">*</span>
             </label>
 
             <input
@@ -229,6 +229,7 @@ export const FormEndereco: FC<IFormPessoaProps> = ({
                 })
               }
               className={inputClass}
+              required
             />
           </div>
 

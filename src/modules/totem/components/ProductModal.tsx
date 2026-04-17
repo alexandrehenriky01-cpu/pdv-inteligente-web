@@ -37,6 +37,7 @@ export function ProductModal({
 
   useEffect(() => {
     if (aberto && produto) {
+      console.log('DADOS DO PRODUTO NO MODAL:', produto);
       setQuantidade(1);
       setQtdAdicional({});
       setObservacao('');
@@ -155,9 +156,19 @@ export function ProductModal({
 
         <div className={`mx-auto max-w-3xl space-y-8 px-4 pt-6 ${isSheet ? 'pb-32' : 'pb-36'}`}>
           <div>
-            <p className="text-lg text-white/75">{produto.descricaoCurta}</p>
-            <p className="mt-2 text-2xl font-semibold text-violet-200">{formatBrl(produto.precoBase)}</p>
+            <p className="text-2xl font-semibold text-violet-200">{formatBrl(produto.precoBase)}</p>
           </div>
+
+          {produto.descricao && (
+            <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+              <h3 className="mb-2 text-[10px] font-bold uppercase tracking-widest text-violet-400">
+                Ingredientes
+              </h3>
+              <p className="text-xs leading-relaxed italic text-slate-300">
+                {produto.descricao}
+              </p>
+            </section>
+          )}
 
           <section>
             <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-white/45">

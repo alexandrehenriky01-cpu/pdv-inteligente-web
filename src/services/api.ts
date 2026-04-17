@@ -44,6 +44,12 @@ api.interceptors.response.use(
   (response: AxiosResponse) => response,
   (error: AxiosError) => {
     if (error.response?.status === 401) {
+      const url = String(error.config?.url || '');
+
+      if (url.includes('/public/')) {
+        return Promise.reject(error);
+      }
+
       // Credenciais inválidas no POST /api/auth/login — não limpar sessão anterior nem forçar redirect
       if (isLoginPostRequest(error.config)) {
         return Promise.reject(error);
@@ -55,7 +61,9 @@ api.interceptors.response.use(
       delete api.defaults.headers.common.Authorization;
 
       const hashRoute = window.location.hash.replace(/^#/, '') || '/';
-      if (hashRoute !== '/' && hashRoute !== '/login') {
+      const rotasPublicas = ['/', '/login', '/menu', '/menu/', '/menu/'];
+      const isRotaPublica = rotasPublicas.some(r => hashRoute === r || hashRoute.startsWith(r + '/'));
+      if (!isRotaPublica && hashRoute !== '/' && hashRoute !== '/login') {
         window.location.hash = '#/login';
       }
     }

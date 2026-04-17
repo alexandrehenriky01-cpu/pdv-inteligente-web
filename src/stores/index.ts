@@ -9,10 +9,8 @@
 
 export {
   createCartStore,
-  createSimpleCartStore,
   type CartStoreConfig,
   type BaseCartItem,
-  type CartItemAdicional,
   type CartItemFiltro,
   type CarrinhoStore,
   type CarrinhoEstado,
@@ -49,7 +47,7 @@ export {
   useDeliveryCartTotal,
   useDeliveryEnderecoInfo,
   useDeliveryTaxaEntrega,
-  DeliveryCartParaPayload,
+  deliveryCartParaPayload,
   type DeliveryCartItem,
   type DeliveryAdicionarItemPayload,
   type EnderecoEntrega,
@@ -69,9 +67,8 @@ export {
   useGarcomCartTotal,
   useGarcomMesaInfo,
   useGarcomResponsavel,
-  GarcomCartParaPayload,
+  garcomCartParaPayload,
   type GarcomCartItem,
   type GarcomAdicionarItemPayload,
   type MesaInfo,
-  type ComandaInfo,
 } from './useGarcomCart';

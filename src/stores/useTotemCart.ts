@@ -58,15 +58,15 @@ export function limparTotemCart(): void {
 }
 
 export function useTotemCartTotal(): number {
-  return useTotemCart((state) => state.valorTotal);
+  return useTotemCart.getState().valorTotal;
 }
 
 export function useTotemCartQuantidade(): number {
-  return useTotemCart((state) => state.quantidadeTotalItens);
+  return useTotemCart.getState().quantidadeTotalItens;
 }
 
 export function useTotemCartVazio(): boolean {
-  return useTotemCart((state) => state.itens.length === 0);
+  return useTotemCart.getState().itens.length === 0;
 }
 
 export function TotemCartParaPayload(): TotemCartItem[] {

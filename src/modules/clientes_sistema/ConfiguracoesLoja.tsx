@@ -43,6 +43,8 @@ interface CompanySettings {
 
   /** Slug público do cardápio delivery (apenas minúsculas, números e hífens). */
   slug: string;
+  /** Taxa de entrega padrão para o cardápio digital (em centavos, ex.: 800 = R$ 8,00). */
+  taxaEntregaPadrao: number;
   
   nfeHomologacaoSerie: string;
   nfeHomologacaoNumero: string;
@@ -111,6 +113,7 @@ export const ConfiguracoesLoja: FC = () => {
     nfseHomologacaoSerie: '', nfseHomologacaoNumero: '', nfseProducaoSerie: '', nfseProducaoNumero: '', nfseToggle: false,
     cteHomologacaoSerie: '', cteHomologacaoNumero: '', cteProducaoSerie: '', cteProducaoNumero: '', cteToggle: false,
     mdfeHomologacaoSerie: '', mdfeHomologacaoNumero: '', mdfeProducaoSerie: '', mdfeProducaoNumero: '', mdfeToggle: false,
+    taxaEntregaPadrao: 0,
     ambienteFiscal: 'HOMOLOGACAO',
     focusTokenHomologacao: '',
     focusTokenProducao: '',
@@ -217,6 +220,7 @@ export const ConfiguracoesLoja: FC = () => {
             mdfeProducaoNumero: lojaDB.mdfeNumeroProducao != null ? String(lojaDB.mdfeNumeroProducao) : prev.mdfeProducaoNumero,
             logoUrl: lojaDB.logoUrl ?? prev.logoUrl,
             slug: typeof lojaDB.slug === 'string' ? lojaDB.slug : prev.slug,
+            taxaEntregaPadrao: Number(lojaDB.taxaEntregaPadrao) || 0,
             possuiCertificado: Boolean(lojaDB.possuiCertificado),
             certificadoNome: lojaDB.certificadoNome ?? prev.certificadoNome,
             certificadoValidade: lojaDB.certificadoValidade ?? prev.certificadoValidade,
@@ -295,7 +299,7 @@ export const ConfiguracoesLoja: FC = () => {
     }
   };
 
-  const updateSetting = (key: keyof CompanySettings, value: string | boolean | File | null) => {
+  const updateSetting = (key: keyof CompanySettings, value: string | boolean | File | number | null) => {
     setSettings(prev => ({ ...prev, [key]: value }));
   };
 
@@ -482,10 +486,29 @@ export const ConfiguracoesLoja: FC = () => {
                           {typeof window !== 'undefined'
                             ? `${window.location.origin}${window.location.pathname.replace(/\/$/, '')}`
                             : ''}
-                          #/delivery/{settings.slug.trim()}
+                          #/menu/{settings.slug.trim()}
                         </span>
                       </p>
                     ) : null}
+                  </div>
+                  <div>
+                    <label className={labelClass}>Taxa de Entrega Padrão (R$)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      className={`${inputClass} font-mono text-sm`}
+                      placeholder="0.00"
+                      autoComplete="off"
+                      value={settings.taxaEntregaPadrao / 100}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value) || 0;
+                        updateSetting('taxaEntregaPadrao', Math.round(v * 100));
+                      }}
+                    />
+                    <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                      Valor base cobrado para entregas no cardápio digital.
+                    </p>
                   </div>
                   <div>
                     <label className={labelClass}>{settings.pessoaFisica ? 'CPF' : 'CNPJ'}</label>

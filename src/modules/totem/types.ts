@@ -19,6 +19,8 @@ export interface TotemMockProduto {
   categoriaId: string;
   nome: string;
   descricaoCurta: string;
+  /** Ingredientes (descrição do itemCardapio) para exibição no cardápio delivery. */
+  descricao?: string | null;
   precoBase: number;
   imagemUrl: string;
   adicionais: TotemMockAdicional[];

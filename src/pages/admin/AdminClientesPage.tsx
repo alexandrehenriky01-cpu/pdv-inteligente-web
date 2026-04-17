@@ -244,9 +244,9 @@ export function AdminClientesPage() {
       if (allActive) {
         novos = prev.modulosAtivos.filter(m => !modulo.subModulos!.map(sm => sm.id).includes(m));
       } else {
-        const subs = modulo.subModulos.map(sm => sm.id);
+        const subs = modulo.subModulos?.map(sm => sm.id) ?? [];
         const withoutParent = prev.modulosAtivos.filter(m => m !== modulo.id && !subs.includes(m));
-        novos = [...withoutParent, modulo.id, ...modulo.subModulos!.map(sm => sm.id)];
+        novos = [...withoutParent, modulo.id, ...subs];
       }
       return { ...prev, modulosAtivos: novos };
     });
@@ -336,9 +336,9 @@ export function AdminClientesPage() {
       if (allActive) {
         novos = prev.modulosAtivos.filter(m => !modulo.subModulos!.map(sm => sm.id).includes(m));
       } else {
-        const subs = modulo.subModulos.map(sm => sm.id);
+        const subs = modulo.subModulos?.map(sm => sm.id) ?? [];
         const withoutParent = prev.modulosAtivos.filter(m => m !== modulo.id && !subs.includes(m));
-        novos = [...withoutParent, modulo.id, ...modulo.subModulos!.map(sm => sm.id)];
+        novos = [...withoutParent, modulo.id, ...subs];
       }
       return { ...prev, modulosAtivos: novos };
     });

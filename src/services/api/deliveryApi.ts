@@ -31,9 +31,12 @@ export interface NovaVendaDeliveryBody {
   tipoConsumo: 'ENTREGA';
   origem?: string;
   taxaEntrega: number;
+  cidade: string;
   enderecoEntrega: string;
   observacoes: string;
   nomeCliente?: string;
+  /** Chave de idempotência para evitar duplicação de pedidos. */
+  idempotencyKey?: string;
 }
 
 export interface VendaDeliveryResposta {
@@ -48,6 +51,7 @@ export interface FinalizarPedidoDeliveryParams {
   carrinho: CartItem[];
   subtotalItens: number;
   taxaEntrega: number;
+  cidade: string;
   enderecoEntrega: string;
   /** Texto único: cliente, WhatsApp, observações do pedido (vai para `observacoes` da venda). */
   observacoesVenda: string;
@@ -62,6 +66,7 @@ export function montarPayloadVendaDelivery(params: FinalizarPedidoDeliveryParams
     carrinho,
     subtotalItens,
     taxaEntrega,
+    cidade,
     observacoesVenda,
     nomeCliente,
     formaPagamento,
@@ -131,9 +136,11 @@ export function montarPayloadVendaDelivery(params: FinalizarPedidoDeliveryParams
     tipoConsumo: 'ENTREGA',
     origem: 'FOOD',
     taxaEntrega,
+    cidade: cidade.trim(),
     enderecoEntrega: enderecoEntrega.trim(),
     observacoes: observacoesVenda.trim(),
     nomeCliente: nomeCliente.trim(),
+    idempotencyKey: `delivery-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
   };
 }
 
@@ -151,6 +158,7 @@ export function mensagemErroDeliveryApi(erro: unknown): string {
 export async function finalizarPedidoDelivery(
   body: NovaVendaDeliveryBody
 ): Promise<{ mensagem: string; venda: VendaDeliveryResposta }> {
+  console.log('PAYLOAD COMPLETO:', JSON.stringify(body, null, 2));
   const { data } = await api.post<{
     mensagem: string;
     venda: VendaDeliveryResposta;

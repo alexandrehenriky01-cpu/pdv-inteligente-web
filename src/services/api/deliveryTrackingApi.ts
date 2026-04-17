@@ -8,7 +8,7 @@ export interface DeliveryPedidoTrackingDTO {
   statusPreparo: string | null;
   valorTotal: number;
   enderecoEntrega: string | null;
-  itens: Array<{ nome: string; quantidade: number }>;
+  itens: Array<{ nome: string; descricao: string | null; quantidade: number }>;
 }
 
 export async function getDeliveryPedidoTracking(pedidoId: string): Promise<DeliveryPedidoTrackingDTO> {

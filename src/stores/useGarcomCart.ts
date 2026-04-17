@@ -180,7 +180,7 @@ export function fecharComandaAtiva(): void {
 }
 
 export function useGarcomCartTotal(): number {
-  return useGarcomCart((state) => state.valorTotal);
+  return useGarcomCart((state: GarcomCartItem[]) => state.reduce((acc, item) => acc + item.valorTotal, 0));
 }
 
 export function useGarcomMesaInfo(): MesaInfo | null {

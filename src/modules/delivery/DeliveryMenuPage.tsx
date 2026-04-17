@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useOutletContext } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { Loader2, ShoppingBag } from 'lucide-react';
+import { Loader2, Plus, ShoppingBag } from 'lucide-react';
 import { ProductModal } from '../totem/components/ProductModal';
 import type { TotemMockCategoria, TotemMockProduto } from '../totem/types';
 import {
@@ -18,6 +18,12 @@ import type { DeliveryOutletContext } from './deliveryOutletContext';
 
 function formatBrl(n: number): string {
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+const PLACEHOLDER_FALLBACK = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"%3E%3Crect fill="%231a1a2e" width="800" height="600"/%3E%3Ccircle cx="400" cy="300" r="120" fill="%232d2d44"/%3E%3C/svg%3E';
+
+function isRealImage(url: string): boolean {
+  return Boolean(url && !url.startsWith('data:') && !url.includes('placeholder') && !url.includes('fallback'));
 }
 
 export function DeliveryMenuPage() {
@@ -48,8 +54,10 @@ export function DeliveryMenuPage() {
       try {
         setCarregando(true);
         const { itens: raw } = await getCardapioTotemPublic(lojaPublicKey);
+        console.log('CARDÁPIO RAW:', JSON.stringify(raw.slice(0, 2), null, 2));
         if (!ativo) return;
         const mapped = raw.map(mapCardapioItemToTotemProduto);
+        console.log('CARDÁPIO MAPPED:', JSON.stringify(mapped.slice(0, 2), null, 2));
         setProdutos(mapped);
         const cats = buildTotemCategoriasFromCardapio(raw);
         setCategorias(cats);
@@ -102,7 +110,10 @@ export function DeliveryMenuPage() {
               <button
                 key={c.id}
                 type="button"
-                onClick={() => setCategoriaAtiva(c.id)}
+                onClick={() => {
+                  setCategoriaAtiva(c.id);
+                  document.getElementById(`cat-${c.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
                 className={`shrink-0 rounded-full border px-4 py-2 text-sm font-medium transition ${
                   categoriaAtiva === c.id
                     ? 'border-violet-400/50 bg-violet-500/25 text-violet-100'
@@ -115,28 +126,60 @@ export function DeliveryMenuPage() {
           </div>
         </div>
 
-        <ul className="divide-y divide-white/10 px-3">
-          {produtosFiltrados.map((p) => (
-            <li key={p.id}>
-              <button
-                type="button"
-                onClick={() => abrirProduto(p)}
-                className="flex w-full gap-3 py-4 text-left transition active:bg-white/[0.04]"
-              >
-                <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
-                  <img src={p.imagemUrl} alt="" className="h-full w-full object-cover" />
-                </div>
-                <div className="min-w-0 flex-1 py-0.5">
-                  <p className="font-semibold text-white">{p.nome}</p>
-                  <p className="mt-1 line-clamp-2 text-sm text-white/50">{p.descricaoCurta}</p>
-                  <p className="mt-2 text-base font-semibold text-violet-200">
-                    {formatBrl(p.precoBase)}
-                  </p>
-                </div>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <div className="space-y-8 px-3 py-4">
+          {categorias.map((cat) => {
+            const produtosDaCategoria = produtosFiltrados.filter((p) => p.categoriaId === cat.id);
+            if (produtosDaCategoria.length === 0) return null;
+            return (
+              <section key={cat.id} id={`cat-${cat.id}`}>
+                <h2 className="mb-4 font-black tracking-widest text-white/80 uppercase text-sm border-b border-white/10 pb-2">
+                  {cat.nome}
+                </h2>
+                <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {produtosDaCategoria.map((p) => {
+                    const temImagem = isRealImage(p.imagemUrl);
+                    return (
+                      <li key={p.id}>
+                        <button
+                          type="button"
+                          onClick={() => abrirProduto(p)}
+                          className="group relative flex w-full flex-col overflow-hidden rounded-[20px] border border-white/10 bg-[#0b1324] text-left shadow-xl transition-all duration-500 hover:border-violet-400/40 hover:shadow-[0_8px_30px_rgba(139,92,246,0.2)] active:scale-[0.98]"
+                        >
+                          <div className="relative h-44 w-full overflow-hidden">
+                            {temImagem ? (
+                              <img
+                                src={p.imagemUrl}
+                                alt=""
+                                className="h-full w-full object-cover rounded-t-[20px] transition-all duration-500 hover:scale-105"
+                              />
+                            ) : (
+                              <div className="h-full w-full bg-gradient-to-br from-slate-800 to-slate-900">
+                                <div className="flex h-full w-full items-center justify-center">
+                                  <span className="text-4xl text-white/20 capitalize">{p.nome.charAt(0)}</span>
+                                </div>
+                              </div>
+                            )}
+                            <div className="absolute inset-0 bg-gradient-to-t from-[#0b1324]/80 via-transparent to-transparent" />
+                          </div>
+                          <div className="flex flex-1 flex-col gap-1 p-3">
+                            <p className="line-clamp-1 text-base font-semibold leading-tight text-white">{p.nome}</p>
+                            <p className="line-clamp-2 text-xs leading-relaxed text-white/50">{p.descricaoCurta}</p>
+                            <div className="mt-auto flex items-end justify-between pt-1">
+                              <p className="text-lg font-black text-emerald-400">{formatBrl(p.precoBase)}</p>
+                              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-fuchsia-600 text-white shadow-lg transition-transform duration-300 group-hover:scale-110">
+                                <Plus className="h-3 w-3" strokeWidth={2.5} />
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            );
+          })}
+        </div>
 
         {produtosFiltrados.length === 0 && (
           <p className="py-16 text-center text-white/45">Nenhum item nesta categoria.</p>

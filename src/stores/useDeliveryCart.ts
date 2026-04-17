@@ -3,7 +3,7 @@
  */
 
 import { create } from 'zustand';
-import { createCartStore, BaseCartItem } from './factories/createCartStore';
+import { createCartStore, BaseCartItem, CarrinhoStore } from './factories/createCartStore';
 import { arredondar2 } from '../utils/formatters';
 
 export interface DeliveryCartItem extends BaseCartItem {
@@ -111,7 +111,7 @@ export function limparDeliveryCart(): void {
 }
 
 export function useDeliveryCartTotal(): number {
-  return useDeliveryCart((state) => state.valorTotal);
+  return useDeliveryCart((state: any) => state.valorTotal);
 }
 
 export function useDeliveryEnderecoInfo(): EnderecoEntrega | null {

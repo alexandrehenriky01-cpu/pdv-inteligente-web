@@ -4,7 +4,10 @@ export interface LojaDeliveryPublic {
   nomeLegal?: string;
   logoUrl: string | null;
   telefoneContato: string | null;
+  endereco: string | null;
   aberto: boolean;
+  taxaEntregaPadrao: number;
+  chavePix: string | null;
 }
 
 export interface DeliveryOutletContext {

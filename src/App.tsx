@@ -127,7 +127,7 @@ function App() {
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<Login />} />
 
-        <Route path="/delivery/:slug" element={<DeliveryLayout />}>
+        <Route path="/menu/:slug" element={<DeliveryLayout />}>
           <Route index element={<DeliveryMenuPage />} />
           <Route path="checkout" element={<DeliveryCheckoutPage />} />
           <Route path="pedido/:pedidoId" element={<DeliveryTrackingPage />} />

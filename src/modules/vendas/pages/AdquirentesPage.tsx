@@ -27,6 +27,7 @@ interface IAdquirenteRow {
   diasRecebimento: number;
   contaContabilId: string | null;
   contaContabil: IContaResumo | null;
+  chavePix: string | null;
   ativo: boolean;
   createdAt: string;
   updatedAt: string;
@@ -77,6 +78,7 @@ const emptyForm = {
   taxaCredito: '0',
   diasRecebimento: '1',
   contaContabilId: '',
+  chavePix: '',
   ativo: true,
 };
 
@@ -149,6 +151,7 @@ export function AdquirentesPage() {
       taxaCredito: String(row.taxaCredito),
       diasRecebimento: String(row.diasRecebimento),
       contaContabilId: row.contaContabilId || '',
+      chavePix: (row.chavePix ?? '') || '',
       ativo: row.ativo,
     });
     setModalOpen(true);
@@ -187,6 +190,7 @@ export function AdquirentesPage() {
       taxaCredito: tc,
       diasRecebimento: dias,
       contaContabilId: form.contaContabilId.trim() || null,
+      chavePix: form.chavePix.trim() || null,
       ativo: form.ativo,
     };
 
@@ -261,6 +265,7 @@ export function AdquirentesPage() {
                       <th className="px-5 py-4">Taxa crédito</th>
                       <th className="px-5 py-4">Dias receb.</th>
                       <th className="px-5 py-4">Conta contábil</th>
+                      <th className="px-5 py-4">Chave PIX</th>
                       <th className="px-5 py-4">Status</th>
                       <th className="px-5 py-4 text-right">Ações</th>
                     </tr>
@@ -268,7 +273,7 @@ export function AdquirentesPage() {
                   <tbody className="divide-y divide-white/5">
                     {lista.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-5 py-12 text-center text-slate-500">
+                        <td colSpan={8} className="px-5 py-12 text-center text-slate-500">
                           Nenhum local cadastrado. Clique em &quot;Novo local&quot; para cadastrar Stone, Cielo, Mercado Pago,
                           etc.
                         </td>
@@ -284,6 +289,13 @@ export function AdquirentesPage() {
                             {row.contaContabil
                               ? `${row.contaContabil.codigoEstrutural} — ${row.contaContabil.nomeConta}`
                               : '—'}
+                          </td>
+                          <td className="px-5 py-4 text-xs text-slate-400">
+                            {row.chavePix ? (
+                              <span className="font-mono text-emerald-400">••••••{row.chavePix.slice(-4)}</span>
+                            ) : (
+                              '—'
+                            )}
                           </td>
                           <td className="px-5 py-4">
                             <span
@@ -415,6 +427,22 @@ export function AdquirentesPage() {
                       </option>
                     ))}
                   </select>
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-400">
+                    Chave PIX (Para QR Code)
+                  </label>
+                  <input
+                    type="text"
+                    value={form.chavePix || ''}
+                    onChange={(e) => setForm((f) => ({ ...f, chavePix: e.target.value }))}
+                    className="w-full rounded-xl border border-white/10 bg-[#0b1324] px-4 py-2.5 text-sm text-white outline-none ring-violet-500/40 focus:ring-2"
+                    placeholder="CPF, CNPJ, e-mail, telefone ou chave aleatória"
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Esta chave será usada para gerar o QR Code dinâmico no Checkout do cliente.
+                  </p>
                 </div>
 
                 <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">

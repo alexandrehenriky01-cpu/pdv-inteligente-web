@@ -2,7 +2,7 @@ import { api } from '../api';
 import type { TotemMockCategoria, TotemMockProduto } from '../../modules/totem/types';
 
 const IMAGEM_FALLBACK =
-  'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&q=80';
+  'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"%3E%3Crect fill="%231a1a2e" width="800" height="600"/%3E%3Ccircle cx="400" cy="300" r="120" fill="%232d2d44"/%3E%3C/svg%3E';
 
 export interface CardapioAdicionalApi {
   id: string;
@@ -66,6 +66,7 @@ export function mapCardapioItemToTotemProduto(row: CardapioItemApi): TotemMockPr
     categoriaId: slugTotemCategoria(row.categoria),
     nome: row.nome,
     descricaoCurta: row.descricao?.trim() || 'Item exclusivo do nosso cardápio.',
+    descricao: row.descricao?.trim() || null,
     precoBase: row.precoVenda,
     imagemUrl: row.imagemUrl?.trim() || IMAGEM_FALLBACK,
     adicionais: row.adicionais.map((a) => ({
