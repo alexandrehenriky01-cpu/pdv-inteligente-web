@@ -26,6 +26,15 @@ export function DeliveryLayout() {
   const [carregandoLoja, setCarregandoLoja] = useState(true);
   const [erroLoja, setErroLoja] = useState<string | null>(null);
 
+  const buscarLoja = async (signal?: AbortSignal): Promise<LojaDeliveryPublic | null> => {
+    const timestamp = Date.now();
+    const { data } = await api.get<LojaDeliveryPublic>(
+      `/api/public/delivery/loja/${encodeURIComponent(lojaPublicKey)}?_=${timestamp}`,
+      { signal }
+    );
+    return data;
+  };
+
   useEffect(() => {
     if (!lojaPublicKey) {
       setCarregandoLoja(false);
@@ -34,20 +43,22 @@ export function DeliveryLayout() {
       return;
     }
 
+    const controller = new AbortController();
     let ativo = true;
+
     (async () => {
       setCarregandoLoja(true);
       setErroLoja(null);
       try {
-        const { data } = await api.get<LojaDeliveryPublic>(
-          `/api/public/delivery/loja/${encodeURIComponent(lojaPublicKey)}`
-        );
-        if (ativo) setLoja(data);
+        const data = await buscarLoja(controller.signal);
+        if (ativo && data) setLoja(data);
 
         if (!estacaoParam && !estacaoEnv && data?.id) {
           try {
+            const timestamp = Date.now();
             const estacoesRes = await api.get<{ estacaoId: string | null }>(
-              `/api/public/delivery/estacao-padrao/${encodeURIComponent(lojaPublicKey)}`
+              `/api/public/delivery/estacao-padrao/${encodeURIComponent(lojaPublicKey)}?_=${timestamp}`,
+              { signal: controller.signal }
             );
             if (estacoesRes.data?.estacaoId) {
               setEstacaoTrabalhoId(estacoesRes.data.estacaoId);
@@ -75,8 +86,32 @@ export function DeliveryLayout() {
 
     return () => {
       ativo = false;
+      controller.abort();
     };
   }, [lojaPublicKey, estacaoParam, estacaoEnv]);
+
+  useEffect(() => {
+    if (!lojaPublicKey) return;
+
+    const intervalId = setInterval(async () => {
+      try {
+        const data = await buscarLoja();
+        if (data) {
+          setLoja((prev) => {
+            if (!prev) return data;
+            if (prev.aberto !== data.aberto) {
+              console.log('[DeliveryLayout] Status da loja atualizado:', data.aberto ? 'ABERTO' : 'FECHADO');
+            }
+            return data;
+          });
+        }
+      } catch {
+        console.warn('[DeliveryLayout] Falha ao revalidar status da loja');
+      }
+    }, 60000);
+
+    return () => clearInterval(intervalId);
+  }, [lojaPublicKey]);
 
   useEffect(() => {
     if (estacaoTrabalhoId) {

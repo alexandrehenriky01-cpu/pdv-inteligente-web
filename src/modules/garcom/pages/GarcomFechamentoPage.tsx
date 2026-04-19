@@ -33,7 +33,10 @@ export function GarcomFechamentoPage() {
   const carregar = useCallback(async () => {
     setCarregando(true);
     try {
-      const { data } = await api.get<MesaApi[]>('/api/mesas');
+      const token = localStorage.getItem('token');
+      const { data } = await api.get<MesaApi[]>('/api/pdv/mesas', {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
       setMesas(Array.isArray(data) ? data : []);
     } catch {
       toast.error('Não foi possível carregar a mesa.');
@@ -92,7 +95,7 @@ export function GarcomFechamentoPage() {
     if (!mesaOk || !mesa?.itens?.length) return;
     setEnviando(true);
     try {
-      await api.patch(`/api/mesas/${n}/solicitar-fechamento`, {
+      await api.patch(`/api/pdv/mesas/${n}/solicitar-fechamento`, {
         incluirTaxaServico,
         pessoas: pessoasClamped,
       });

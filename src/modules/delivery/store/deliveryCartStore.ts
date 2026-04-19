@@ -1,5 +1,7 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import type { CartItem, TotemMockProduto } from '../../totem/types';
+import type { AddressData } from '../../../hooks/useCep';
 
 function arredondar2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -34,54 +36,67 @@ export interface PayloadAdicionarDelivery {
 
 interface DeliveryCartStore {
   carrinho: CartItem[];
+  endereco: AddressData | null;
   adicionarAoCarrinho: (payload: PayloadAdicionarDelivery) => void;
   removerDoCarrinho: (id: string) => void;
   alterarQuantidade: (id: string, delta: number) => void;
   limparCarrinho: () => void;
+  setEndereco: (endereco: AddressData | null) => void;
 }
 
-export const useDeliveryCartStore = create<DeliveryCartStore>((set) => ({
-  carrinho: [],
+export const useDeliveryCartStore = create<DeliveryCartStore>()(
+  persist(
+    (set) => ({
+      carrinho: [],
+      endereco: null,
 
-  adicionarAoCarrinho: (payload) =>
-    set((s) => ({
-      carrinho: [
-        ...s.carrinho,
-        {
-          id: novoIdCarrinho(),
-          produto: payload.produto,
-          quantidade: payload.quantidade,
-          adicionais: { ...payload.adicionais },
-          observacao: payload.observacao,
-          subtotal: arredondar2(payload.subtotal),
-        },
-      ],
-    })),
+      adicionarAoCarrinho: (payload) =>
+        set((s) => ({
+          carrinho: [
+            ...s.carrinho,
+            {
+              id: novoIdCarrinho(),
+              produto: payload.produto,
+              quantidade: payload.quantidade,
+              adicionais: { ...payload.adicionais },
+              observacao: payload.observacao,
+              subtotal: arredondar2(payload.subtotal),
+            },
+          ],
+        })),
 
-  removerDoCarrinho: (id) =>
-    set((s) => ({
-      carrinho: s.carrinho.filter((item) => item.id !== id),
-    })),
+      removerDoCarrinho: (id) =>
+        set((s) => ({
+          carrinho: s.carrinho.filter((item) => item.id !== id),
+        })),
 
-  alterarQuantidade: (id, delta) =>
-    set((s) => {
-      const next = s.carrinho
-        .map((item) => {
-          if (item.id !== id) return item;
-          const q = item.quantidade + delta;
-          if (q <= 0) return null;
-          return {
-            ...item,
-            quantidade: q,
-            subtotal: calcularSubtotalLinhaDelivery(item.produto, item.adicionais, q),
-          };
-        })
-        .filter((x): x is CartItem => x !== null);
-      return { carrinho: next };
+      alterarQuantidade: (id, delta) =>
+        set((s) => {
+          const next = s.carrinho
+            .map((item) => {
+              if (item.id !== id) return item;
+              const q = item.quantidade + delta;
+              if (q <= 0) return null;
+              return {
+                ...item,
+                quantidade: q,
+                subtotal: calcularSubtotalLinhaDelivery(item.produto, item.adicionais, q),
+              };
+            })
+            .filter((x): x is CartItem => x !== null);
+          return { carrinho: next };
+        }),
+
+      limparCarrinho: () => set({ carrinho: [], endereco: null }),
+
+      setEndereco: (endereco) => set({ endereco }),
     }),
-
-  limparCarrinho: () => set({ carrinho: [] }),
-}));
+    {
+      name: 'delivery-cart',
+      partialize: (state) => ({ carrinho: state.carrinho, endereco: state.endereco }),
+    }
+  )
+);
 
 export function selectTotalItensDelivery(s: DeliveryCartStore): number {
   return s.carrinho.reduce((acc, item) => acc + item.quantidade, 0);
@@ -89,4 +104,8 @@ export function selectTotalItensDelivery(s: DeliveryCartStore): number {
 
 export function selectValorSubtotalCarrinhoDelivery(s: DeliveryCartStore): number {
   return arredondar2(s.carrinho.reduce((acc, item) => acc + item.subtotal, 0));
+}
+
+export function selectEnderecoDelivery(s: DeliveryCartStore): AddressData | null {
+  return s.endereco;
 }

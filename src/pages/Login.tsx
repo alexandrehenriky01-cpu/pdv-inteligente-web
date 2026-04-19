@@ -371,6 +371,7 @@ export function Login() {
                         placeholder="••••••••"
                         disabled={loading || enteringPortal}
                         required
+                        autoComplete="current-password"
                         className="w-full rounded-2xl border border-white/10 bg-[#0d182d] py-3.5 pl-11 pr-4 text-sm text-white placeholder:text-slate-500 outline-none shadow-inner transition-all focus:border-violet-400/40 focus:ring-2 focus:ring-violet-500/20 disabled:cursor-not-allowed disabled:opacity-60 sm:py-4"
                       />
                     </div>

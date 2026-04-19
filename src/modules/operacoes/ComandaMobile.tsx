@@ -140,7 +140,7 @@ export function ComandaMobile() {
         valorTotal: item.subtotal,
         observacao: item.observacao,
       }));
-      const response = await api.post(`/api/mesas/${mesaSelecionada}/adicionar`, { itens: itensPayload });
+      const response = await api.post(`/api/pdv/mesas/${mesaSelecionada}/adicionar`, { itens: itensPayload });
       
       alert(`✅ Pedido enviado para a Mesa ${mesaSelecionada}!`);
       

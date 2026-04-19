@@ -25,7 +25,10 @@ export function useMesas(options: UseMesasOptions = {}) {
     }
     setCarregando(true);
     try {
-      const { data } = await api.get<MesaApi[]>('/api/mesas');
+      const token = localStorage.getItem('token');
+      const { data } = await api.get<MesaApi[]>('/api/pdv/mesas', {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
       setMesas(Array.isArray(data) ? data : []);
     } catch {
       if (toastOnError) {

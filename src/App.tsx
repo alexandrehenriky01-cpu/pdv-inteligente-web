@@ -27,6 +27,9 @@ import { DeliveryLayout } from './modules/delivery/DeliveryLayout';
 import { DeliveryMenuPage } from './modules/delivery/DeliveryMenuPage';
 import { DeliveryCheckoutPage } from './modules/delivery/DeliveryCheckoutPage';
 import { DeliveryTrackingPage } from './modules/delivery/DeliveryTrackingPage';
+import { EntregasMobilePage } from './modules/delivery-tracking/pages/EntregasMobilePage';
+import { EntregadorTrackPage } from './modules/delivery-tracking/pages/EntregadorTrackPage';
+import { GestaoDeliveryPage } from './modules/delivery-tracking/pages/GestaoDeliveryPage';
 
 // Estoque
 import { Estoque } from './modules/estoque/pages/Estoque';
@@ -202,6 +205,10 @@ function App() {
           <Route path="/vendas/campanhas-promocionais" element={<CampanhasPromocionaisPage />} />
           <Route path="/vendas/gestao-turnos-caixa" element={<GestaoTurnosCaixaPage />} />
           <Route path="/gestao-food" element={<GestaoPedidosFoodPage />} />
+          <Route path="/vendas/gestao-delivery" element={<GestaoDeliveryPage />} />
+          <Route path="/entregas/mobile/:token" element={<EntregasMobilePage />} />
+          <Route path="/entregas/mobile" element={<EntregasMobilePage />} />
+          <Route path="/track/:token" element={<EntregadorTrackPage />} />
           <Route
             path="/cardapio/gestao"
             element={

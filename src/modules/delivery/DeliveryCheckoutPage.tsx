@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useOutletContext } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { ArrowLeft, Copy, Loader2, MapPin, QrCode } from 'lucide-react';
@@ -13,6 +13,7 @@ import {
   useDeliveryCartStore,
   selectValorSubtotalCarrinhoDelivery,
 } from './store/deliveryCartStore';
+import { useCep } from '../../hooks/useCep';
 import type { DeliveryOutletContext } from './deliveryOutletContext';
 
 function formatBrl(n: number): string {
@@ -62,6 +63,28 @@ export function DeliveryCheckoutPage() {
   const [formaPagamento, setFormaPagamento] = useState<FormaPagamentoDelivery>('NA_ENTREGA');
   const [enviando, setEnviando] = useState(false);
   const [copiaColaCopiado, setCopiaColaCopiado] = useState(false);
+
+  const { addressData, isLoading: carregandoCep, error: erroCep, fetchAddress } = useCep();
+  const [cepInput, setCepInput] = useState('');
+
+  useEffect(() => {
+    console.log('Checkout useEffect - addressData:', addressData);
+    if (addressData) {
+      console.log('Preenchendo campos com:', addressData);
+      setRua(addressData.logradouro || '');
+      setBairro(addressData.bairro || '');
+      setCidade(addressData.cidade || '');
+    }
+  }, [addressData]);
+
+  const handleCepChange = (value: string) => {
+    const onlyNums = value.replace(/\D/g, '').slice(0, 8);
+    setCepInput(onlyNums);
+    setCep(onlyNums);
+    if (onlyNums.length === 8) {
+      fetchAddress(onlyNums);
+    }
+  };
 
   const taxaEntrega = loja?.taxaEntregaPadrao ?? 0;
 
@@ -303,13 +326,26 @@ export function DeliveryCheckoutPage() {
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="mb-1 block text-xs text-white/45">CEP</label>
-            <input
-              value={cep}
-              onChange={(e) => setCep(e.target.value)}
-              className="w-full rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5 text-white placeholder:text-white/30 focus:border-violet-500/50 focus:outline-none focus:ring-2 focus:ring-violet-500/25"
-              placeholder="00000-000"
-              autoComplete="postal-code"
-            />
+            <div className="relative">
+              <input
+                value={cepInput}
+                onChange={(e) => handleCepChange(e.target.value)}
+                className="w-full rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5 pr-10 text-white placeholder:text-white/30 focus:border-violet-500/50 focus:outline-none focus:ring-2 focus:ring-violet-500/25"
+                placeholder="00000000"
+                inputMode="numeric"
+                maxLength={8}
+                autoComplete="postal-code"
+              />
+              {carregandoCep && (
+                <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-white/50" />
+              )}
+            </div>
+            {erroCep && !carregandoCep && (
+              <p className="mt-1 text-xs text-red-400">{erroCep}</p>
+            )}
+            {addressData && !carregandoCep && !erroCep && (
+              <p className="mt-1 text-xs text-emerald-400">CEP encontrado!</p>
+            )}
           </div>
           <div>
             <label className="mb-1 block text-xs text-white/45">Número</label>

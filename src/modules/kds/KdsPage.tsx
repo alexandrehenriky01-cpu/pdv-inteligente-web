@@ -7,6 +7,8 @@ import { KdsOrderCard } from './components/KdsOrderCard';
 import { extrairIdVendaPayload, vendaPayloadParaKdsPedido } from './kdsPedidoUtils';
 import type { ColunaKds, KdsPedido } from './types';
 
+const URGENCY_THRESHOLD_MS = 10 * 60 * 1000;
+
 function tocarNotificacaoCurta(): void {
   try {
     const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -28,6 +30,21 @@ function tocarNotificacaoCurta(): void {
   }
 }
 
+function tocarAlertaPedidoNovo(): void {
+  tocarNotificacaoCurta();
+  try {
+    const audio = new Audio('/sounds/alert.mp3');
+    audio.volume = 0.7;
+    audio.play().catch(() => {});
+  } catch {
+    /* áudio bloqueado pelo navegador */
+  }
+}
+
+function isPedidoUrgente(recebidoEm: number, currentTime: number = Date.now()): boolean {
+  return currentTime - recebidoEm > URGENCY_THRESHOLD_MS;
+}
+
 type SocketStatus = 'idle' | 'connecting' | 'connected' | 'error';
 
 const COLUNAS: Array<{ id: ColunaKds; titulo: string; subtitulo: string }> = [
@@ -41,12 +58,31 @@ export function KdsPage() {
   const [socketStatus, setSocketStatus] = useState<SocketStatus>('idle');
   const [carregandoLista, setCarregandoLista] = useState(true);
   const [savingIds, setSavingIds] = useState<Set<string>>(() => new Set());
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNow(Date.now());
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const urgenciaPorPedido = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const p of pedidos) {
+      map.set(p.id, isPedidoUrgente(p.recebidoEm, now));
+    }
+    return map;
+  }, [pedidos, now]);
 
   const pedidosPorColuna = useCallback(
-    (col: ColunaKds) =>
-      pedidos
-        .filter((p) => p.coluna === col)
-        .sort((a, b) => b.recebidoEm - a.recebidoEm),
+    (col: ColunaKds) => {
+      const filtered = pedidos.filter((p) => p.coluna === col);
+      if (col === 'TODO') {
+        return filtered.sort((a, b) => a.recebidoEm - b.recebidoEm);
+      }
+      return filtered.sort((a, b) => b.recebidoEm - a.recebidoEm);
+    },
     [pedidos]
   );
 
@@ -71,9 +107,9 @@ export function KdsPage() {
     if (!pedido) return;
     setPedidos((prev) => {
       const novo = !prev.some((p) => p.id === pedido.id);
-      if (novo) requestAnimationFrame(() => tocarNotificacaoCurta());
+      if (novo) requestAnimationFrame(() => tocarAlertaPedidoNovo());
       const rest = prev.filter((p) => p.id !== pedido.id);
-      return [pedido, ...rest];
+      return [...rest, pedido];
     });
   }, []);
 
@@ -246,6 +282,7 @@ export function KdsPage() {
                   onAvancar={avancar}
                   onConcluir={concluir}
                   salvando={savingIds.has(p.id)}
+                  urgente={urgenciaPorPedido.get(p.id) ?? false}
                 />
               ))}
               {pedidosPorColuna(col.id).length === 0 && (

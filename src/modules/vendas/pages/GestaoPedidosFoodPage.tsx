@@ -7,10 +7,12 @@ import {
   DollarSign,
   ImageIcon,
   Loader2,
+  Map,
   PackageSearch,
   Printer,
   Radio,
   RefreshCw,
+  Rocket,
   Smartphone,
   Truck,
   UtensilsCrossed,
@@ -28,10 +30,17 @@ import {
   type CupomItemLinha,
 } from '../components/CupomImpressaoFood';
 import { num, subtotalMesa, type MesaApi } from '../../mesas/types';
+import { abrirRotaDelivery } from '../../delivery-tracking/utils/googleMapsUtils';
 
 interface LojaResumoApi {
   nome?: string | null;
   nomeFantasia?: string | null;
+  endereco?: string | null;
+  logradouro?: string | null;
+  numero?: string | null;
+  bairro?: string | null;
+  cidade?: string | null;
+  uf?: string | null;
 }
 
 interface PagamentoApi {
@@ -57,6 +66,7 @@ export interface VendaGestaoFoodApi {
   createdAt?: string;
   origemVenda?: string;
   statusPreparo?: string | null;
+  statusEntrega?: string | null;
   numeroPedido?: number | null;
   numeroVenda?: number;
   nomeCliente?: string | null;
@@ -145,6 +155,23 @@ function badgeStatus(status: string | null | undefined): string {
   if (u === 'PREPARANDO') return 'bg-orange-500/15 text-orange-200 border border-orange-500/35';
   if (u === 'RECEBIDO') return 'bg-slate-500/15 text-slate-300 border border-white/15';
   return 'bg-slate-600/20 text-slate-400 border border-white/10';
+}
+
+function badgeStatusEntrega(status: string | null | undefined): { label: string; className: string } | null {
+  const u = String(status ?? 'PENDENTE').toUpperCase();
+  if (u === 'SAIU_ENTREGA') {
+    return {
+      label: 'SAIU PARA ENTREGA',
+      className: 'bg-amber-500/15 text-amber-300 border border-amber-500/35',
+    };
+  }
+  if (u === 'ENTREGUE') {
+    return {
+      label: 'ENTREGUE',
+      className: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/35',
+    };
+  }
+  return null;
 }
 
 function vendaParaCupomProps(v: VendaGestaoFoodApi): CupomImpressaoFoodProps {
@@ -311,7 +338,10 @@ export function GestaoPedidosFoodPage() {
   const carregarMesas = useCallback(async () => {
     setCarregandoMesas(true);
     try {
-      const { data } = await api.get<MesaApi[]>('/api/mesas');
+      const token = localStorage.getItem('token');
+      const { data } = await api.get<MesaApi[]>('/api/pdv/mesas', {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
       const list = Array.isArray(data) ? data : [];
       setMesasAguardando(
         list.filter((m) => String(m.status).toUpperCase() === 'FECHANDO')
@@ -385,7 +415,7 @@ export function GestaoPedidosFoodPage() {
   }, [resumoPagamentoModal, totalPagarModal]);
 
   const cardapioMap = useMemo(() => {
-    const map = new Map<string, ItemCardapioComImagem>();
+    const map = new window.Map<string, ItemCardapioComImagem>();
     for (const p of cardapioProdutos) {
       map.set(p.nome.toLowerCase().trim(), p);
     }
@@ -479,6 +509,16 @@ export function GestaoPedidosFoodPage() {
     };
   }, [agendarRecarga, carregarMesas]);
 
+  useEffect(() => {
+    const POLLING_INTERVAL = 10000;
+    const interval = setInterval(() => {
+      if (aba === 'pedidos' && !carregando) {
+        void carregar();
+      }
+    }, POLLING_INTERVAL);
+    return () => clearInterval(interval);
+  }, [aba, carregando, carregar]);
+
   const despachar = async (id: string) => {
     setSavingIds((s) => new Set(s).add(id));
     try {
@@ -497,12 +537,69 @@ export function GestaoPedidosFoodPage() {
     }
   };
 
+  const sairParaEntrega = async (id: string, endereco: string) => {
+    setSavingIds((s) => new Set(s).add(id));
+    try {
+      await api.post(`/api/entregas/${id}/sair-entrega`);
+      toast.success('Motoboy saiu para entrega!');
+      await carregar();
+    } catch (e) {
+      console.error('Gestão food: sair para entrega', e);
+      const msg =
+        e && typeof e === 'object' && 'response' in e
+          ? String((e as { response?: { data?: { error?: string } } }).response?.data?.error ?? '')
+          : 'Não foi possível atualizar o status de entrega.';
+      toast.error(msg);
+    } finally {
+      setSavingIds((s) => {
+        const n = new Set(s);
+        n.delete(id);
+        return n;
+      });
+    }
+  };
+
+  const confirmarEntrega = async (id: string) => {
+    setSavingIds((s) => new Set(s).add(id));
+    try {
+      await api.post(`/api/entregas/${id}/confirmar-entrega`);
+      toast.success('Entrega confirmada!');
+      await carregar();
+    } catch (e) {
+      console.error('Gestão food: confirmar entrega', e);
+      const msg =
+        e && typeof e === 'object' && 'response' in e
+          ? String((e as { response?: { data?: { error?: string } } }).response?.data?.error ?? '')
+          : 'Não foi possível confirmar a entrega.';
+      toast.error(msg);
+    } finally {
+      setSavingIds((s) => {
+        const n = new Set(s);
+        n.delete(id);
+        return n;
+      });
+    }
+  };
+
+  const verRotaDelivery = (endereco: string) => {
+    if (!endereco) {
+      toast.error('Endereço não disponível para calcular rota.');
+      return;
+    }
+    const loja = pedidos.find((p) => p.loja);
+    const lojaData = loja?.loja;
+    const origem = 'endereco' in (lojaData || {})
+      ? String((lojaData as Record<string, unknown>).endereco || 'Loja')
+      : `${lojaData?.logradouro || ''} ${lojaData?.numero || ''}, ${lojaData?.bairro || ''}, ${lojaData?.cidade || ''} ${lojaData?.uf || ''}`.trim() || 'Loja';
+    abrirRotaDelivery(origem, endereco);
+  };
+
   const confirmarPagamentoLiberarMesa = async () => {
     const m = mesaDetalheRef.current;
     if (!m) return;
     setLiberandoMesa(true);
     try {
-      await api.post(`/api/mesas/${m.numero}/liberar`, {
+      await api.post(`/api/pdv/mesas/${m.numero}/liberar`, {
         tipoPagamento: formaPagamentoMesa,
         isentarTaxaServico,
       });
@@ -720,6 +817,9 @@ export function GestaoPedidosFoodPage() {
                       const endereco =
                         row.enderecoEntrega != null ? String(row.enderecoEntrega).trim() : '';
                       const podeDespachar = origem === 'DELIVERY' && st === 'PRONTO';
+                      const statusEntrega = badgeStatusEntrega(row.statusEntrega);
+                      const podeSairEntrega = origem === 'DELIVERY' && st === 'PRONTO' && row.statusEntrega !== 'SAIU_ENTREGA' && row.statusEntrega !== 'ENTREGUE';
+                      const podeConfirmarEntrega = origem === 'DELIVERY' && row.statusEntrega === 'SAIU_ENTREGA';
                       const busy = savingIds.has(row.id);
 
                       return (
@@ -802,6 +902,13 @@ export function GestaoPedidosFoodPage() {
                             >
                               {statusPreparoLabel(row.statusPreparo)}
                             </span>
+                            {origem === 'DELIVERY' && statusEntrega && (
+                              <span
+                                className={`inline-flex rounded-lg px-2.5 py-1 text-xs font-black uppercase tracking-wide mt-1 ${statusEntrega.className}`}
+                              >
+                                {statusEntrega.label}
+                              </span>
+                            )}
                           </td>
                           <td className="px-4 py-4 text-right font-mono font-bold text-emerald-300">
                             {fmtBrl(total)}
@@ -816,7 +923,48 @@ export function GestaoPedidosFoodPage() {
                                 <Printer className="w-3.5 h-3.5" />
                                 Imprimir
                               </button>
-                              {podeDespachar ? (
+                              {podeSairEntrega ? (
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => void sairParaEntrega(row.id, endereco)}
+                                  className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-amber-600 to-orange-600 px-3 py-2 text-xs font-black uppercase tracking-wide text-white shadow-[0_0_16px_rgba(245,158,11,0.35)] hover:scale-[1.02] transition-all disabled:opacity-50"
+                                >
+                                  {busy ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <Rocket className="w-3.5 h-3.5" />
+                                  )}
+                                  Sair p/ entrega
+                                </button>
+                              ) : null}
+                              {podeConfirmarEntrega ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => verRotaDelivery(endereco)}
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/35 bg-sky-500/10 px-3 py-2 text-xs font-black uppercase tracking-wide text-sky-100 hover:bg-sky-500/20 transition-all"
+                                  >
+                                    <Map className="w-3.5 h-3.5" />
+                                    Ver rota
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => void confirmarEntrega(row.id)}
+                                    className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 px-3 py-2 text-xs font-black uppercase tracking-wide text-white shadow-[0_0_16px_rgba(16,185,129,0.35)] hover:scale-[1.02] transition-all disabled:opacity-50"
+                                  >
+                                    {busy ? (
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    ) : (
+                                      <Truck className="w-3.5 h-3.5" />
+                                    )}
+                                    Confirmar
+                                  </button>
+                                </>
+                              ) : null}
+                              {podeDespachar && !podeSairEntrega ? (
                                 <button
                                   type="button"
                                   disabled={busy}

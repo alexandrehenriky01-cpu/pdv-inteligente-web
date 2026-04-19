@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useOutletContext } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { Loader2, Plus, ShoppingBag } from 'lucide-react';
@@ -38,10 +38,18 @@ export function DeliveryMenuPage() {
   const [produtoModal, setProdutoModal] = useState<TotemMockProduto | null>(null);
   const [modalAberto, setModalAberto] = useState(false);
 
-  const produtosFiltrados = useMemo(
-    () => produtos.filter((p) => p.categoriaId === categoriaAtiva),
-    [produtos, categoriaAtiva]
-  );
+const produtosFiltrados = categoriaAtiva
+    ? produtos.filter((p) => p.categoriaId === categoriaAtiva)
+    : produtos;
+
+  const abrirProduto = (p: TotemMockProduto) => {
+    if (loja && !loja.aberto) {
+      toast.info('Estamos fechados no momento. Volte mais tarde!');
+      return;
+    }
+    setProdutoModal(p);
+    setModalAberto(true);
+  };
 
   useEffect(() => {
     if (!lojaPublicKey || erroLoja) {
@@ -54,10 +62,8 @@ export function DeliveryMenuPage() {
       try {
         setCarregando(true);
         const { itens: raw } = await getCardapioTotemPublic(lojaPublicKey);
-        console.log('CARDÁPIO RAW:', JSON.stringify(raw.slice(0, 2), null, 2));
         if (!ativo) return;
         const mapped = raw.map(mapCardapioItemToTotemProduto);
-        console.log('CARDÁPIO MAPPED:', JSON.stringify(mapped.slice(0, 2), null, 2));
         setProdutos(mapped);
         const cats = buildTotemCategoriasFromCardapio(raw);
         setCategorias(cats);
@@ -74,15 +80,6 @@ export function DeliveryMenuPage() {
       ativo = false;
     };
   }, [lojaPublicKey, erroLoja]);
-
-  const abrirProduto = (p: TotemMockProduto) => {
-    if (loja && !loja.aberto) {
-      toast.info('Estamos fechados no momento. Volte mais tarde!');
-      return;
-    }
-    setProdutoModal(p);
-    setModalAberto(true);
-  };
 
   if (carregandoLoja || carregando) {
     return (
@@ -128,7 +125,9 @@ export function DeliveryMenuPage() {
 
         <div className="space-y-8 px-3 py-4">
           {categorias.map((cat) => {
-            const produtosDaCategoria = produtosFiltrados.filter((p) => p.categoriaId === cat.id);
+            const produtosDaCategoria = categoriaAtiva
+              ? produtosFiltrados.filter((p) => p.categoriaId === cat.id)
+              : produtos.filter((p) => p.categoriaId === cat.id);
             if (produtosDaCategoria.length === 0) return null;
             return (
               <section key={cat.id} id={`cat-${cat.id}`}>
@@ -181,7 +180,7 @@ export function DeliveryMenuPage() {
           })}
         </div>
 
-        {produtosFiltrados.length === 0 && (
+        {produtos.length === 0 && (
           <p className="py-16 text-center text-white/45">Nenhum item nesta categoria.</p>
         )}
       </div>

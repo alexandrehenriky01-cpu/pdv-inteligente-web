@@ -423,16 +423,27 @@ export function Layout({ children }: LayoutProps) {
                   </RenderIfModule>
                   <RenderIfModule module="FOOD_SERVICE.DELIVERY">
                     <MenuItem
-                      to="/gestao-food"
+                      to="/vendas/gestao-delivery"
                       icon={Truck}
                       label="Gestão Delivery / Pedidos"
-                      isActive={location.pathname.includes('/gestao-food')}
+                      isActive={location.pathname.includes('/vendas/gestao-delivery')}
                       collapsed={sidebarCollapsed}
                       mode={mode}
                       theme={theme}
                     />
                   </RenderIfModule>
-                  <MenuItem to="/gestao-food" icon={PackageSearch} label="Gestão Food / Expedição" isActive={location.pathname.includes('/gestao-food')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
+                  <MenuItem to="/gestao-food" icon={PackageSearch} label="Gestão Food / Expedição" isActive={location.pathname.includes('/gestao-food') && !location.pathname.includes('/vendas/gestao-delivery')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
+                  <RenderIfModule module="FOOD_SERVICE.DELIVERY">
+                    <MenuItem
+                      to="/entregas/mobile"
+                      icon={Smartphone}
+                      label="Entregas Mobile"
+                      isActive={location.pathname.includes('/entregas/mobile')}
+                      collapsed={sidebarCollapsed}
+                      mode={mode}
+                      theme={theme}
+                    />
+                  </RenderIfModule>
                   <MenuItem to="/comanda-mobile" icon={Smartphone} label="Comanda Mobile" isActive={location.pathname.includes('/comanda-mobile')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
                   <MenuItem to="/garcom/mesas" icon={UtensilsCrossed} label="Garçom (mesas)" isActive={location.pathname.includes('/garcom')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />
                   <MenuItem to="/vendas/campanhas-promocionais" icon={Sparkles} label="Campanhas e promoções" isActive={location.pathname.includes('/vendas/campanhas-promocionais')} collapsed={sidebarCollapsed} mode={mode} theme={theme} />

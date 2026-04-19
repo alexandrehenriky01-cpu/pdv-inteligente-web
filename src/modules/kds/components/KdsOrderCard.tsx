@@ -1,4 +1,4 @@
-import { ChefHat, ChevronRight, Package, Truck, UtensilsCrossed } from 'lucide-react';
+import { ChefHat, ChevronRight, Clock, Package, Truck, UtensilsCrossed } from 'lucide-react';
 import type { ColunaKds, KdsPedido, OrigemVendaKds } from '../types';
 
 function estiloOrigem(origem: OrigemVendaKds): { label: string; className: string; Icon: typeof Package } {
@@ -36,9 +36,10 @@ interface KdsOrderCardProps {
   onAvancar: (id: string) => void;
   onConcluir: (id: string) => void;
   salvando?: boolean;
+  urgente?: boolean;
 }
 
-export function KdsOrderCard({ pedido, onAvancar, onConcluir, salvando }: KdsOrderCardProps) {
+export function KdsOrderCard({ pedido, onAvancar, onConcluir, salvando, urgente }: KdsOrderCardProps) {
   const { label, className, Icon } = estiloOrigem(pedido.origem);
   const coluna = pedido.coluna;
 
@@ -46,11 +47,25 @@ export function KdsOrderCard({ pedido, onAvancar, onConcluir, salvando }: KdsOrd
     coluna === 'TODO' ? 'Iniciar preparo' : coluna === 'PREPARANDO' ? 'Marcar pronto' : null;
 
   return (
-    <article className="flex flex-col rounded-2xl border border-white/10 bg-white/[0.06] shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur-md">
+    <article
+      className={`flex flex-col rounded-2xl border bg-white/[0.06] shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur-md transition-all ${
+        urgente
+          ? 'border-2 border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.5)] animate-pulse'
+          : 'border-white/10'
+      }`}
+    >
       <header className="flex items-start justify-between gap-2 border-b border-white/10 px-4 py-3">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/40">Senha</p>
-          <p className="text-3xl font-bold tabular-nums leading-none text-white">{pedido.senha}</p>
+        <div className="flex items-center gap-2">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/40">Senha</p>
+            <p className="text-3xl font-bold tabular-nums leading-none text-white">{pedido.senha}</p>
+          </div>
+          {urgente && (
+            <div className="flex items-center gap-1 rounded-lg border border-amber-500/40 bg-amber-500/20 px-2 py-1">
+              <Clock className="h-4 w-4 text-amber-400" />
+              <span className="text-xs font-bold text-amber-300">ATRASADO</span>
+            </div>
+          )}
         </div>
         <span
           className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold ${className}`}
@@ -97,7 +112,11 @@ export function KdsOrderCard({ pedido, onAvancar, onConcluir, salvando }: KdsOrd
             type="button"
             disabled={salvando}
             onClick={() => onAvancar(pedido.id)}
-            className="flex min-h-[2.75rem] w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(109,40,217,0.35)] transition enabled:active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
+            className={`flex min-h-[2.75rem] w-full items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(109,40,217,0.35)] transition enabled:active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 ${
+              urgente
+                ? 'bg-gradient-to-r from-amber-600 to-orange-600 shadow-[0_8px_24px_rgba(245,158,11,0.35)]'
+                : 'bg-gradient-to-r from-violet-600 to-indigo-600'
+            }`}
           >
             {rotuloAcao}
             <ChevronRight className="h-4 w-4" />

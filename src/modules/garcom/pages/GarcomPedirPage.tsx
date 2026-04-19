@@ -112,7 +112,7 @@ export function GarcomPedirPage() {
         };
       });
 
-      await api.post(`/api/mesas/${n}/adicionar`, { itens });
+      await api.post(`/api/pdv/mesas/${n}/adicionar`, { itens });
       toast.success('Pedido lançado na cozinha!');
       limparCarrinho();
       navigate(`/garcom/mesa/${n}`);

@@ -110,7 +110,7 @@ export function PdvFoodService() {
   const carregarMesas = useCallback(async () => {
     setRecarregandoMesas(true);
     try {
-      const response = await api.get('/api/mesas');
+      const response = await api.get('/api/pdv/mesas');
       const mesasAtivas = response.data;
 
       const gridAtualizado = Array.from({ length: 20 }, (_, i) => {
@@ -557,22 +557,26 @@ export function PdvFoodService() {
               </div>
 
               <div className="grid grid-cols-4 md:grid-cols-5 gap-4">
-                {mesas.map(mesa => (
-                  <button
-                    key={mesa.numero}
-                    onClick={() => setMesaSelecionada(mesa.numero)}
-                    className={`aspect-square rounded-2xl flex flex-col items-center justify-center gap-2 border-2 transition-all hover:scale-105 ${
-                      mesa.status === 'LIVRE' ? 'bg-[#0b1324]/70 border-white/10 text-slate-400 hover:border-violet-500/30' :
-                      mesa.status === 'OCUPADA' ? 'bg-violet-500/15 border-violet-500/40 text-white shadow-[0_0_15px_rgba(139,92,246,0.30)]' :
-                      'bg-amber-500/15 border-amber-500/40 text-amber-300'
-                    }`}
-                  >
-                    <span className="text-2xl font-black">{mesa.numero}</span>
-                    <span className="text-[10px] font-bold uppercase tracking-widest">
-                      {mesa.status === 'OCUPADA' ? `R$ ${mesa.itens.reduce((a, b) => a + b.subtotal, 0).toFixed(2)}` : 'Livre'}
-                    </span>
-                  </button>
-                ))}
+                {mesas.map(mesa => {
+                  const statusClass = {
+                    LIVRE: 'bg-emerald-500/10 border-emerald-500/30 text-slate-300 hover:border-emerald-400/60 hover:shadow-[0_0_20px_rgba(46,204,113,0.25)]',
+                    OCUPADA: 'bg-rose-500/15 border-rose-500/40 text-white shadow-[0_0_15px_rgba(231,76,60,0.25)]',
+                    FECHANDO: 'bg-amber-500/20 border-amber-500/40 text-amber-200 shadow-[0_0_15px_rgba(241,196,15,0.25)]',
+                  }[mesa.status] || 'bg-slate-700/30 border-white/10 text-slate-400';
+                  
+                  const label = mesa.status === 'LIVRE' ? 'Livre' : mesa.status === 'OCUPADA' ? `R$ ${mesa.itens.reduce((a, b) => a + b.subtotal, 0).toFixed(2)}` : 'Conta';
+                  
+                  return (
+                    <button
+                      key={mesa.numero}
+                      onClick={() => setMesaSelecionada(mesa.numero)}
+                      className={`aspect-square rounded-2xl flex flex-col items-center justify-center gap-2 border-2 transition-all hover:scale-105 active:scale-95 cursor-pointer ${statusClass}`}
+                    >
+                      <span className="text-2xl font-black">{mesa.numero}</span>
+                      <span className="text-[10px] font-bold uppercase tracking-widest">{label}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           ) : (

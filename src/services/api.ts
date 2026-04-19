@@ -30,9 +30,19 @@ function isLoginPostRequest(config: InternalAxiosRequestConfig | undefined): boo
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const token = localStorage.getItem(AUTH_TOKEN_KEY);
+    const url = config.url || '';
+
+    if (url.includes('/ia/')) {
+      console.log('[API] Enviando requisição para:', url);
+    }
 
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
+      if (url.includes('/ia/')) {
+        console.log('[API] Token anexado:', !!token, '| Header:', config.headers.Authorization?.substring(0, 20) + '...');
+      }
+    } else if (url.includes('/ia/')) {
+      console.warn('[API] ATENÇÃO: Token NÃO encontrado para rota:', url);
     }
 
     return config;
