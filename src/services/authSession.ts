@@ -53,6 +53,10 @@ export function persistSessionFromApiData(data: unknown): PersistSessionResult {
     username: u.username,
     ativo: u.ativo,
     permissoes: u.permissoes,
+    permissions: u.permissions,
+    modulosAtivos: u.modulosAtivos,
+    featuresAtivas: u.featuresAtivas,
+    statusLicenca: u.statusLicenca,
   };
 
   if (u.loja !== undefined) {
@@ -68,6 +72,9 @@ export function persistSessionFromApiData(data: unknown): PersistSessionResult {
   try {
     localStorage.setItem(AUTH_TOKEN_KEY, token);
     localStorage.setItem(AUTH_USER_KEY, JSON.stringify(usuarioArmazenado));
+
+    console.log('[AuthSession] Token salvo no localStorage:', token.substring(0, 30) + '...');
+    console.log('[AuthSession] Usuario salvo:', JSON.stringify(usuarioArmazenado).substring(0, 50) + '...');
   } catch {
     return { ok: false, reason: 'Não foi possível salvar a sessão localmente.' };
   }

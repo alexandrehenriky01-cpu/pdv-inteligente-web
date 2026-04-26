@@ -67,12 +67,25 @@ export function KdsOrderCard({ pedido, onAvancar, onConcluir, salvando, urgente 
             </div>
           )}
         </div>
-        <span
-          className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold ${className}`}
-        >
-          <Icon className="h-3.5 w-3.5 opacity-90" />
-          {label}
-        </span>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold ${className}`}
+          >
+            <Icon className="h-3.5 w-3.5 opacity-90" />
+            {label}
+          </span>
+          {pedido.origem === 'DELIVERY' && pedido.tipoPedidoMenu != null && (
+            <span
+              className={`inline-flex rounded-lg border px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${
+                pedido.tipoPedidoMenu === 'RETIRADA_BALCAO'
+                  ? 'border-violet-400/45 bg-violet-500/20 text-violet-100'
+                  : 'border-orange-400/45 bg-orange-500/20 text-orange-100'
+              }`}
+            >
+              {pedido.tipoPedidoMenu === 'RETIRADA_BALCAO' ? 'Retirada' : 'Delivery'}
+            </span>
+          )}
+        </div>
       </header>
 
       <div className="min-h-0 flex-1 space-y-3 px-4 py-3">
@@ -89,6 +102,25 @@ export function KdsOrderCard({ pedido, onAvancar, onConcluir, salvando, urgente 
                 <span className="font-bold tabular-nums">{it.quantidade}×</span>{' '}
                 <span className="font-medium">{it.nome}</span>
               </p>
+              {it.tamanho && (
+                <p className="mt-1 text-[13px] font-semibold uppercase tracking-wide text-slate-300/95">
+                  Tam: {it.tamanho}
+                </p>
+              )}
+              {it.saboresNomes && it.saboresNomes.length > 0 && (
+                <div className="mt-1.5 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-2 py-1.5">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-200/90">
+                    Sabores
+                  </p>
+                  <ul className="mt-1 space-y-0.5">
+                    {it.saboresNomes.map((sn, si) => (
+                      <li key={si} className="text-[13px] font-semibold text-emerald-100/95">
+                        {sn}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {it.adicionais.length > 0 && (
                 <ul className="mt-1.5 space-y-0.5 border-l-2 border-violet-500/35 pl-3">
                   {it.adicionais.map((a, i) => (
@@ -98,8 +130,12 @@ export function KdsOrderCard({ pedido, onAvancar, onConcluir, salvando, urgente 
                   ))}
                 </ul>
               )}
-              {it.observacoes && (
-                <p className="mt-1.5 text-[13px] italic text-amber-200/90">Obs.: {it.observacoes}</p>
+              {it.exibirSemObservacoes ? (
+                <p className="mt-1.5 text-[13px] text-white/45">(sem observações)</p>
+              ) : (
+                it.observacoes && (
+                  <p className="mt-1.5 text-[13px] italic text-amber-200/90">Obs.: {it.observacoes}</p>
+                )
               )}
             </li>
           ))}

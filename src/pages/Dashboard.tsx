@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Layout } from '../components/Layout';
 import { Link } from 'react-router-dom';
 import { api } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 import {
   TrendingUp,
   TrendingDown,
@@ -78,11 +79,27 @@ export function Dashboard() {
     lucroPresumidoMes: 0
   });
   const [loading, setLoading] = useState(true);
+  const [isAuthInitialized, setIsAuthInitialized] = useState(false);
 
-  const usuario = JSON.parse(localStorage.getItem('@PDVUsuario') || '{}') as IUsuarioStorage;
-  const iniciaisUsuario = usuario.nome ? usuario.nome.substring(0, 2).toUpperCase() : 'US';
+  const { usuario, logout } = useAuth();
+
+  const nomeUsuario = typeof usuario?.nome === 'string' ? usuario.nome : '';
+  const primeiroNomeUsuario = nomeUsuario ? nomeUsuario.split(' ')[0] : 'Usuário';
+  const iniciaisUsuario = nomeUsuario ? nomeUsuario.substring(0, 2).toUpperCase() : 'US';
 
   useEffect(() => {
+    if (!isAuthInitialized) {
+      setIsAuthInitialized(true);
+      if (!usuario) {
+        return;
+      }
+    }
+
+    if (isAuthInitialized && !usuario) {
+      logout();
+      return;
+    }
+
     const carregarDashboard = async () => {
       try {
         const response = await api.get<Partial<ResumoDashboard>>('/api/dashboard/resumo');
@@ -110,7 +127,7 @@ export function Dashboard() {
       }
     };
     carregarDashboard();
-  }, []);
+  }, [usuario, logout, isAuthInitialized]);
 
   const formatarMoeda = (valor: number) => {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor || 0);
@@ -205,7 +222,7 @@ export function Dashboard() {
 
               <div>
                 <h1 className="flex flex-wrap items-center gap-3 text-3xl font-black tracking-tight text-white md:text-4xl">
-                  Olá, {usuario.nome?.split(' ')[0]}!
+                  Olá, {primeiroNomeUsuario}!
                   <span className="origin-bottom text-violet-300 animate-bounce">👋</span>
                 </h1>
                 <p className="mt-1 text-sm font-medium text-slate-400 md:text-base">

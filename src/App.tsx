@@ -87,6 +87,7 @@ import { DashboardGlobal } from './modules/contabil/pages/DashboardGlobal';
 // IA e Admin
 import { ConsultorIA } from './pages/ConsultorIA';
 import { AdminClientesPage } from './pages/admin/AdminClientesPage';
+import { AdminEmpresaFeaturesPage } from './pages/admin/AdminEmpresaFeaturesPage';
 
 // Gestão de Usuários, Equipe e Configurações
 import { GestaoUsuariosPage } from './modules/configuracoes/pages/GestaoUsuariosPage';
@@ -139,6 +140,7 @@ function App() {
         {/* 👑 ROTAS SAAS (ACESSO RESTRITO AO SUPER_ADMIN) */}
         <Route element={<PrivateRoute rolesPermitidas={['SUPER_ADMIN', 'SUPORTE_MASTER']} />}>
           <Route path="/admin/clientes" element={<AdminClientesPage />} />
+          <Route path="/admin/empresas/:empresaId/features" element={<AdminEmpresaFeaturesPage />} />
         </Route>
 
         {/* 🔒 ROTAS PRIVADAS PADRÃO (Acesso para usuários logados) */}

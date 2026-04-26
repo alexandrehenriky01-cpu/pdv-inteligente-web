@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Link, useOutletContext } from 'react-router-dom';
+import { useOutletContext } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { Loader2, Plus, ShoppingBag } from 'lucide-react';
+import { Loader2, Plus } from 'lucide-react';
 import { ProductModal } from '../totem/components/ProductModal';
-import type { TotemMockCategoria, TotemMockProduto } from '../totem/types';
+import type { CartItem, TotemMockCategoria, TotemMockProduto } from '../totem/types';
 import {
   buildTotemCategoriasFromCardapio,
   getCardapioTotemPublic,
@@ -13,8 +13,31 @@ import { mensagemErroTotemApi } from '../../services/api/totemApi';
 import {
   useDeliveryCartStore,
   selectTotalItensDelivery,
+  calcularSubtotalLinhaDelivery,
 } from './store/deliveryCartStore';
 import type { DeliveryOutletContext } from './deliveryOutletContext';
+import { DeliveryCartPanel } from './components/DeliveryCartPanel';
+
+interface PizzaComposicaoTemporaria {
+  produtoBase: TotemMockProduto;
+  quantidade: number;
+  adicionais: Record<string, number>;
+  observacao: string;
+  itemCardapioTamanhoId?: string | null;
+  saboresItemCardapioIds: string[];
+  maxSabores: number;
+}
+
+function resolverSaborIdParaPizza(produto: TotemMockProduto): string {
+  const opcoes = produto.saboresOpcoes ?? [];
+  const idDireto = produto.id.trim();
+  if (opcoes.some((s) => s.id === idDireto)) return idDireto;
+  const idCardapio = (produto.itemCardapioId ?? '').trim();
+  if (idCardapio && opcoes.some((s) => s.id === idCardapio)) return idCardapio;
+  const byNome = opcoes.find((s) => s.nome.trim().toLowerCase() === produto.nome.trim().toLowerCase())?.id;
+  if (byNome) return byNome;
+  return idDireto || idCardapio;
+}
 
 function formatBrl(n: number): string {
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -26,10 +49,46 @@ function isRealImage(url: string): boolean {
   return Boolean(url && !url.startsWith('data:') && !url.includes('placeholder') && !url.includes('fallback'));
 }
 
+function resolveItemImage(item: TotemMockProduto): string {
+  const fromProduto = item as TotemMockProduto & {
+    imageUrl?: string | null;
+    fotoUrl?: string | null;
+    imageBase64?: string | null;
+    produto?: {
+      imagemUrl?: string | null;
+      imageUrl?: string | null;
+      fotoUrl?: string | null;
+    } | null;
+  };
+
+  const candidates = [
+    item.imagemUrl,
+    fromProduto.imageUrl,
+    fromProduto.fotoUrl,
+    fromProduto.produto?.imagemUrl,
+    fromProduto.produto?.imageUrl,
+    fromProduto.produto?.fotoUrl,
+  ];
+
+  for (const c of candidates) {
+    const value = c?.trim();
+    if (value) return value;
+  }
+
+  const base64 = fromProduto.imageBase64?.trim();
+  if (base64) {
+    return base64.startsWith('data:') ? base64 : `data:image/png;base64,${base64}`;
+  }
+
+  return PLACEHOLDER_FALLBACK;
+}
+
 export function DeliveryMenuPage() {
   const { lojaPublicKey, loja, carregandoLoja, erroLoja } = useOutletContext<DeliveryOutletContext>();
   const adicionarAoCarrinho = useDeliveryCartStore((s) => s.adicionarAoCarrinho);
+  const substituirLinhaCarrinho = useDeliveryCartStore((s) => s.substituirLinhaCarrinho);
   const totalItens = useDeliveryCartStore(selectTotalItensDelivery);
+  const carrinho = useDeliveryCartStore((s) => s.carrinho);
 
   const [carregando, setCarregando] = useState(true);
   const [categorias, setCategorias] = useState<TotemMockCategoria[]>([]);
@@ -37,17 +96,83 @@ export function DeliveryMenuPage() {
   const [categoriaAtiva, setCategoriaAtiva] = useState('');
   const [produtoModal, setProdutoModal] = useState<TotemMockProduto | null>(null);
   const [modalAberto, setModalAberto] = useState(false);
+  const [linhaEdicao, setLinhaEdicao] = useState<CartItem | null>(null);
+  const [pizzaEmComposicao, setPizzaEmComposicao] = useState<PizzaComposicaoTemporaria | null>(null);
 
 const produtosFiltrados = categoriaAtiva
     ? produtos.filter((p) => p.categoriaId === categoriaAtiva)
     : produtos;
+
+  const finalizarPizzaEmComposicao = (ctx: PizzaComposicaoTemporaria) => {
+    const sub = calcularSubtotalLinhaDelivery(
+      ctx.produtoBase,
+      ctx.adicionais,
+      ctx.quantidade,
+      ctx.itemCardapioTamanhoId,
+      ctx.saboresItemCardapioIds
+    );
+    adicionarAoCarrinho({
+      produto: ctx.produtoBase,
+      quantidade: ctx.quantidade,
+      adicionais: ctx.adicionais,
+      observacao: ctx.observacao,
+      itemCardapioTamanhoId: ctx.itemCardapioTamanhoId,
+      saboresItemCardapioIds: [...ctx.saboresItemCardapioIds],
+      subtotal: sub,
+    });
+    setPizzaEmComposicao(null);
+    toast.success(`${ctx.quantidade}× ${ctx.produtoBase.nome} adicionado`, {
+      toastId: `add-split-${ctx.produtoBase.id}-${ctx.saboresItemCardapioIds.join('-')}`,
+    });
+  };
 
   const abrirProduto = (p: TotemMockProduto) => {
     if (loja && !loja.aberto) {
       toast.info('Estamos fechados no momento. Volte mais tarde!');
       return;
     }
+    if (pizzaEmComposicao) {
+      const saborId = resolverSaborIdParaPizza(p);
+      const idsAtuais = pizzaEmComposicao.saboresItemCardapioIds;
+      if (!saborId) {
+        toast.error('Sabor inválido.');
+        return;
+      }
+      if (idsAtuais.includes(saborId)) {
+        toast.info('Este sabor já foi adicionado nesta pizza.');
+        return;
+      }
+      const permitidos = (pizzaEmComposicao.produtoBase.saboresOpcoes ?? []).map((s) => s.id);
+      if (permitidos.length > 0 && !permitidos.includes(saborId)) {
+        toast.error('Este sabor não é permitido para a pizza em montagem.');
+        return;
+      }
+      if (idsAtuais.length >= pizzaEmComposicao.maxSabores) {
+        toast.info(`Limite de ${pizzaEmComposicao.maxSabores} sabores atingido.`);
+        return;
+      }
+      const nextCtx: PizzaComposicaoTemporaria = {
+        ...pizzaEmComposicao,
+        saboresItemCardapioIds: [...idsAtuais, saborId],
+      };
+      setPizzaEmComposicao(nextCtx);
+      if (nextCtx.saboresItemCardapioIds.length >= nextCtx.maxSabores) {
+        finalizarPizzaEmComposicao(nextCtx);
+        return;
+      }
+      toast.info(
+        `Sabor adicionado (${nextCtx.saboresItemCardapioIds.length}/${nextCtx.maxSabores}). Escolha outro sabor ou finalize.`
+      );
+      return;
+    }
+    setLinhaEdicao(null);
     setProdutoModal(p);
+    setModalAberto(true);
+  };
+
+  const abrirEdicaoItem = (item: CartItem) => {
+    setLinhaEdicao(item);
+    setProdutoModal(item.produto);
     setModalAberto(true);
   };
 
@@ -100,7 +225,7 @@ const produtosFiltrados = categoriaAtiva
 
   return (
     <>
-      <div className="flex min-h-0 flex-col pb-24">
+      <div className={`flex min-h-0 flex-col ${carrinho.length > 0 ? 'pb-44 sm:pb-48' : 'pb-24'}`}>
         <div className="sticky top-0 z-20 border-b border-white/10 bg-[#060816]/90 backdrop-blur-md">
           <div className="flex gap-2 overflow-x-auto px-3 py-2 scrollbar-none">
             {categorias.map((c) => (
@@ -121,6 +246,30 @@ const produtosFiltrados = categoriaAtiva
               </button>
             ))}
           </div>
+          {pizzaEmComposicao ? (
+            <div className="border-t border-violet-400/20 bg-violet-500/10 px-3 py-2">
+              <p className="text-xs font-semibold text-violet-100">
+                Escolha o próximo sabor da pizza ({pizzaEmComposicao.saboresItemCardapioIds.length}/
+                {pizzaEmComposicao.maxSabores})
+              </p>
+              <div className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPizzaEmComposicao(null)}
+                  className="rounded-lg border border-white/15 bg-white/[0.08] px-3 py-1.5 text-xs font-semibold text-white/80"
+                >
+                  Cancelar divisão
+                </button>
+                <button
+                  type="button"
+                  onClick={() => finalizarPizzaEmComposicao(pizzaEmComposicao)}
+                  className="rounded-lg border border-violet-400/40 bg-violet-500/30 px-3 py-1.5 text-xs font-semibold text-violet-100"
+                >
+                  Finalizar pizza
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div className="space-y-8 px-3 py-4">
@@ -136,7 +285,8 @@ const produtosFiltrados = categoriaAtiva
                 </h2>
                 <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {produtosDaCategoria.map((p) => {
-                    const temImagem = isRealImage(p.imagemUrl);
+                    const imageSrc = resolveItemImage(p);
+                    const temImagem = isRealImage(imageSrc);
                     return (
                       <li key={p.id}>
                         <button
@@ -147,7 +297,7 @@ const produtosFiltrados = categoriaAtiva
                           <div className="relative h-44 w-full overflow-hidden">
                             {temImagem ? (
                               <img
-                                src={p.imagemUrl}
+                                src={imageSrc}
                                 alt=""
                                 className="h-full w-full object-cover rounded-t-[20px] transition-all duration-500 hover:scale-105"
                               />
@@ -186,36 +336,78 @@ const produtosFiltrados = categoriaAtiva
       </div>
 
       {totalItens > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 z-40 flex justify-center pb-[max(0.75rem,env(safe-area-inset-bottom))] pointer-events-none">
-          <div className="pointer-events-auto w-full max-w-md px-3">
-            <Link
-              to="checkout"
-              className="flex min-h-[3.25rem] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 text-base font-semibold text-white shadow-[0_12px_40px_rgba(109,40,217,0.45)] transition active:scale-[0.99]"
-            >
-              <ShoppingBag className="h-5 w-5" />
-              Ver sacola ({totalItens})
-            </Link>
-          </div>
-        </div>
+        <DeliveryCartPanel lojaSlug={lojaPublicKey} onEditarItem={(item) => abrirEdicaoItem(item)} />
       )}
 
       <ProductModal
         produto={produtoModal}
         aberto={modalAberto}
         presentation="sheet"
+        linhaCarrinhoParaEdicao={linhaEdicao}
+        modoPizzaSequencial
         onFechar={() => {
           setModalAberto(false);
           setProdutoModal(null);
+          setLinhaEdicao(null);
         }}
-        onAdicionarAoPedido={({ produto, quantidade, adicionais, observacao, total }) => {
-          adicionarAoCarrinho({
+        onAdicionarAoPedido={({
+          produto,
+          quantidade,
+          adicionais,
+          observacao,
+          itemCardapioTamanhoId,
+          partidoAoMeio,
+          saboresItemCardapioIds,
+          substituirLinhaId,
+          iniciarDivisaoSabores,
+        }) => {
+          const saborBaseId = resolverSaborIdParaPizza(produto);
+          const saboresNormalizados =
+            saboresItemCardapioIds && saboresItemCardapioIds.length > 0
+              ? [...saboresItemCardapioIds]
+              : produto.tipoItem === 'PIZZA' && produto.permiteMultiplosSabores
+                ? [saborBaseId]
+                : [];
+          if (iniciarDivisaoSabores && produto.tipoItem === 'PIZZA' && produto.permiteMultiplosSabores) {
+            const maxSabores = Math.min(20, Math.max(1, produto.maxSabores ?? 1));
+            setPizzaEmComposicao({
+              produtoBase: produto,
+              quantidade,
+              adicionais,
+              observacao,
+              itemCardapioTamanhoId,
+              saboresItemCardapioIds: saboresNormalizados.length > 0 ? saboresNormalizados : [saborBaseId],
+              maxSabores,
+            });
+            toast.info('Escolha o próximo sabor da pizza.');
+            return;
+          }
+          const sub = calcularSubtotalLinhaDelivery(
+            produto,
+            adicionais,
+            quantidade,
+            itemCardapioTamanhoId,
+            saboresNormalizados.length > 0 ? saboresNormalizados : undefined
+          );
+          const payload = {
             produto,
             quantidade,
             adicionais,
             observacao,
-            subtotal: total,
-          });
-          toast.success(`${quantidade}× ${produto.nome} adicionado`, { toastId: `add-${produto.id}` });
+            itemCardapioTamanhoId,
+            partidoAoMeio,
+            ...(saboresNormalizados.length > 0
+              ? { saboresItemCardapioIds: [...saboresNormalizados] }
+              : {}),
+            subtotal: sub,
+          };
+          if (substituirLinhaId) {
+            substituirLinhaCarrinho(substituirLinhaId, payload);
+            toast.success('Item atualizado na sacola.', { toastId: `upd-${substituirLinhaId}` });
+          } else {
+            adicionarAoCarrinho(payload);
+            toast.success(`${quantidade}× ${produto.nome} adicionado`, { toastId: `add-${produto.id}` });
+          }
         }}
       />
     </>

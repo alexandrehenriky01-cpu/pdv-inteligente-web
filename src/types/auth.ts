@@ -9,8 +9,10 @@ export interface IUsuario {
   ativo?: boolean;
   role?: 'SUPER_ADMIN' | 'SUPORTE_MASTER' | 'DIRETOR' | 'GERENTE' | 'VENDEDOR' | 'CAIXA' | string;
   permissoes?: string[];
+  featuresAtivas?: string[];
   loja?: {
     modulosAtivos?: string[];
+    featuresAtivas?: string[];
     nome?: string;
   };
   lojaId: string;

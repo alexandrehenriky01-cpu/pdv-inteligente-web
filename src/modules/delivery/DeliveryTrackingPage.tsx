@@ -3,7 +3,12 @@ import { Link, useOutletContext, useParams } from 'react-router-dom';
 import { io, type Socket } from 'socket.io-client';
 import { Check, Loader2, MapPin, Package, Radio, Store } from 'lucide-react';
 import { resolveApiBaseUrl } from '../../services/api';
-import { getDeliveryPedidoTracking, type DeliveryPedidoTrackingDTO } from '../../services/api/deliveryTrackingApi';
+import {
+  getDeliveryPedidoTracking,
+  type DeliveryPedidoTrackingDTO,
+  type TipoPedidoTracking,
+  type TrackingStatusCliente,
+} from '../../services/api/deliveryTrackingApi';
 import { buildDeliveryTrackingSocketAuth } from '../../services/socket/deliveryTrackingSocketAuth';
 import type { DeliveryOutletContext } from './deliveryOutletContext';
 
@@ -21,19 +26,72 @@ function formatSenha(np: number | null | undefined, nv?: number): string {
   return String((nv ?? 0) % 1000).padStart(3, '0');
 }
 
-function stepIndexFromStatus(status: string | null | undefined): number {
-  const u = String(status ?? 'NENHUM').toUpperCase();
-  if (u === 'ENTREGUE') return 3;
-  if (u === 'PRONTO') return 2;
-  if (u === 'PREPARANDO') return 1;
+function ehRetiradaPedido(tipo: TipoPedidoTracking | string | null | undefined): boolean {
+  return String(tipo ?? 'DELIVERY').toUpperCase() === 'RETIRADA_BALCAO';
+}
+
+function getCustomerTrackingStatus(
+  statusEntrega: string | null | undefined,
+  statusPreparo: string | null | undefined,
+  explicitTrackingStatus: string | null | undefined,
+  tipoPedido: TipoPedidoTracking | string | null | undefined
+): TrackingStatusCliente {
+  const explicit = String(explicitTrackingStatus ?? '').toUpperCase().trim();
+  const validExplicit = new Set([
+    'RECEBIDO',
+    'NA_COZINHA',
+    'SAIU_PARA_ENTREGA',
+    'ENTREGUE',
+    'PRONTO_PARA_RETIRADA',
+    'RETIRADO',
+  ]);
+  if (validExplicit.has(explicit)) {
+    return explicit as TrackingStatusCliente;
+  }
+
+  const entrega = String(statusEntrega ?? '').toUpperCase().trim();
+  const preparo = String(statusPreparo ?? '').toUpperCase().trim();
+
+  if (ehRetiradaPedido(tipoPedido)) {
+    if (entrega === 'ENTREGUE' || preparo === 'ENTREGUE') return 'RETIRADO';
+    if (preparo === 'PRONTO') return 'PRONTO_PARA_RETIRADA';
+    if (preparo === 'PREPARANDO') return 'NA_COZINHA';
+    return 'RECEBIDO';
+  }
+
+  if (entrega === 'ENTREGUE') return 'ENTREGUE';
+  if (entrega === 'EM_ROTA' || entrega === 'SAIU_PARA_ENTREGA' || entrega === 'SAIU_ENTREGA') {
+    return 'SAIU_PARA_ENTREGA';
+  }
+  if (preparo === 'PREPARANDO' || preparo === 'PRONTO') return 'NA_COZINHA';
+  return 'RECEBIDO';
+}
+
+function stepIndexFromTrackingStatus(status: TrackingStatusCliente, retirada: boolean): number {
+  if (retirada) {
+    if (status === 'RETIRADO') return 3;
+    if (status === 'PRONTO_PARA_RETIRADA') return 2;
+    if (status === 'NA_COZINHA') return 1;
+    return 0;
+  }
+  if (status === 'ENTREGUE') return 3;
+  if (status === 'SAIU_PARA_ENTREGA') return 2;
+  if (status === 'NA_COZINHA') return 1;
   return 0;
 }
 
-const STEPS = [
+const STEPS_DELIVERY = [
+  { id: 'recebido', titulo: 'Recebido', subtitulo: 'Pendente' },
+  { id: 'cozinha', titulo: 'Na cozinha', subtitulo: 'Preparando / aguardando entrega' },
+  { id: 'rota', titulo: 'Saiu para entrega', subtitulo: 'Em rota' },
+  { id: 'entregue', titulo: 'Entregue', subtitulo: 'Concluído' },
+] as const;
+
+const STEPS_RETIRADA = [
   { id: 'recebido', titulo: 'Recebido', subtitulo: 'Pendente' },
   { id: 'cozinha', titulo: 'Na cozinha', subtitulo: 'Preparando' },
-  { id: 'rota', titulo: 'Saiu para entrega', subtitulo: 'Pronto' },
-  { id: 'entregue', titulo: 'Entregue', subtitulo: 'Concluído' },
+  { id: 'pronto', titulo: 'Pronto para retirada', subtitulo: 'Compare ao balcão' },
+  { id: 'retirado', titulo: 'Retirado', subtitulo: 'Concluído' },
 ] as const;
 
 type SocketStatus = 'idle' | 'connecting' | 'connected' | 'error';
@@ -64,8 +122,16 @@ export function DeliveryTrackingPage() {
         if (!prev) return prev;
         return {
           ...prev,
+          statusEntrega: p.statusEntrega != null ? String(p.statusEntrega) : prev.statusEntrega,
           statusPreparo: st != null ? String(st) : prev.statusPreparo,
+          trackingStatus:
+            p.trackingStatus != null
+              ? (String(p.trackingStatus) as DeliveryPedidoTrackingDTO['trackingStatus'])
+              : undefined,
           ...(typeof p.numeroPedido === 'number' ? { numeroPedido: p.numeroPedido } : {}),
+          ...(p.tipoPedido != null && String(p.tipoPedido).trim() !== ''
+            ? { tipoPedido: String(p.tipoPedido) as TipoPedidoTracking }
+            : {}),
         };
       });
     },
@@ -85,7 +151,6 @@ export function DeliveryTrackingPage() {
       setErro(null);
       try {
         const data = await getDeliveryPedidoTracking(pedidoId);
-        console.log('DEBUG ITENS:', JSON.stringify(data.itens, null, 2));
         if (!ativo) return;
         if (idLojaParaChecagem && data.lojaId !== idLojaParaChecagem) {
           setErro('Este pedido não pertence a este link de loja.');
@@ -138,10 +203,25 @@ export function DeliveryTrackingPage() {
     };
   }, [pedidoId, idLojaParaChecagem, pedido, erro, aplicarPayloadStatus]);
 
-  const stepAtivo = useMemo(
-    () => stepIndexFromStatus(pedido?.statusPreparo ?? null),
-    [pedido?.statusPreparo]
+  const ehRetirada = useMemo(() => ehRetiradaPedido(pedido?.tipoPedido), [pedido?.tipoPedido]);
+
+  const trackingStatus = useMemo(
+    () =>
+      getCustomerTrackingStatus(
+        pedido?.statusEntrega ?? null,
+        pedido?.statusPreparo ?? null,
+        pedido?.trackingStatus ?? null,
+        pedido?.tipoPedido ?? 'DELIVERY'
+      ),
+    [pedido?.statusEntrega, pedido?.statusPreparo, pedido?.trackingStatus, pedido?.tipoPedido]
   );
+
+  const stepAtivo = useMemo(
+    () => stepIndexFromTrackingStatus(trackingStatus, ehRetirada),
+    [trackingStatus, ehRetirada]
+  );
+
+  const steps = ehRetirada ? STEPS_RETIRADA : STEPS_DELIVERY;
 
   if (carregando) {
     return (
@@ -229,7 +309,7 @@ export function DeliveryTrackingPage() {
           aria-hidden
         />
         <ol className="relative space-y-6">
-          {STEPS.map((step, index) => {
+          {steps.map((step, index) => {
             const concluido = index < stepAtivo;
             const atual = index === stepAtivo;
             const futuro = index > stepAtivo;
@@ -303,7 +383,16 @@ export function DeliveryTrackingPage() {
         </ul>
       </section>
 
-      {pedido.enderecoEntrega && (
+      {ehRetiradaPedido(pedido.tipoPedido) && (
+        <section className="mt-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+          <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-white/80">
+            <MapPin className="h-4 w-4 text-violet-300" />
+            Retirada
+          </h3>
+          <p className="text-sm leading-relaxed text-white/70">Retirada no balcão — endereço não se aplica.</p>
+        </section>
+      )}
+      {!ehRetiradaPedido(pedido.tipoPedido) && pedido.enderecoEntrega && (
         <section className="mt-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
           <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-white/80">
             <MapPin className="h-4 w-4 text-emerald-300" />

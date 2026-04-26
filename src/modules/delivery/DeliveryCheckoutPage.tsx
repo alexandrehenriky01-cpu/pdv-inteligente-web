@@ -7,14 +7,18 @@ import {
   mensagemErroDeliveryApi,
   montarPayloadVendaDelivery,
   type FormaPagamentoDelivery,
+  type TipoPedidoDelivery,
 } from '../../services/api/deliveryApi';
 import { extrairSenhaPedidoTotem } from '../../services/api/totemApi';
 import {
   useDeliveryCartStore,
   selectValorSubtotalCarrinhoDelivery,
+  validarLinhasCarrinhoDelivery,
 } from './store/deliveryCartStore';
+import type { CartItem } from '../totem/types';
 import { useCep } from '../../hooks/useCep';
 import type { DeliveryOutletContext } from './deliveryOutletContext';
+import { rotuloLinhaCarrinho } from './cartItemDisplay';
 
 function formatBrl(n: number): string {
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -60,6 +64,7 @@ export function DeliveryCheckoutPage() {
   const [cidade, setCidade] = useState('');
   const [complemento, setComplemento] = useState('');
   const [observacaoPedido, setObservacaoPedido] = useState('');
+  const [tipoPedido, setTipoPedido] = useState<TipoPedidoDelivery>('DELIVERY');
   const [formaPagamento, setFormaPagamento] = useState<FormaPagamentoDelivery>('NA_ENTREGA');
   const [enviando, setEnviando] = useState(false);
   const [copiaColaCopiado, setCopiaColaCopiado] = useState(false);
@@ -86,7 +91,7 @@ export function DeliveryCheckoutPage() {
     }
   };
 
-  const taxaEntrega = loja?.taxaEntregaPadrao ?? 0;
+  const taxaEntrega = tipoPedido === 'RETIRADA_BALCAO' ? 0 : (loja?.taxaEntregaPadrao ?? 0);
 
   const totalPedido = useMemo(
     () => Math.round((subtotalItens + taxaEntrega) * 100) / 100,
@@ -192,9 +197,11 @@ export function DeliveryCheckoutPage() {
       toast.error('Informe seu WhatsApp.');
       return false;
     }
-    if (!cep.trim() || !rua.trim() || !numero.trim() || !bairro.trim() || !cidade.trim()) {
-      toast.error('Preencha CEP, rua, número, bairro e cidade.');
-      return false;
+    if (tipoPedido === 'DELIVERY') {
+      if (!cep.trim() || !rua.trim() || !numero.trim() || !bairro.trim() || !cidade.trim()) {
+        toast.error('Preencha CEP, rua, número, bairro e cidade.');
+        return false;
+      }
     }
     if (loja && !loja.aberto) {
       toast.error('A loja está fechada no momento.');
@@ -208,9 +215,17 @@ export function DeliveryCheckoutPage() {
       toast.error('Sua sacola está vazia.');
       return;
     }
+    const errSacola = validarLinhasCarrinhoDelivery(carrinho);
+    if (errSacola) {
+      toast.error(errSacola);
+      return;
+    }
     if (!validar()) return;
 
-    const enderecoEntrega = montarEnderecoEntrega({ cep, rua, numero, bairro, cidade, complemento });
+    const enderecoEntrega =
+      tipoPedido === 'DELIVERY'
+        ? montarEnderecoEntrega({ cep, rua, numero, bairro, cidade, complemento })
+        : '';
     const observacoesVenda = montarObservacoesVenda({
       nome,
       whatsapp,
@@ -224,9 +239,10 @@ export function DeliveryCheckoutPage() {
         estacaoTrabalhoId: estacaoId,
         carrinho,
         subtotalItens,
-        taxaEntrega,
-        cidade: cidade.trim(),
-        enderecoEntrega,
+        taxaEntrega: loja?.taxaEntregaPadrao ?? 0,
+        tipoPedido,
+        cidade: tipoPedido === 'DELIVERY' ? cidade.trim() : undefined,
+        enderecoEntrega: tipoPedido === 'DELIVERY' ? enderecoEntrega : undefined,
         observacoesVenda,
         nomeCliente: nome.trim(),
         formaPagamento,
@@ -298,9 +314,37 @@ export function DeliveryCheckoutPage() {
       </div>
 
       <section className="mb-6 space-y-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-white/45">Tipo do pedido</h3>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => setTipoPedido('DELIVERY')}
+            className={`rounded-xl border px-3 py-3 text-sm font-semibold transition ${
+              tipoPedido === 'DELIVERY'
+                ? 'border-violet-500/60 bg-violet-500/20 text-violet-100'
+                : 'border-white/10 bg-white/[0.04] text-white/60 hover:border-white/20'
+            }`}
+          >
+            Entrega
+          </button>
+          <button
+            type="button"
+            onClick={() => setTipoPedido('RETIRADA_BALCAO')}
+            className={`rounded-xl border px-3 py-3 text-sm font-semibold transition ${
+              tipoPedido === 'RETIRADA_BALCAO'
+                ? 'border-violet-500/60 bg-violet-500/20 text-violet-100'
+                : 'border-white/10 bg-white/[0.04] text-white/60 hover:border-white/20'
+            }`}
+          >
+            Retirar no balcão
+          </button>
+        </div>
+      </section>
+
+      <section className="mb-6 space-y-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
         <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-white/45">
           <MapPin className="h-4 w-4" />
-          Entrega
+          {tipoPedido === 'DELIVERY' ? 'Entrega' : 'Seus dados'}
         </h3>
         <div>
           <label className="mb-1 block text-xs text-white/45">Nome completo</label>
@@ -323,6 +367,8 @@ export function DeliveryCheckoutPage() {
             autoComplete="tel"
           />
         </div>
+        {tipoPedido === 'DELIVERY' && (
+          <>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="mb-1 block text-xs text-white/45">CEP</label>
@@ -396,6 +442,8 @@ export function DeliveryCheckoutPage() {
             placeholder="Apto, bloco, referência…"
           />
         </div>
+          </>
+        )}
         <div>
           <label className="mb-1 block text-xs text-white/45">Observações do pedido (opcional)</label>
           <textarea
@@ -494,14 +542,35 @@ export function DeliveryCheckoutPage() {
       </section>
 
       <section className="mb-6 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+        <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/45">Sacola</h3>
+        <ul className="mb-4 space-y-2 border-b border-white/10 pb-4">
+          {carrinho.map((it) => {
+            const { titulo, subtitulo } = rotuloLinhaCarrinho(it);
+            return (
+              <li key={it.id} className="flex justify-between gap-3 text-sm text-white/80">
+                <div className="min-w-0">
+                  <p className="font-medium text-white">
+                    <span className="tabular-nums text-violet-200">{it.quantidade}×</span> {titulo}
+                  </p>
+                  {subtitulo && (
+                    <p className="mt-0.5 text-xs leading-snug text-slate-400">{subtitulo}</p>
+                  )}
+                </div>
+                <span className="shrink-0 tabular-nums text-white/90">{formatBrl(it.subtotal)}</span>
+              </li>
+            );
+          })}
+        </ul>
         <div className="flex justify-between text-sm text-white/60">
           <span>Subtotal</span>
           <span className="tabular-nums text-white">{formatBrl(subtotalItens)}</span>
         </div>
+        {tipoPedido === 'DELIVERY' && (
         <div className="mt-2 flex justify-between text-sm text-white/60">
           <span>Taxa de entrega</span>
           <span className="tabular-nums text-white">{formatBrl(taxaEntrega)}</span>
         </div>
+        )}
         <div className="mt-3 flex justify-between border-t border-white/10 pt-3 text-base font-semibold">
           <span>Total</span>
           <span className="tabular-nums text-violet-200">{formatBrl(totalPedido)}</span>

@@ -90,6 +90,7 @@ export interface IViaCepResponse {
 }
 
 export interface IApiError {
+  erro?: string;
   error?: string;
   mensagem?: string;
   message?: string;

@@ -29,20 +29,26 @@ function isLoginPostRequest(config: InternalAxiosRequestConfig | undefined): boo
 // Injeta o Token salvo no LocalStorage em todas as chamadas
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    const token = localStorage.getItem(AUTH_TOKEN_KEY);
+    let token = localStorage.getItem(AUTH_TOKEN_KEY);
     const url = config.url || '';
 
-    if (url.includes('/ia/')) {
-      console.log('[API] Enviando requisição para:', url);
-    }
-
-    if (token && config.headers) {
-      config.headers.Authorization = `Bearer ${token}`;
-      if (url.includes('/ia/')) {
-        console.log('[API] Token anexado:', !!token, '| Header:', config.headers.Authorization?.substring(0, 20) + '...');
+    if (token) {
+      token = token.trim();
+      if (token.startsWith('"') && token.endsWith('"')) {
+        token = token.slice(1, -1);
+        console.warn('[API] Token tinha aspas extras, removendo');
       }
-    } else if (url.includes('/ia/')) {
-      console.warn('[API] ATENÇÃO: Token NÃO encontrado para rota:', url);
+
+      if (token.length > 0 && config.headers) {
+        config.headers.Authorization = `Bearer ${token}`;
+        if (url.includes('/contabilidade/') || url.includes('/dashboard/')) {
+          console.log('[API Token enviado para:', url, '| Prefix:', token.substring(0, 30) + '...');
+        }
+      } else {
+        console.warn('[API] Token vazio após trim para rota:', url);
+      }
+    } else {
+      console.warn('[API] ATENÇÃO: Token NÃO encontrado no localStorage para rota:', url);
     }
 
     return config;
@@ -53,14 +59,14 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response: AxiosResponse) => response,
   (error: AxiosError) => {
-    if (error.response?.status === 401) {
-      const url = String(error.config?.url || '');
+    const status = error.response?.status;
+    const url = String(error.config?.url || '');
 
+    if (status === 401) {
       if (url.includes('/public/')) {
         return Promise.reject(error);
       }
 
-      // Credenciais inválidas no POST /api/auth/login — não limpar sessão anterior nem forçar redirect
       if (isLoginPostRequest(error.config)) {
         return Promise.reject(error);
       }
@@ -75,6 +81,16 @@ api.interceptors.response.use(
       const isRotaPublica = rotasPublicas.some(r => hashRoute === r || hashRoute.startsWith(r + '/'));
       if (!isRotaPublica && hashRoute !== '/' && hashRoute !== '/login') {
         window.location.hash = '#/login';
+      }
+    }
+
+    if (status === 403) {
+      const errorData = error.response?.data as { error?: string; message?: string } | undefined;
+      const errorCode = errorData?.error;
+
+      if (errorCode === 'MODULE_NOT_LICENSED') {
+        console.error('🚫 Módulo não contratado:', errorData?.message);
+        alert(errorData?.message || 'Módulo não contratado para esta loja.');
       }
     }
 

@@ -382,8 +382,18 @@ export function Produtos() {
       setProdutos(resProd.data);
       setCategorias(resCat.data);
       setPlanosContas(resContas.data);
-    } catch (error) {
-      console.error("Erro ao carregar dados", error);
+    } catch (error: unknown) {
+      const axiosError = error as { response?: { status: number; data: { error?: string; message?: string } } };
+      const status = axiosError.response?.status;
+      const errorData = axiosError.response?.data;
+      
+      if (status === 403 && errorData?.error === 'MODULE_NOT_LICENSED') {
+        console.warn('Módulo Contabilidade não contratado:', errorData.message);
+        alert(errorData.message || 'Módulo de Contabilidade não contratado para esta loja.');
+        setPlanosContas([]);
+      } else {
+        console.error("Erro ao carregar dados", error);
+      }
     } finally {
       setLoading(false);
     }

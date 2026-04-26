@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { AxiosError } from 'axios';
 import { MODULES_CONFIG, permissionsForModules } from '../../../config/permissions';
+import { fetchAccessCatalog, type CatalogModule } from '../../../services/accessCatalog';
 
 export interface IUsuarioLoja {
   id: string;
@@ -56,18 +57,36 @@ export function GestaoUsuariosPage() {
     ativo: true,
   });
   const [modulosLoja, setModulosLoja] = useState<string[]>([]);
+  /** Catálogo da API — define permissões disponíveis filtradas pelos módulos ativos da loja. */
+  const [catalogModules, setCatalogModules] = useState<CatalogModule[]>([]);
 
   useEffect(() => {
     void carregarUsuarios();
+
+    let activeModules: string[] = [];
     try {
       const raw = localStorage.getItem('@PDVUsuario');
       if (raw) {
         const u = JSON.parse(raw) as { loja?: { modulosAtivos?: string[] } };
-        setModulosLoja((u.loja?.modulosAtivos ?? []).map((m) => String(m).toUpperCase()));
+        activeModules = (u.loja?.modulosAtivos ?? []).map((m) => String(m).toUpperCase());
+        setModulosLoja(activeModules);
       }
     } catch {
       setModulosLoja([]);
     }
+
+    // Carrega catálogo e filtra pelos módulos ativos da loja
+    fetchAccessCatalog()
+      .then((catalog) => {
+        const filtered = activeModules.length > 0
+          ? catalog.modules.filter((m) => activeModules.includes(m.module))
+          : catalog.modules;
+        setCatalogModules(filtered);
+      })
+      .catch(() => {
+        // Fallback: usa MODULES_CONFIG local
+        setCatalogModules([]);
+      });
   }, []);
 
   const carregarUsuarios = async () => {
@@ -149,7 +168,31 @@ export function GestaoUsuariosPage() {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const permissoesDisponiveis = permissionsForModules(modulosLoja);
+  /**
+   * Permissões disponíveis para atribuição.
+   * Fonte primária: catálogo da API (canônico, filtrado pelos módulos ativos da loja).
+   * Fallback: MODULES_CONFIG local (legado).
+   * Regra: usuário só pode receber permissões dos módulos ativos da loja.
+   */
+  const permissoesDisponiveis = useMemo<Array<{ module: string; moduleLabel: string; code: string; label: string }>>(() => {
+    if (catalogModules.length > 0) {
+      return catalogModules.flatMap((m) =>
+        m.permissions.map((p) => ({
+          module: m.module,
+          moduleLabel: m.label,
+          code: p.code,
+          label: p.label,
+        }))
+      );
+    }
+    // Fallback legado
+    return permissionsForModules(modulosLoja).map((code) => ({
+      module: '',
+      moduleLabel: '',
+      code,
+      label: code,
+    }));
+  }, [catalogModules, modulosLoja]);
 
   const togglePermissao = (code: string) => {
     setFormData((prev) => {
@@ -188,7 +231,7 @@ export function GestaoUsuariosPage() {
 
     try {
       if (modalMode === 'create') {
-        await api.post('/api/usuarios', {
+        const payload = {
           codigo: formData.codigo.trim().toUpperCase(),
           username: formData.username.trim(),
           nome: formData.nome.trim(),
@@ -197,7 +240,9 @@ export function GestaoUsuariosPage() {
           role: formData.role,
           permissoes: formData.permissoes,
           ativo: formData.ativo,
-        });
+        };
+        console.log('[GestaoUsuarios] POST payload:', JSON.stringify(payload));
+        await api.post('/api/usuarios', payload);
       } else if (modalMode === 'edit' && editingId) {
         const payload: Record<string, unknown> = {
           codigo: formData.codigo.trim().toUpperCase(),
@@ -218,12 +263,10 @@ export function GestaoUsuariosPage() {
       fecharModal();
       await carregarUsuarios();
     } catch (err) {
-      const error = err as AxiosError<{ error?: string; erro?: string }>;
-      alert(
-        error.response?.data?.error ||
-          error.response?.data?.erro ||
-          'Erro ao salvar usuário. Verifique dados únicos (e-mail / username).'
-      );
+      const error = err as AxiosError<{ error?: string; erro?: string; message?: string }>;
+      const serverMsg = error.response?.data?.error || error.response?.data?.erro || error.response?.data?.message;
+      console.error('[GestaoUsuarios] Erro ao salvar:', serverMsg, error.response?.data);
+      alert(serverMsg || 'Erro ao salvar usuário. Verifique dados únicos (e-mail / username).');
     } finally {
       setSaving(false);
     }
@@ -561,33 +604,61 @@ export function GestaoUsuariosPage() {
                   {activeTab === 'permissoes' && (
                     <div className="rounded-xl border border-white/10 bg-[#0b1324] p-4">
                       <p className="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-400">
-                        Permissões granulares por módulo
+                        Permissões por módulo ativo da loja
                       </p>
-                      {MODULES_CONFIG.filter((m) => modulosLoja.includes(m.id)).map((moduleDef) => (
-                        <div key={moduleDef.id} className="mb-3">
-                          <p className="mb-1 text-xs font-bold text-violet-300">{moduleDef.label}</p>
-                          <div className="flex flex-wrap gap-2">
-                            {moduleDef.permissions.map((perm) => {
-                              const checked = formData.permissoes.includes(perm.code);
-                              return (
-                                <button
-                                  key={perm.code}
-                                  type="button"
-                                  onClick={() => togglePermissao(perm.code)}
-                                  className={`rounded-lg border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
-                                    checked
-                                      ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-200'
-                                      : 'border-white/10 bg-white/5 text-slate-300'
-                                  }`}
-                                >
-                                  {perm.label}
-                                </button>
-                              );
-                            })}
+                      {/* Fonte primária: catálogo da API (canônico, filtrado pelos módulos da loja) */}
+                      {catalogModules.length > 0
+                        ? catalogModules.map((mod) => (
+                          <div key={mod.module} className="mb-3">
+                            <p className="mb-1 text-xs font-bold text-violet-300">{mod.label}</p>
+                            <div className="flex flex-wrap gap-2">
+                              {mod.permissions.map((perm) => {
+                                const checked = formData.permissoes.includes(perm.code);
+                                return (
+                                  <button
+                                    key={perm.code}
+                                    type="button"
+                                    onClick={() => togglePermissao(perm.code)}
+                                    className={`rounded-lg border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
+                                      checked
+                                        ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-200'
+                                        : 'border-white/10 bg-white/5 text-slate-300'
+                                    }`}
+                                  >
+                                    {perm.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                      {permissoesDisponiveis.length === 0 && (
+                        ))
+                        /* Fallback: MODULES_CONFIG local enquanto catálogo carrega */
+                        : MODULES_CONFIG.filter((m) => modulosLoja.length === 0 || modulosLoja.includes(m.id)).map((moduleDef) => (
+                          <div key={moduleDef.id} className="mb-3">
+                            <p className="mb-1 text-xs font-bold text-violet-300">{moduleDef.label}</p>
+                            <div className="flex flex-wrap gap-2">
+                              {moduleDef.permissions.map((perm) => {
+                                const checked = formData.permissoes.includes(perm.code);
+                                return (
+                                  <button
+                                    key={perm.code}
+                                    type="button"
+                                    onClick={() => togglePermissao(perm.code)}
+                                    className={`rounded-lg border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
+                                      checked
+                                        ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-200'
+                                        : 'border-white/10 bg-white/5 text-slate-300'
+                                    }`}
+                                  >
+                                    {perm.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))
+                      }
+                      {permissoesDisponiveis.length === 0 && catalogModules.length === 0 && (
                         <p className="text-xs text-slate-500">Nenhum módulo ativo na loja para delegar permissões.</p>
                       )}
                     </div>

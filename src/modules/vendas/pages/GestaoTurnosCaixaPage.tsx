@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Layout } from '../../../components/Layout';
-import { api } from '../../../services/api';
+import {
+  getEstacoesTrabalhoLista,
+  getPdvCaixaResumoSessao,
+  getPdvCaixaSessoesHoje,
+  postPdvCaixaAbrirManual,
+} from '../../../services/api/pdvCaixaGestaoApi';
+import { syncAxiosAuthorizationFromStorage } from '../../../services/authSession';
 import {
   Loader2,
   Plus,
@@ -121,12 +127,12 @@ export function GestaoTurnosCaixaPage() {
   const [fundoTroco, setFundoTroco] = useState('200');
 
   const carregarSessoes = useCallback(async () => {
-    const { data } = await api.get<ISessaoCaixaRow[]>('/api/pdv/caixa/sessoes?hoje=1');
+    const data = await getPdvCaixaSessoesHoje<ISessaoCaixaRow[]>();
     setSessoes(Array.isArray(data) ? data : []);
   }, []);
 
   const carregarEstacoes = useCallback(async () => {
-    const { data } = await api.get('/api/estacoes-trabalho');
+    const data = await getEstacoesTrabalhoLista();
     const list = extrairEstacoes(data);
     setEstacoes(list.filter((e) => e.ativo !== false));
   }, []);
@@ -134,6 +140,7 @@ export function GestaoTurnosCaixaPage() {
   const recarregarTudo = useCallback(async () => {
     setCarregando(true);
     try {
+      syncAxiosAuthorizationFromStorage();
       await Promise.all([carregarSessoes(), carregarEstacoes()]);
     } catch (e) {
       const ax = e as AxiosError<{ error?: string }>;
@@ -159,15 +166,13 @@ export function GestaoTurnosCaixaPage() {
     }
     setSalvando(true);
     try {
+      syncAxiosAuthorizationFromStorage();
       const estacaoSel = estacoes.find((e) => e.id === estacaoId.trim());
       const labelEstacao = estacaoSel
         ? [estacaoSel.nome, estacaoSel.nomeMaquina].filter(Boolean).join(' — ')
         : '';
 
-      const { data: sessaoCriada } = await api.post<{
-        id: string;
-        terminal?: string | null;
-      }>('/api/pdv/caixa/abrir-manual', {
+      const sessaoCriada = await postPdvCaixaAbrirManual({
         estacaoTrabalhoId: estacaoId.trim(),
         saldoAbertura: v,
         observacao: 'Abertura manual — Central do Fiscal',
@@ -202,7 +207,8 @@ export function GestaoTurnosCaixaPage() {
     setResumo(null);
     setCarregandoResumo(true);
     try {
-      const { data } = await api.get<IResumoSessao>(`/api/pdv/caixa/sessoes/${row.id}/resumo`);
+      syncAxiosAuthorizationFromStorage();
+      const data = await getPdvCaixaResumoSessao<IResumoSessao>(row.id);
       setResumo(data);
     } catch (e) {
       const ax = e as AxiosError<{ error?: string }>;

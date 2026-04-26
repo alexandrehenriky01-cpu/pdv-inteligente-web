@@ -1,42 +1,44 @@
 import { type ReactNode } from 'react';
 import { AUTH_USER_KEY } from '../services/authStorage';
+import { FEATURE_MASTER_MAP } from '../config/featureMasterMap';
+import { normalizeFeature } from '../config/normalizeFeature';
+import { isSuperAdminRole, userCanAccessFeature, type MenuUser } from '../config/filterMenu';
 
-type UsuarioModulos = {
-  role?: string;
-  permissoes?: string[];
-  loja?: { modulosAtivos?: string[] };
-};
-
-function normalize(value: string): string {
-  return String(value || '').trim().toUpperCase();
-}
-
-function hasModule(moduleId: string, usuario: UsuarioModulos | null): boolean {
-  if (!usuario) return false;
-  const role = normalize(usuario.role || '');
-  if (role === 'SUPER_ADMIN' || role === 'SUPORTE_MASTER' || role === 'DIRETOR' || role === 'GERENTE' || role === 'ADMIN_LOJA') {
-    return true;
-  }
-
-  const required = normalize(moduleId);
-  const modulosLoja = (usuario.loja?.modulosAtivos ?? []).map(normalize);
-  const permissoes = (usuario.permissoes ?? []).map(normalize);
-  return [...modulosLoja, ...permissoes].includes(required);
-}
-
-export function RenderIfModule({
-  module,
-  children,
-}: {
-  module: string;
-  children: ReactNode;
-}) {
+function readUsuario(): MenuUser | null {
   try {
     const raw = localStorage.getItem(AUTH_USER_KEY);
     if (!raw) return null;
-    const usuario = JSON.parse(raw) as UsuarioModulos;
-    return hasModule(module, usuario) ? <>{children}</> : null;
+    return JSON.parse(raw) as MenuUser;
   } catch {
     return null;
   }
+}
+
+function modulosAtivos(user: MenuUser): string[] {
+  return ((user.loja?.modulosAtivos as string[]) || []).map((m) => String(m).trim().toUpperCase());
+}
+
+/**
+ * Controle declarativo por módulo (`FOOD_SERVICE`) ou submódulo (`FOOD_SERVICE.KDS` → feature normalizada).
+ */
+export function RenderIfModule({ module, children }: { module: string; children: ReactNode }) {
+  const usuario = readUsuario();
+  if (!usuario) return null;
+  if (isSuperAdminRole(usuario.role)) return <>{children}</>;
+
+  const mod = String(module || '').trim().toUpperCase();
+  if (!mod) return null;
+
+  if (mod.includes('.')) {
+    const featureKey = normalizeFeature(mod);
+    return userCanAccessFeature(usuario, featureKey) ? <>{children}</> : null;
+  }
+
+  const mods = modulosAtivos(usuario);
+  if (mods.includes(mod)) return <>{children}</>;
+
+  const hasAnyFeature = Object.keys(FEATURE_MASTER_MAP).some(
+    (k) => k.startsWith(`${mod}.`) && userCanAccessFeature(usuario, k)
+  );
+  return hasAnyFeature ? <>{children}</> : null;
 }

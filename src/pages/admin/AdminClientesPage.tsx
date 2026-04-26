@@ -1,12 +1,14 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { Layout } from '../../components/Layout';
 import { api } from '../../services/api';
 import {
   Building2, Plus, X, ShieldCheck, CheckCircle2,
-  User, Key, Mail, FileText, Loader2, Server, Settings, Save, ChevronDown, ChevronRight
+  User, Key, Mail, FileText, Loader2, Server, Settings, Save, ChevronDown, ChevronRight, Flag
 } from 'lucide-react';
 import { AxiosError } from 'axios';
 import { MODULES_CONFIG } from '../../config/permissions';
+import { fetchAccessCatalog, catalogModuleToHierarquico } from '../../services/accessCatalog';
 
 interface SubModulo {
   id: string;
@@ -109,14 +111,24 @@ const MODULOS_HIERARQUICOS: ModuloHierarquico[] = [
     { id: 'CONTABIL.FECHAMENTO', nome: 'Fechamento Contábil' },
   ]},
   { id: 'IA', nome: 'Central Aurya', subModulos: [
-    { id: 'IA.INSIGHTS', nome: 'Insights' },
-    { id: 'IA.ALERTAS', nome: 'Alertas' },
-    { id: 'IA.OPORTUNIDADES', nome: 'Oportunidades' },
+    { id: 'IA.INSIGHT_VIEW', nome: 'Insights' },
+    { id: 'IA.ALERT_VIEW', nome: 'Alertas' },
+    { id: 'IA.OPPORTUNITY_VIEW', nome: 'Oportunidades' },
   ]},
-  { id: 'DASHBOARD', nome: 'Dashboards' },
+  { id: 'DASHBOARD', nome: 'Dashboards', subModulos: [
+    { id: 'DASHBOARD.VIEW', nome: 'Dashboard Principal' },
+    { id: 'DASHBOARD.FOOD_VIEW', nome: 'Dashboard Food Service' },
+  ]},
 ];
 
 // 🛡️ INTERFACES DE TIPAGEM ESTRITA
+export interface LojasResponse {
+  lojas: ILojaAdmin[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface ILojaAdmin {
   id: string;
   nome: string;
@@ -124,6 +136,7 @@ export interface ILojaAdmin {
   plano: string;
   statusLicenca: 'ATIVA' | 'TRIAL' | 'INADIMPLENTE' | 'SUSPENSA' | 'CANCELADA';
   modulosAtivos: string[];
+  featuresAtivas?: string[];
   limiteUsuarios: number;
   limiteTerminais: number;
   _count?: {
@@ -139,11 +152,15 @@ export interface IFormDataNovoCliente {
   emailAdmin: string;
   senhaAdmin: string;
   modulosAtivos: string[];
+  featuresAtivas: string[];
   limiteTerminais: number;
 }
 
 export function AdminClientesPage() {
   const [clientes, setClientes] = useState<ILojaAdmin[]>([]);
+  const [total, setTotal] = useState(0);
+  const [limit, setLimit] = useState(50);
+  const [offset, setOffset] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -156,6 +173,18 @@ export function AdminClientesPage() {
   /** Redefinição de senha do dono (Master / suporte) — não persiste em `lojaSelecionada`. */
   const [novaSenhaDono, setNovaSenhaDono] = useState('');
 
+  /**
+   * Catálogo oficial de módulos/features carregado da API.
+   * Substitui MODULOS_HIERARQUICOS hardcoded.
+   * Fallback: MODULOS_HIERARQUICOS local enquanto o catálogo carrega.
+   */
+  const [catalogModulos, setCatalogModulos] = useState<ModuloHierarquico[]>(MODULOS_HIERARQUICOS);
+  /**
+   * Set de feature codes canônicas válidas (do catálogo oficial).
+   * Usado para filtrar features antes de enviar ao backend.
+   */
+  const [validFeatureCodes, setValidFeatureCodes] = useState<Set<string>>(new Set());
+
   const [formData, setFormData] = useState<IFormDataNovoCliente>({
     nomeLoja: '',
     cnpj: '',
@@ -164,6 +193,7 @@ export function AdminClientesPage() {
     emailAdmin: '',
     senhaAdmin: '',
     modulosAtivos: ['PDV'],
+    featuresAtivas: [],
     limiteTerminais: 1
   });
 
@@ -174,15 +204,47 @@ export function AdminClientesPage() {
 
   useEffect(() => {
     carregarClientes();
+    // Carrega o catálogo oficial da API (substitui listas hardcoded)
+    fetchAccessCatalog()
+      .then((catalog) => {
+        setCatalogModulos(catalog.modules.map(catalogModuleToHierarquico));
+        // Indexa todos os feature codes válidos para validação antes do save
+        const codes = new Set(catalog.modules.flatMap((m) => m.features.map((f) => f.code)));
+        setValidFeatureCodes(codes);
+      })
+      .catch(() => {
+        // Mantém fallback local em caso de erro
+      });
   }, []);
 
   const carregarClientes = async () => {
     setLoading(true);
     try {
-      const res = await api.get<ILojaAdmin[]>('/api/admin/lojas');
-      setClientes(res.data);
+      const res = await api.get<LojasResponse>('/api/admin/lojas', {
+        params: { limit, offset }
+      });
+      const data = res.data;
+      
+      if (data && typeof data === 'object' && 'lojas' in data) {
+        const response = data as unknown as LojasResponse;
+        const lojasArr = (Array.isArray(response.lojas) ? response.lojas : []).map(loja => ({
+          ...loja,
+          modulosAtivos: Array.isArray(loja.modulosAtivos) ? loja.modulosAtivos : [],
+        }));
+        setClientes(lojasArr);
+        setTotal(typeof response.total === 'number' ? response.total : lojasArr.length);
+      } else if (Array.isArray(data)) {
+        const arrData = data as unknown as ILojaAdmin[];
+        setClientes(arrData);
+        setTotal(arrData.length);
+      } else {
+        setClientes([]);
+        setTotal(0);
+      }
     } catch (error) {
       console.error('Erro ao carregar clientes', error);
+      setClientes([]);
+      setTotal(0);
       alert('⚠️ Acesso Negado. Apenas o Super Admin pode ver esta tela.');
     } finally {
       setLoading(false);
@@ -193,26 +255,15 @@ export function AdminClientesPage() {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const toggleModulo = (modulo: string) => {
-    setFormData(prev => {
-      const ativos = prev.modulosAtivos.includes(modulo)
-        ? prev.modulosAtivos.filter(m => m !== modulo)
-        : [...prev.modulosAtivos, modulo];
-      return { ...prev, modulosAtivos: ativos };
-    });
+  const toggleModulo = (moduloId: string) => {
+    const moduloInfo = catalogModulos.find(m => m.id === moduloId);
+    const featuresDoModulo = moduloInfo?.subModulos?.map(sm => sm.id) || [];
+    toggleModuloGeneric(moduloId, featuresDoModulo, setFormData);
   };
 
-  const toggleSubModulo = (subModuloId: string, moduloId: string) => {
-    setFormData(prev => {
-      const ativos = prev.modulosAtivos.includes(subModuloId)
-        ? prev.modulosAtivos.filter(m => m !== subModuloId)
-        : [...prev.modulosAtivos, subModuloId];
-      
-      if (!prev.modulosAtivos.includes(moduloId)) {
-        return { ...prev, modulosAtivos: [...ativos, moduloId] };
-      }
-      return { ...prev, modulosAtivos: ativos };
-    });
+  const toggleSubModulo = (subModuloId: string) => {
+    const moduloId = getModuloFromFeature(subModuloId);
+    toggleFeatureGeneric(subModuloId, moduloId, setFormData);
   };
 
   const toggleModuleExpansion = (moduloId: string) => {
@@ -227,36 +278,212 @@ export function AdminClientesPage() {
     });
   };
 
-  const isModuloActive = (moduloId: string, modulosAtivos: string[]) => modulosAtivos.includes(moduloId);
+  const isModuloActive = (moduloId: string, modulosAtivos: string[] = []) => {
+  if (!modulosAtivos || !Array.isArray(modulosAtivos)) {
+    return false;
+  }
+  const normalizedId = moduloId.toUpperCase();
+  return modulosAtivos.some(m => m.toUpperCase() === normalizedId);
+};
 
-  const isSubModuloActive = (subModuloId: string, modulosAtivos: string[]) => modulosAtivos.includes(subModuloId);
+  const getModuloFromFeature = (feature: string): string => {
+  return feature.split('.')[0];
+};
 
-  const isAllSubModulosActive = (modulo: ModuloHierarquico, modulosAtivos: string[]) => {
-    if (!modulo.subModulos || modulo.subModulos.length === 0) return false;
-    return modulo.subModulos.every(sm => modulosAtivos.includes(sm.id));
-  };
+const isAllSubModulosActive = (modulo: ModuloHierarquico, featuresAtivas: string[] = []) => {
+  if (!modulo.subModulos || modulo.subModulos.length === 0) return false;
+  const normalizedIds = modulo.subModulos.map(sm => sm.id);
+  return normalizedIds.every(id => featuresAtivas.includes(id));
+};
+
+const isSubModuloActiveByFeatures = (subModuloId: string, featuresAtivas: string[] = []) => {
+  if (!featuresAtivas || !Array.isArray(featuresAtivas)) return false;
+  return featuresAtivas.includes(subModuloId);
+};
+
+const isModuloFullyActive = (
+  modulo: ModuloHierarquico,
+  features: string[],
+  modulos: string[]
+): boolean => {
+  if (!modulo.subModulos || modulo.subModulos.length === 0) {
+    return modulos.includes(modulo.id);
+  }
+
+  return modulo.subModulos.every(sm =>
+    features.includes(sm.id)
+  );
+};
 
   const toggleAllSubModulos = (modulo: ModuloHierarquico, setFunc: React.Dispatch<React.SetStateAction<IFormDataNovoCliente>>) => {
     if (!modulo.subModulos) return;
     setFunc(prev => {
-      const allActive = modulo.subModulos!.every(sm => prev.modulosAtivos.includes(sm.id));
-      let novos: string[];
+      const features = prev.featuresAtivas || [];
+      const modulos = prev.modulosAtivos || [];
+      const subIds = modulo.subModulos!.map(sm => sm.id);
+      
+      const allActive = subIds.every(id => features.includes(id));
+      
+      let novasFeatures: string[];
+      let novosModulos: string[];
+      
       if (allActive) {
-        novos = prev.modulosAtivos.filter(m => !modulo.subModulos!.map(sm => sm.id).includes(m));
+        novasFeatures = features.filter(f => !subIds.includes(f));
+        novosModulos = modulos.filter(m => m !== modulo.id);
       } else {
-        const subs = modulo.subModulos?.map(sm => sm.id) ?? [];
-        const withoutParent = prev.modulosAtivos.filter(m => m !== modulo.id && !subs.includes(m));
-        novos = [...withoutParent, modulo.id, ...subs];
+        const subsToAdd = subIds.filter(id => !features.includes(id));
+        const withoutSubs = features.filter(f => !subIds.includes(f));
+        novasFeatures = [...withoutSubs, ...subsToAdd];
+        
+        if (!modulos.includes(modulo.id)) {
+          novosModulos = [...modulos, modulo.id];
+        } else {
+          novosModulos = modulos;
+        }
       }
-      return { ...prev, modulosAtivos: novos };
+      
+      return {
+        ...prev,
+        modulosAtivos: novosModulos,
+        featuresAtivas: novasFeatures
+      };
     });
+  };
+
+  const normalizeArray = (value: unknown): string[] => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  };
+
+  const toggleFeatureGeneric = (
+    featureId: string,
+    moduloId: string,
+    setState: React.Dispatch<React.SetStateAction<IFormDataNovoCliente>>
+  ) => {
+    setState((prev) => {
+      const features = prev.featuresAtivas || [];
+      const modulos = prev.modulosAtivos || [];
+
+      const isActive = features.includes(featureId);
+
+      const novasFeatures = isActive
+        ? features.filter((f: string) => f !== featureId)
+        : [...features, featureId];
+
+      const moduloDoFeature = getModuloFromFeature(featureId);
+
+      let novosModulos = modulos;
+
+      if (!isActive) {
+        if (!modulos.includes(moduloDoFeature)) {
+          novosModulos = [...modulos, moduloDoFeature];
+        }
+      } else {
+        const aindaTemFeature = novasFeatures.some((f: string) =>
+          getModuloFromFeature(f) === moduloDoFeature
+        );
+
+        if (!aindaTemFeature) {
+          novosModulos = modulos.filter((m: string) => m !== moduloDoFeature);
+        }
+      }
+
+      return {
+        ...prev,
+        modulosAtivos: novosModulos,
+        featuresAtivas: novasFeatures
+      };
+    });
+  };
+
+  const toggleModuloGeneric = (
+    moduloId: string,
+    featuresDoModulo: string[],
+    setState: React.Dispatch<React.SetStateAction<IFormDataNovoCliente>>
+  ) => {
+    setState((prev) => {
+      const modulos = prev.modulosAtivos || [];
+      const features = prev.featuresAtivas || [];
+
+      const isActive = modulos.includes(moduloId);
+
+      if (isActive) {
+        const featuresDoModuloIds = featuresDoModulo || [];
+        return {
+          ...prev,
+          modulosAtivos: modulos.filter((m: string) => m !== moduloId),
+          featuresAtivas: features.filter(
+            (f: string) => !featuresDoModuloIds.includes(f)
+          )
+        };
+      }
+
+      return {
+        ...prev,
+        modulosAtivos: [...modulos, moduloId],
+        featuresAtivas: features
+      };
+    });
+  };
+
+  /**
+   * Sanitiza a lista de features antes de enviar ao backend.
+   * Remove features inválidas (não presentes no catálogo oficial).
+   * Garante que nunca seja enviado um código malformado como DASHBOARD.VIEW_VIEW.
+   * Se o catálogo ainda não carregou, passa a lista como-está (o backend normaliza).
+   */
+  const sanitizeFeatures = (features: string[]): string[] => {
+    if (validFeatureCodes.size === 0) return features; // catálogo ainda não carregou
+    return features.filter(f => validFeatureCodes.has(f));
   };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.post<ILojaAdmin>('/api/admin/lojas', formData);
+      const validModules = [
+        'PDV', 'FOOD_SERVICE', 'WMS', 'FINANCEIRO', 'CONTABIL', 'ESTOQUE',
+        'COMPRAS', 'NFE', 'ESTRUTURA', 'IA', 'FISCAL', 'COMERCIAL', 'PRODUCAO', 'DASHBOARD'
+      ];
+
+      const normalizedModules = formData.modulosAtivos
+        .map(m => m.toUpperCase())
+        .filter(m => {
+          if (validModules.includes(m)) return true;
+          const parent = m.split('.')[0];
+          return validModules.includes(parent);
+        })
+        .map(m => {
+          const parent = m.split('.')[0];
+          return validModules.includes(parent) ? parent : m;
+        });
+
+      const uniqueModules = [...new Set(normalizedModules)];
+
+      const payload = {
+        nome: formData.nomeLoja,
+        cnpj: formData.cnpj,
+        plano: formData.plano,
+        nomeAdmin: formData.nomeAdmin,
+        emailAdmin: formData.emailAdmin,
+        senhaAdmin: formData.senhaAdmin,
+        modulosAtivos: uniqueModules.length > 0 ? uniqueModules : ['PDV', 'IA'],
+        featuresAtivas: sanitizeFeatures(formData.featuresAtivas || []),
+        limiteTerminais: formData.limiteTerminais,
+      };
+
+      console.log('Dados enviados:', payload);
+
+      await api.post('/api/admin/lojas', payload);
 
       alert('✅ Cliente (Tenant) provisionado com sucesso! Banco de dados isolado criado.');
       setIsModalOpen(false);
@@ -269,6 +496,7 @@ export function AdminClientesPage() {
         emailAdmin: '',
         senhaAdmin: '',
         modulosAtivos: ['PDV'],
+        featuresAtivas: [],
         limiteTerminais: 1
       });
 
@@ -282,17 +510,56 @@ export function AdminClientesPage() {
     }
   };
 
+  // Helper para normalizar lista de módulos
+  const normalizeModulosList = (modulos: unknown): string[] => {
+    if (!modulos) return [];
+    if (Array.isArray(modulos)) return modulos.map(m => String(m).toUpperCase());
+    if (typeof modulos === 'string') {
+      try {
+        const parsed = JSON.parse(modulos);
+        if (Array.isArray(parsed)) return parsed.map(m => String(m).toUpperCase());
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  };
+
   // 🚀 FUNÇÕES PARA GERENCIAR CLIENTE
   const abrirModalGerenciar = (loja: ILojaAdmin) => {
+    console.log('=== ABRINDO MODAL DE EDIÇÃO ===');
+    console.log('Loja recebida:', loja.nome);
+    console.log('modulosAtivos raw:', loja.modulosAtivos);
+    console.log('featuresAtivas raw:', loja.featuresAtivas);
+    console.log('Tipo:', typeof loja.modulosAtivos);
+    console.log('É array?:', Array.isArray(loja.modulosAtivos));
+    
+    const normalizedModulos = normalizeModulosList(loja.modulosAtivos);
+    const normalizedFeatures = normalizeArray(loja.featuresAtivas);
+    console.log('modulos normalizados:', normalizedModulos);
+    console.log('features normalizadas:', normalizedFeatures);
+    
     setLojaSelecionada({ 
       ...loja, 
-      limiteTerminais: loja.limiteTerminais ?? 1 
-    }); // Cria uma cópia para não alterar a tabela antes de salvar
+      modulosAtivos: normalizedModulos,
+      featuresAtivas: normalizedFeatures,
+      limiteUsuarios: loja.limiteUsuarios ?? 3,
+      limiteTerminais: loja.limiteTerminais ?? 1,
+      nome: loja.nome || '',
+      cnpj: loja.cnpj || '',
+      statusLicenca: loja.statusLicenca || 'TRIAL',
+      plano: loja.plano || 'START',
+    });
+    
+    console.log('Estado setado com:', normalizedModulos, normalizedFeatures);
+    console.log('===========================');
+    
     setNovaSenhaDono('');
     setIsGerenciarModalOpen(true);
   };
 
   const fecharModalGerenciar = () => {
+    setLojaSelecionada(null);
     setNovaSenhaDono('');
     setIsGerenciarModalOpen(false);
   };
@@ -303,44 +570,95 @@ export function AdminClientesPage() {
       ? parseInt(e.target.value) || 0
       : e.target.value;
     setLojaSelecionada({ ...lojaSelecionada, [e.target.name]: value });
-  };
-
-  const toggleModuloEdit = (modulo: string) => {
+};
+  
+  const toggleModuloEdit = (moduloId: string) => {
     if (!lojaSelecionada) return;
-    const ativos = lojaSelecionada.modulosAtivos.includes(modulo)
-      ? lojaSelecionada.modulosAtivos.filter(m => m !== modulo)
-      : [...lojaSelecionada.modulosAtivos, modulo];
-    setLojaSelecionada({ ...lojaSelecionada, modulosAtivos: ativos });
-  };
-
-  const toggleSubModuloEdit = (subModuloId: string, moduloId: string) => {
-    if (!lojaSelecionada) return;
-    const ativos = lojaSelecionada.modulosAtivos.includes(subModuloId)
-      ? lojaSelecionada.modulosAtivos.filter(m => m !== subModuloId)
-      : [...lojaSelecionada.modulosAtivos, subModuloId];
+    const moduloInfo = catalogModulos.find(m => m.id === moduloId);
+    const featuresDoModulo = moduloInfo?.subModulos?.map(sm => sm.id) || [];
     
-    if (!lojaSelecionada.modulosAtivos.includes(moduloId)) {
-      setLojaSelecionada({ ...lojaSelecionada, modulosAtivos: [...ativos, moduloId] });
+    const modulos = normalizeArray(lojaSelecionada.modulosAtivos);
+    const features = normalizeArray(lojaSelecionada.featuresAtivas);
+    
+    const isActive = modulos.includes(moduloId);
+    
+    if (isActive) {
+      setLojaSelecionada({
+        ...lojaSelecionada,
+        modulosAtivos: modulos.filter(m => m !== moduloId),
+        featuresAtivas: features.filter(f => !featuresDoModulo.includes(f))
+      });
     } else {
-      setLojaSelecionada({ ...lojaSelecionada, modulosAtivos: ativos });
+      setLojaSelecionada({
+        ...lojaSelecionada,
+        modulosAtivos: [...modulos, moduloId],
+        featuresAtivas: features
+      });
     }
+  };
+
+  const toggleSubModuloEdit = (subModuloId: string) => {
+    if (!lojaSelecionada) return;
+    const moduloId = getModuloFromFeature(subModuloId);
+    const features = normalizeArray(lojaSelecionada.featuresAtivas);
+    const modulos = normalizeArray(lojaSelecionada.modulosAtivos);
+    
+    const isActive = features.includes(subModuloId);
+    
+    let novasFeatures = isActive
+      ? features.filter(f => f !== subModuloId)
+      : [...features, subModuloId];
+    
+    let novosModulos = modulos;
+    
+    if (!isActive) {
+      if (!modulos.includes(moduloId)) {
+        novosModulos = [...modulos, moduloId];
+      }
+    } else {
+      const aindaTemFeature = novasFeatures.some(f => getModuloFromFeature(f) === moduloId);
+      if (!aindaTemFeature) {
+        novosModulos = modulos.filter(m => m !== moduloId);
+      }
+    }
+    
+    setLojaSelecionada({ 
+      ...lojaSelecionada, 
+      modulosAtivos: novosModulos, 
+      featuresAtivas: novasFeatures 
+    });
   };
 
   const toggleAllSubModulosEdit = (modulo: ModuloHierarquico) => {
     if (!modulo.subModulos || !lojaSelecionada) return;
-    const allActive = modulo.subModulos!.every(sm => lojaSelecionada.modulosAtivos.includes(sm.id));
-    setLojaSelecionada(prev => {
-      if (!prev) return prev;
-      const allActive = modulo.subModulos!.every(sm => prev.modulosAtivos.includes(sm.id));
-      let novos: string[];
-      if (allActive) {
-        novos = prev.modulosAtivos.filter(m => !modulo.subModulos!.map(sm => sm.id).includes(m));
+    const features = normalizeArray(lojaSelecionada.featuresAtivas);
+    const modulos = normalizeArray(lojaSelecionada.modulosAtivos);
+    const subIds = modulo.subModulos!.map(sm => sm.id);
+    
+    const allActive = subIds.every(id => features.includes(id));
+    
+    let novasFeatures: string[];
+    let novosModulos: string[];
+    
+    if (allActive) {
+      novasFeatures = features.filter(f => !subIds.includes(f));
+      novosModulos = modulos.filter(m => m !== modulo.id);
+    } else {
+      const subsToAdd = subIds.filter(id => !features.includes(id));
+      const withoutSubs = features.filter(f => !subIds.includes(f));
+      novasFeatures = [...withoutSubs, ...subsToAdd];
+      
+      if (!modulos.includes(modulo.id)) {
+        novosModulos = [...modulos, modulo.id];
       } else {
-        const subs = modulo.subModulos?.map(sm => sm.id) ?? [];
-        const withoutParent = prev.modulosAtivos.filter(m => m !== modulo.id && !subs.includes(m));
-        novos = [...withoutParent, modulo.id, ...subs];
+        novosModulos = modulos;
       }
-      return { ...prev, modulosAtivos: novos };
+    }
+    
+    setLojaSelecionada({
+      ...lojaSelecionada,
+      modulosAtivos: novosModulos,
+      featuresAtivas: novasFeatures
     });
   };
 
@@ -369,13 +687,18 @@ export function AdminClientesPage() {
         return false;
       };
 
-      const modulosAtivosFiltrados = (lojaSelecionada.modulosAtivos || []).filter(isValidModule);
+      const normalizedModules = (lojaSelecionada.modulosAtivos || [])
+        .map(m => m.toUpperCase())
+        .filter(isValidModule);
+
+      const uniqueModules = [...new Set(normalizedModules)];
 
       const payload: Record<string, unknown> = {
         nome: lojaSelecionada.nome,
         plano: lojaSelecionada.plano,
         statusLicenca: lojaSelecionada.statusLicenca,
-        modulosAtivos: modulosAtivosFiltrados.length > 0 ? modulosAtivosFiltrados : ['PDV', 'IA'],
+        modulosAtivos: uniqueModules.length > 0 ? uniqueModules : ['PDV', 'IA'],
+        featuresAtivas: sanitizeFeatures(lojaSelecionada.featuresAtivas || []),
         limiteUsuarios: Number(lojaSelecionada.limiteUsuarios) || 3,
         limiteTerminais: Number(lojaSelecionada.limiteTerminais) || 1,
       };
@@ -383,7 +706,15 @@ export function AdminClientesPage() {
         payload.novaSenhaDono = senhaTrim;
       }
 
-      await api.put(`/api/admin/lojas/${lojaSelecionada.id}`, payload);
+      const response = await api.put(`/api/admin/lojas/${lojaSelecionada.id}`, payload);
+
+      console.log('Dados recebidos após salvar:', response.data.modulosAtivos);
+
+      setClientes(prev => prev.map(l => 
+        l.id === lojaSelecionada.id 
+          ? { ...response.data, modulosAtivos: response.data.modulosAtivos || [], featuresAtivas: response.data.featuresAtivas || [] }
+          : l
+      ));
 
       alert(
         senhaTrim.length >= 6
@@ -391,7 +722,6 @@ export function AdminClientesPage() {
           : '✅ Cliente atualizado com sucesso!'
       );
       fecharModalGerenciar();
-      carregarClientes(); // Recarrega a tabela com os novos dados
     } catch (err) {
       const error = err as AxiosError<{ error?: string }>;
       console.error('Erro ao atualizar cliente:', error.response?.data || error.message);
@@ -483,7 +813,9 @@ export function AdminClientesPage() {
                     </td>
                   </tr>
                 ) : (
-                  clientes.map((loja) => (
+                  (clientes || []).map((loja) => {
+                    console.log('Módulos da Loja:', loja.nome, loja.modulosAtivos);
+                    return (
                     <tr key={loja.id} className="group transition-colors hover:bg-white/5">
                       <td className="p-5">
                         <div className="flex items-center gap-3">
@@ -547,7 +879,7 @@ export function AdminClientesPage() {
                         </button>
                       </td>
                     </tr>
-                  ))
+                  );})
                 )}
               </tbody>
             </table>
@@ -721,11 +1053,17 @@ export function AdminClientesPage() {
 
                     <div className="custom-scrollbar flex-1 overflow-y-auto pr-1">
                       <div className="grid grid-cols-1 gap-3">
-                        {MODULOS_HIERARQUICOS.map(modulo => {
-                          const isAtivo = isModuloActive(modulo.id, formData.modulosAtivos);
-                          const isExpanded = expandedModules.has(modulo.id);
+                        {catalogModulos.map(modulo => {
+                          const features = formData.featuresAtivas || [];
                           const hasSubModulos = modulo.subModulos && modulo.subModulos.length > 0;
-                          const allSubActive = isAllSubModulosActive(modulo, formData.modulosAtivos);
+                          const subModulos = hasSubModulos ? modulo.subModulos! : [];
+                          const isAtivo = hasSubModulos
+                            ? subModulos.every(sm => features.includes(sm.id))
+                            : (formData.modulosAtivos || []).includes(modulo.id);
+                          const isExpanded = expandedModules.has(modulo.id);
+                          const allSubActive = hasSubModulos 
+                            ? subModulos.every(sm => features.includes(sm.id))
+                            : (formData.modulosAtivos || []).includes(modulo.id);
 
                           return (
                             <div key={modulo.id} className="rounded-xl border border-white/10 bg-[#08101f] overflow-hidden">
@@ -799,7 +1137,8 @@ export function AdminClientesPage() {
                                 <div className="border-t border-white/10 bg-[#0b1324]/50 p-3 pl-10">
                                   <div className="grid grid-cols-1 gap-2">
                                     {modulo.subModulos!.map(subModulo => {
-                                      const isSubAtivo = isSubModuloActive(subModulo.id, formData.modulosAtivos);
+                                      const features = formData.featuresAtivas || [];
+                                      const isSubAtivo = features.includes(subModulo.id);
                                       return (
                                         <label
                                           key={subModulo.id}
@@ -821,12 +1160,12 @@ export function AdminClientesPage() {
                                           <span className={`text-sm font-medium ${isSubAtivo ? 'text-violet-200' : 'text-slate-400'}`}>
                                             {subModulo.nome}
                                           </span>
-                                          <input
-                                            type="checkbox"
-                                            className="hidden"
-                                            checked={isSubAtivo}
-                                            onChange={() => toggleSubModulo(subModulo.id, modulo.id)}
-                                          />
+<input
+                                              type="checkbox"
+                                              className="hidden"
+                                              checked={isSubAtivo}
+                                              onChange={() => toggleSubModulo(subModulo.id)}
+                                            />
                                         </label>
                                       );
                                     })}
@@ -877,6 +1216,14 @@ export function AdminClientesPage() {
                     <Settings className="w-7 h-7 text-emerald-400" /> Gerenciar Cliente
                   </h2>
                   <p className="mt-1 text-sm text-slate-400">Altere o plano, status da licença e módulos de <strong className="text-white">{lojaSelecionada.nome}</strong>.</p>
+                  <Link
+                    to={`/admin/empresas/${lojaSelecionada.id}/features`}
+                    onClick={fecharModalGerenciar}
+                    className="mt-4 inline-flex items-center gap-2 rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-2 text-sm font-bold text-violet-200 transition-colors hover:bg-violet-500/20"
+                  >
+                    <Flag className="h-4 w-4" />
+                    Feature flags (catálogo)
+                  </Link>
                 </div>
                 <button
                   type="button"
@@ -1013,13 +1360,20 @@ export function AdminClientesPage() {
                       Ligue ou desligue o acesso aos módulos para este cliente.
                     </p>
 
-                    <div className="custom-scrollbar flex-1 overflow-y-auto pr-1">
+<div className="custom-scrollbar flex-1 overflow-y-auto pr-1">
                       <div className="grid grid-cols-1 gap-3">
-                        {MODULOS_HIERARQUICOS.map(modulo => {
-                          const isAtivo = isModuloActive(modulo.id, lojaSelecionada.modulosAtivos);
-                          const isExpanded = expandedModules.has(modulo.id);
+                        {catalogModulos.map(modulo => {
+                          const storeModulos = normalizeArray(lojaSelecionada?.modulosAtivos);
+                          const storeFeatures = normalizeArray(lojaSelecionada?.featuresAtivas);
                           const hasSubModulos = modulo.subModulos && modulo.subModulos.length > 0;
-                          const allSubActive = isAllSubModulosActive(modulo, lojaSelecionada.modulosAtivos);
+                          const subModulos = hasSubModulos ? modulo.subModulos! : [];
+                          const isAtivo = hasSubModulos
+                            ? subModulos.every(sm => storeFeatures.includes(sm.id))
+                            : storeModulos.includes(modulo.id);
+                          const isExpanded = expandedModules.has(modulo.id);
+                          const allSubActive = hasSubModulos
+                            ? subModulos.every(sm => storeFeatures.includes(sm.id))
+                            : storeModulos.includes(modulo.id);
 
                           return (
                             <div key={modulo.id} className="rounded-xl border border-white/10 bg-[#08101f] overflow-hidden">
@@ -1093,7 +1447,8 @@ export function AdminClientesPage() {
                                 <div className="border-t border-white/10 bg-[#0b1324]/50 p-3 pl-10">
                                   <div className="grid grid-cols-1 gap-2">
                                     {modulo.subModulos!.map(subModulo => {
-                                      const isSubAtivo = isSubModuloActive(subModulo.id, lojaSelecionada.modulosAtivos);
+                                      const features = normalizeArray(lojaSelecionada?.featuresAtivas);
+                                      const isSubAtivo = features.includes(subModulo.id);
                                       return (
                                         <label
                                           key={subModulo.id}
@@ -1119,7 +1474,7 @@ export function AdminClientesPage() {
                                             type="checkbox"
                                             className="hidden"
                                             checked={isSubAtivo}
-                                            onChange={() => toggleSubModuloEdit(subModulo.id, modulo.id)}
+                                            onChange={() => toggleSubModuloEdit(subModulo.id)}
                                           />
                                         </label>
                                       );

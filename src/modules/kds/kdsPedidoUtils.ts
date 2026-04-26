@@ -1,4 +1,4 @@
-import type { ColunaKds, KdsItemLinha, KdsPedido, OrigemVendaKds } from './types';
+import type { ColunaKds, KdsItemLinha, KdsPedido, OrigemVendaKds, TipoPedidoMenuKds } from './types';
 
 function num(v: unknown): number {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
@@ -43,50 +43,75 @@ export function extrairSenhaPedido(raw: Record<string, unknown>): string {
   return String(num(nv) % 1000).padStart(3, '0');
 }
 
-function linhaAdicionais(item: Record<string, unknown>): string[] {
-  const snap = item.adicionaisSnapshot;
+interface SnapshotRow {
+  nomeSnapshot?: unknown;
+  quantidade?: unknown;
+}
+
+interface SaborSnapRow {
+  nome?: unknown;
+}
+
+function nomesSaboresDoSnapshot(snap: unknown): string[] {
+  if (!Array.isArray(snap) || snap.length === 0) return [];
+  const out: string[] = [];
+  for (const el of snap) {
+    if (!el || typeof el !== 'object') continue;
+    const nome = String((el as SaborSnapRow).nome ?? '').trim();
+    if (nome) out.push(nome);
+  }
+  return out;
+}
+
+function linhasAdicionaisDoSnapshot(snap: unknown): string[] {
   if (!Array.isArray(snap) || snap.length === 0) return [];
 
-  const card = item.itemCardapio as Record<string, unknown> | undefined;
-  const catalog = card?.adicionais;
-  if (!Array.isArray(catalog)) {
-    return snap.map((s: unknown) => {
-      const row = s as Record<string, unknown>;
-      const id = String(row.adicionalCardapioId ?? '').slice(0, 8);
-      const q = num(row.quantidade);
-      return q > 1 ? `+ Adicional ${id} ×${q}` : `+ Adicional ${id}`;
-    });
-  }
-
   return snap.map((s: unknown) => {
-    const row = s as Record<string, unknown>;
-    const adId = String(row.adicionalCardapioId ?? '');
-    const ad = catalog.find((a: unknown) => String((a as Record<string, unknown>).id) === adId) as
-      | Record<string, unknown>
-      | undefined;
-    const nome = ad?.nome != null ? String(ad.nome) : 'Adicional';
+    const row = s as SnapshotRow;
+    const nome =
+      typeof row.nomeSnapshot === 'string' && row.nomeSnapshot.trim() !== ''
+        ? row.nomeSnapshot.trim()
+        : 'Adicional';
     const q = num(row.quantidade);
     return q > 1 ? `+ ${nome} ×${q}` : `+ ${nome}`;
   });
 }
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object';
+}
+
 export function linhaItemKds(item: Record<string, unknown>): KdsItemLinha {
-  const produto = item.produto as Record<string, unknown> | undefined;
-  const card = item.itemCardapio as Record<string, unknown> | undefined;
+  const produto = isRecord(item.produto) ? item.produto : undefined;
+  const card = isRecord(item.itemCardapio) ? item.itemCardapio : undefined;
+  const nomeSnap =
+    typeof item.nomeExibicaoSnapshot === 'string' ? item.nomeExibicaoSnapshot.trim() : '';
   const nome =
-    (produto?.nome != null ? String(produto.nome) : null) ??
-    (card?.nome != null ? String(card.nome) : null) ??
+    (nomeSnap ? nomeSnap : null) ??
+    (typeof produto?.nome === 'string' && produto.nome.trim() !== '' ? produto.nome.trim() : null) ??
+    (typeof card?.nome === 'string' && card.nome.trim() !== '' ? card.nome.trim() : null) ??
     'Item';
 
-  const obs = item.observacoes != null && String(item.observacoes).trim() !== ''
-    ? String(item.observacoes).trim()
-    : undefined;
+  const tipoRaw = typeof card?.tipoItem === 'string' ? card.tipoItem.toUpperCase() : 'COMIDA';
+  const isBebida = tipoRaw === 'BEBIDA';
+  const saboresNomes = nomesSaboresDoSnapshot(item.saboresSnapshot);
+
+  const obsRaw = item.observacoes;
+  const obs =
+    obsRaw != null && String(obsRaw).trim() !== '' ? String(obsRaw).trim() : undefined;
+
+  const tamanhoRaw = item.tamanhoNome;
+  const tamanho =
+    typeof tamanhoRaw === 'string' && tamanhoRaw.trim() !== '' ? tamanhoRaw.trim() : undefined;
 
   return {
     quantidade: num(item.quantidade) || 1,
     nome,
-    observacoes: obs,
-    adicionais: linhaAdicionais(item),
+    tamanho,
+    ...(saboresNomes.length > 0 ? { saboresNomes } : {}),
+    observacoes: isBebida ? undefined : obs,
+    adicionais: linhasAdicionaisDoSnapshot(item.adicionaisSnapshot),
+    exibirSemObservacoes: isBebida,
   };
 }
 
@@ -115,6 +140,12 @@ export function vendaPayloadParaKdsPedido(
   const coluna = statusPreparoParaColuna(status);
   const origem = String(raw.origemVenda ?? 'PDV').toUpperCase() as OrigemVendaKds;
 
+  let tipoPedidoMenu: TipoPedidoMenuKds | null = null;
+  if (origem === 'DELIVERY') {
+    const tp = String(raw.tipoPedido ?? 'DELIVERY').toUpperCase();
+    tipoPedidoMenu = tp === 'RETIRADA_BALCAO' ? 'RETIRADA_BALCAO' : 'DELIVERY';
+  }
+
   const obsGeral =
     raw.observacoes != null && String(raw.observacoes).trim() !== ''
       ? String(raw.observacoes).trim()
@@ -140,6 +171,7 @@ export function vendaPayloadParaKdsPedido(
     id,
     senha: extrairSenhaPedido(raw),
     origem,
+    tipoPedidoMenu,
     observacoesGerais: obsGeral,
     coluna,
     itens,

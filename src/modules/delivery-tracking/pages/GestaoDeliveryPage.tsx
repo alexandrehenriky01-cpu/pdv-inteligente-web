@@ -46,6 +46,7 @@ interface PedidoDelivery {
   observacoes?: string | null;
   pagamentos?: { tipoPagamento: string; valor: number }[];
   origemVenda?: string;
+  tipoPedido?: string | null;
   updatedAt?: string;
 }
 
@@ -57,7 +58,12 @@ interface PedidoAtualizado {
   nomeCliente: string | null;
   enderecoEntrega: string | null;
   valorTotal: number;
+  tipoPedido?: string | null;
   updatedAt: string;
+}
+
+function isRetiradaBalcaoGestao(tipo: string | null | undefined): boolean {
+  return String(tipo ?? '').toUpperCase() === 'RETIRADA_BALCAO';
 }
 
 function formatCurrency(value: number): string {
@@ -219,11 +225,13 @@ export function GestaoDeliveryPage() {
     loadingImpressaoRef.current = true;
     setLoadingImpressao(true);
     try {
-      const { data } = await api.patch<{
+      const { data } = await api.put<{
         sucesso: boolean;
         impressaoAutomatica: boolean;
         mensagem?: string;
-      }>('/api/lojas/impressao-automatica');
+      }>('/api/entregas/config/impressao-automatica', {
+        impressaoAutomatica: !(statusAnterior ?? false),
+      });
       if (data.sucesso) {
         setImpressaoAutomatica(data.impressaoAutomatica);
         toast.success(data.mensagem || (data.impressaoAutomatica ? 'Impressão automática ativada!' : 'Impressão automática desativada.'));
@@ -248,14 +256,17 @@ export function GestaoDeliveryPage() {
       if (!isMounted) return;
 
       try {
-        const [pedidosRes, lojaRes, statusLojaRes] = await Promise.all([
+        const [pedidosRes, lojaRes, statusLojaRes, configImpressaoRes] = await Promise.all([
           api.get<PedidoDelivery[]>('/api/vendas/gestao-food'),
           api
             .get<{ nome?: string; nomeFantasia?: string }>('/api/lojas/minha-loja')
             .catch(() => ({ data: { nome: 'Restaurante', nomeFantasia: undefined } })),
           api
-            .get<{ aberto: boolean; impressaoAutomatica: boolean }>('/api/lojas/minha-loja')
-            .catch(() => ({ data: { aberto: true, impressaoAutomatica: false } })),
+            .get<{ aberto: boolean }>('/api/lojas/minha-loja')
+            .catch(() => ({ data: { aberto: true } })),
+          api
+            .get<{ impressaoAutomatica: boolean }>('/api/entregas/config')
+            .catch(() => ({ data: { impressaoAutomatica: false } })),
         ]);
 
         if (!isMounted) return;
@@ -277,7 +288,7 @@ export function GestaoDeliveryPage() {
         });
 
         setLojaAberta(statusLojaRes.data?.aberto ?? null);
-        setImpressaoAutomatica(statusLojaRes.data?.impressaoAutomatica ?? null);
+        setImpressaoAutomatica(configImpressaoRes.data?.impressaoAutomatica ?? null);
         setLoading(false);
       } catch (e) {
         console.error('Gestão Delivery: falha ao carregar dados iniciais', e);
@@ -369,6 +380,7 @@ export function GestaoDeliveryPage() {
                     statusEntrega: payload.statusEntrega,
                     statusPreparo: payload.statusPreparo,
                     updatedAt: payload.updatedAt,
+                    ...(payload.tipoPedido != null ? { tipoPedido: payload.tipoPedido } : {}),
                   }
                 : p
             );
@@ -581,7 +593,9 @@ export function GestaoDeliveryPage() {
   };
 
   const toggleSelectAll = () => {
-    const pendentes = filteredPedidos.filter((p) => p.statusEntrega === 'PENDENTE').map((p) => p.id);
+    const pendentes = filteredPedidos
+      .filter((p) => p.statusEntrega === 'PENDENTE' && !isRetiradaBalcaoGestao(p.tipoPedido))
+      .map((p) => p.id);
     if (selectedOrderIds.size === pendentes.length) {
       setSelectedOrderIds(new Set());
     } else {
@@ -823,8 +837,12 @@ export function GestaoDeliveryPage() {
                           type="checkbox"
                           checked={
                             selectedOrderIds.size > 0 &&
-                            filteredPedidos.filter((p) => p.statusEntrega === 'PENDENTE').length === selectedOrderIds.size &&
-                            filteredPedidos.filter((p) => p.statusEntrega === 'PENDENTE').every((p) => selectedOrderIds.has(p.id))
+                            filteredPedidos.filter(
+                              (p) => p.statusEntrega === 'PENDENTE' && !isRetiradaBalcaoGestao(p.tipoPedido)
+                            ).length === selectedOrderIds.size &&
+                            filteredPedidos
+                              .filter((p) => p.statusEntrega === 'PENDENTE' && !isRetiradaBalcaoGestao(p.tipoPedido))
+                              .every((p) => selectedOrderIds.has(p.id))
                           }
                           onChange={toggleSelectAll}
                           className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-sky-500 focus:ring-sky-500"
@@ -843,8 +861,13 @@ export function GestaoDeliveryPage() {
                       const busy = savingIds.has(row.id);
                       const isPrinting = printingIds.has(row.id);
                       const statusBadge = badgeStatusEntrega(row.statusEntrega);
-                      const podeSairEntrega = row.statusEntrega === 'PENDENTE';
-                      const podeConfirmar = row.statusEntrega === 'SAIU_ENTREGA';
+                      const retirada = isRetiradaBalcaoGestao(row.tipoPedido);
+                      const podeSairEntrega = row.statusEntrega === 'PENDENTE' && !retirada;
+                      const podeConfirmar = row.statusEntrega === 'SAIU_ENTREGA' && !retirada;
+                      const preparoU = String(row.statusPreparo ?? '').toUpperCase();
+                      const podeConcluirRetirada =
+                        retirada && row.statusEntrega === 'PENDENTE' && preparoU === 'PRONTO';
+                      const cupomPendente = row.statusEntrega === 'PENDENTE' && (podeSairEntrega || retirada);
                       const isRecentlyUpdated = row.updatedAt && new Date(row.updatedAt).getTime() > Date.now() - 5000;
 
                       const handleImprimirCupom = async () => {
@@ -866,14 +889,14 @@ export function GestaoDeliveryPage() {
                           className={`border-b border-white/5 transition-colors ${isRecentlyUpdated ? 'bg-emerald-500/5' : 'hover:bg-white/[0.03]'}`}
                         >
                           <td className="px-2 py-4">
-                            {podeSairEntrega && (
+                            {podeSairEntrega ? (
                               <input
                                 type="checkbox"
                                 checked={selectedOrderIds.has(row.id)}
                                 onChange={() => toggleSelectOrder(row.id)}
                                 className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-sky-500 focus:ring-sky-500"
                               />
-                            )}
+                            ) : null}
                           </td>
                           <td className="px-4 py-4">
                             <div className="flex items-center gap-2">
@@ -886,6 +909,17 @@ export function GestaoDeliveryPage() {
                             </div>
                             <div className="text-[10px] text-slate-500 font-mono mt-1">
                               {formatTime(row.createdAt)}
+                            </div>
+                            <div className="mt-2">
+                              <span
+                                className={`inline-flex rounded-md px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${
+                                  retirada
+                                    ? 'border border-violet-500/40 bg-violet-500/15 text-violet-200'
+                                    : 'border border-sky-500/40 bg-sky-500/15 text-sky-200'
+                                }`}
+                              >
+                                {retirada ? 'Retirada' : 'Entrega'}
+                              </span>
                             </div>
                           </td>
                           <td className="px-4 py-4">
@@ -901,7 +935,7 @@ export function GestaoDeliveryPage() {
                             <div className="flex items-start gap-2">
                               <MapPin className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
                               <span className="text-xs text-slate-300 whitespace-pre-wrap leading-snug">
-                                {row.enderecoEntrega || 'Sem endereço'}
+                                {retirada ? 'Retirada no balcão' : row.enderecoEntrega || 'Sem endereço'}
                               </span>
                             </div>
                           </td>
@@ -917,35 +951,50 @@ export function GestaoDeliveryPage() {
                           </td>
                           <td className="px-4 py-4 text-right">
                             <div className="flex flex-wrap justify-end gap-2">
+                              {cupomPendente && (
+                                <button
+                                  type="button"
+                                  disabled={isPrinting || !agentOnline}
+                                  onClick={() => void handleImprimirCupom()}
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/35 bg-sky-500/10 px-3 py-2 text-xs font-black uppercase tracking-wide text-sky-100 hover:bg-sky-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  {isPrinting ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <Printer className="w-3.5 h-3.5" />
+                                  )}
+                                  Cupom
+                                </button>
+                              )}
                               {podeSairEntrega && (
-                                <>
-                                  <button
-                                    type="button"
-                                    disabled={isPrinting || !agentOnline}
-                                    onClick={() => void handleImprimirCupom()}
-                                    className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/35 bg-sky-500/10 px-3 py-2 text-xs font-black uppercase tracking-wide text-sky-100 hover:bg-sky-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                  >
-                                    {isPrinting ? (
-                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                    ) : (
-                                      <Printer className="w-3.5 h-3.5" />
-                                    )}
-                                    Cupom
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={busy}
-                                    onClick={() => void sairParaEntrega(row.id, row.enderecoEntrega || '')}
-                                    className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-amber-600 to-orange-600 px-3 py-2 text-xs font-black uppercase tracking-wide text-white shadow-[0_0_16px_rgba(245,158,11,0.35)] hover:scale-[1.02] transition-all disabled:opacity-50"
-                                  >
-                                    {busy ? (
-                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                    ) : (
-                                      <Rocket className="w-3.5 h-3.5" />
-                                    )}
-                                    Sair p/ Entrega
-                                  </button>
-                                </>
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => void sairParaEntrega(row.id, row.enderecoEntrega || '')}
+                                  className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-amber-600 to-orange-600 px-3 py-2 text-xs font-black uppercase tracking-wide text-white shadow-[0_0_16px_rgba(245,158,11,0.35)] hover:scale-[1.02] transition-all disabled:opacity-50"
+                                >
+                                  {busy ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <Rocket className="w-3.5 h-3.5" />
+                                  )}
+                                  Sair p/ Entrega
+                                </button>
+                              )}
+                              {podeConcluirRetirada && (
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => void confirmarEntrega(row.id)}
+                                  className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 px-3 py-2 text-xs font-black uppercase tracking-wide text-white shadow-[0_0_16px_rgba(16,185,129,0.35)] hover:scale-[1.02] transition-all disabled:opacity-50"
+                                >
+                                  {busy ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <CheckCircle className="w-3.5 h-3.5" />
+                                  )}
+                                  Concluir retirada
+                                </button>
                               )}
                               {podeConfirmar && (
                                 <>

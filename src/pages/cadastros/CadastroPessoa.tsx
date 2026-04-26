@@ -300,8 +300,18 @@ export function CadastroPessoa() {
 
     } catch (err) {
       const error = err as AxiosError<IApiError>;
-      console.error("Erro na busca de CNPJ:", error.response?.data || error.message);
-      alert("A Aurya não conseguiu localizar este CNPJ. Verifique o número digitado.");
+      const backendMessage = error.response?.data?.erro || error.response?.data?.message;
+      const status = error.response?.status;
+      
+      console.error('Erro na busca de CNPJ:', backendMessage || error.message);
+      
+      if (status === 400 && backendMessage) {
+        alert(backendMessage);
+      } else if (status === 0 || error.message?.includes('Network Error')) {
+        alert('Erro de conexão. Verifique sua internet e tente novamente.');
+      } else {
+        alert('A Aurya não conseguiu localizar este CNPJ. Verifique o número digitado.');
+      }
     } finally {
       setIaLoading(false);
     }
