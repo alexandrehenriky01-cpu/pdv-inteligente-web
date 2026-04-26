@@ -116,13 +116,53 @@ async function enviarPacoteImpressaoPosAoAgent(
   pacoteImpressaoPos: PacoteImpressaoPos
 ): Promise<boolean> {
   const agent = getHardwareAgent();
-  agent.connect();
-  const enviado = agent.send({
+  const url = agent.getUrl ? agent.getUrl() : 'ws://localhost:8080';
+  console.log('[PDV FOOD][PRINT][AGENT CONNECT]', { url });
+
+  const connected = await agent.waitForOpen(3000);
+  if (!connected) {
+    console.error('[PDV FOOD][PRINT][AGENT ERROR]', 'Conexão não estabelecida');
+    return false;
+  }
+
+  const comando = {
     acao: 'IMPRIMIR_CUPOM',
     formato: pacoteImpressaoPos.formato,
     payload: pacoteImpressaoPos.payload,
+  };
+  console.log('[PDV FOOD][PRINT][AGENT SEND]', comando);
+
+  const enviado = agent.send(comando);
+  if (!enviado) {
+    console.error('[PDV FOOD][PRINT][AGENT ERROR]', 'Falha ao enviar');
+    return false;
+  }
+
+  const resposta = await new Promise<boolean>((resolve) => {
+    const timeout = setTimeout(() => {
+      unsubscribe();
+      console.warn('[PDV FOOD][PRINT][AGENT TIMEOUT]');
+      resolve(true);
+    }, 8000);
+
+    const unsubscribe = agent.subscribe((msg) => {
+      const tipo = msg.tipo;
+      if (tipo === 'RESPOSTA_IMPRESSAO') {
+        clearTimeout(timeout);
+        unsubscribe();
+        const sucesso = msg.sucesso;
+        console.log('[PDV FOOD][PRINT][AGENT RESPONSE]', msg);
+        if (sucesso === true) {
+          resolve(true);
+        } else {
+          console.error('[PDV FOOD][PRINT][AGENT ERROR]', msg.mensagem || 'Falha na impressão');
+          resolve(false);
+        }
+      }
+    });
   });
-  return enviado;
+
+  return resposta;
 }
 
 interface PdvMesaApiProduto {

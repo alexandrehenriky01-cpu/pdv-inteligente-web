@@ -18,6 +18,8 @@ class HardwareAgentClient {
   private readonly connectionListeners = new Set<(connected: boolean) => void>();
   private intentionalClose = false;
   private reconnectAttempt = 0;
+  private pendingOpenResolve: ((connected: boolean) => void) | null = null;
+  private waitingOpen = false;
 
   subscribe(fn: Listener): () => void {
     this.listeners.add(fn);
@@ -32,6 +34,10 @@ class HardwareAgentClient {
 
   get isConnected(): boolean {
     return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
+  getUrl(): string {
+    return HARDWARE_AGENT_WS_URL;
   }
 
   private emitConnection(connected: boolean) {
@@ -56,7 +62,11 @@ class HardwareAgentClient {
 
   connect(): void {
     this.intentionalClose = false;
-    if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      return;
+    }
+    if (this.ws?.readyState === WebSocket.CONNECTING) {
+      this.waitingOpen = true;
       return;
     }
 
@@ -71,11 +81,21 @@ class HardwareAgentClient {
     this.ws.onopen = () => {
       this.reconnectAttempt = 0;
       this.emitConnection(true);
+      if (this.waitingOpen && this.pendingOpenResolve) {
+        this.pendingOpenResolve(true);
+        this.pendingOpenResolve = null;
+        this.waitingOpen = false;
+      }
     };
 
     this.ws.onclose = () => {
       this.emitConnection(false);
       this.ws = null;
+      if (this.waitingOpen && this.pendingOpenResolve) {
+        this.pendingOpenResolve(false);
+        this.pendingOpenResolve = null;
+        this.waitingOpen = false;
+      }
       if (!this.intentionalClose) this.scheduleReconnect();
     };
 
@@ -118,6 +138,35 @@ class HardwareAgentClient {
       this.reconnectTimer = null;
       this.connect();
     }, delay);
+  }
+
+  waitForOpen(timeoutMs = 3000): Promise<boolean> {
+    if (this.isConnected) return Promise.resolve(true);
+    if (this.ws?.readyState === WebSocket.CONNECTING) {
+      return new Promise((resolve) => {
+        this.pendingOpenResolve = resolve;
+        this.waitingOpen = true;
+        setTimeout(() => {
+          if (this.pendingOpenResolve) {
+            this.pendingOpenResolve(this.isConnected);
+            this.pendingOpenResolve = null;
+            this.waitingOpen = false;
+          }
+        }, timeoutMs);
+      });
+    }
+    this.connect();
+    return new Promise((resolve) => {
+      this.pendingOpenResolve = resolve;
+      this.waitingOpen = true;
+      setTimeout(() => {
+        if (this.pendingOpenResolve) {
+          this.pendingOpenResolve(this.isConnected);
+          this.pendingOpenResolve = null;
+          this.waitingOpen = false;
+        }
+      }, timeoutMs);
+    });
   }
 
   send(payload: object): boolean {
