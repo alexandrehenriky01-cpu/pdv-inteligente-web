@@ -36,6 +36,7 @@ export type StatusTituloGestao =
   | 'PAGO_PARCIAL'
   | 'PAGO_TOTAL'
   | 'CANCELADO'
+  | 'ESTORNO_PENDENTE'
   | 'AGUARDANDO_LIQUIDACAO'
   | string;
 
@@ -49,6 +50,7 @@ export interface ITitulo {
   dataVencimento: string;
   dataEmissao?: string;
   status: StatusTituloGestao;
+  estornoPendente?: boolean;
   pessoa: IPessoaResumo;
   origem: 'MANUAL' | 'PDV' | 'NFE' | string;
   planoContas: string;
@@ -79,7 +81,13 @@ export function GestaoTitulosPage() {
   const [busca, setBusca] = useState('');
   const [filtroTipo, setFiltroTipo] = useState<'TODOS' | 'RECEBER' | 'PAGAR'>('TODOS');
   const [filtroStatus, setFiltroStatus] = useState<
-    'TODOS' | 'ABERTOS' | 'PAGOS' | 'VENCIDOS' | 'AGUARDANDO_LIQUIDACAO'
+    | 'TODOS'
+    | 'ABERTOS'
+    | 'PAGOS'
+    | 'VENCIDOS'
+    | 'AGUARDANDO_LIQUIDACAO'
+    | 'PENDENTES_ESTORNO'
+    | 'CANCELADOS'
   >('TODOS');
   const [filtroValorMin, setFiltroValorMin] = useState('');
   const [filtroValorMax, setFiltroValorMax] = useState('');
@@ -119,6 +127,10 @@ export function GestaoTitulosPage() {
     ['ATRASADO', 'VENCIDO'].includes(status?.toUpperCase() || '');
   const isAguardandoLiquidacao = (status: string) =>
     String(status || '').toUpperCase() === 'AGUARDANDO_LIQUIDACAO';
+  const isEstornoPendente = (status: string) =>
+    String(status || '').toUpperCase() === 'ESTORNO_PENDENTE';
+  const isCanceladoTitulo = (status: string) =>
+    String(status || '').toUpperCase() === 'CANCELADO';
 
   useEffect(() => {
     carregarDados();
@@ -291,10 +303,19 @@ export function GestaoTitulosPage() {
     
     // 2. Status
     const statusSeguro = String(t.status || '');
-    if (filtroStatus === 'ABERTOS' && isPago(statusSeguro)) return false;
+    if (filtroStatus === 'ABERTOS') {
+      if (isPago(statusSeguro)) return false;
+      if (isCanceladoTitulo(statusSeguro) || isEstornoPendente(statusSeguro)) return false;
+    }
     if (filtroStatus === 'PAGOS' && !isPago(statusSeguro)) return false;
     if (filtroStatus === 'VENCIDOS' && !isAtrasado(statusSeguro)) return false;
     if (filtroStatus === 'AGUARDANDO_LIQUIDACAO' && !isAguardandoLiquidacao(statusSeguro)) {
+      return false;
+    }
+    if (filtroStatus === 'PENDENTES_ESTORNO' && !isEstornoPendente(statusSeguro) && !t.estornoPendente) {
+      return false;
+    }
+    if (filtroStatus === 'CANCELADOS' && !isCanceladoTitulo(statusSeguro)) {
       return false;
     }
 
@@ -329,11 +350,23 @@ export function GestaoTitulosPage() {
   });
 
   const totalReceber = titulos
-    .filter(t => t.tipo === 'RECEBER' && !isPago(t.status))
+    .filter(
+      (t) =>
+        t.tipo === 'RECEBER' &&
+        !isPago(t.status) &&
+        !isCanceladoTitulo(t.status) &&
+        !isEstornoPendente(t.status)
+    )
     .reduce((acc, t) => acc + t.saldoDevedor, 0);
 
   const totalPagar = titulos
-    .filter(t => t.tipo === 'PAGAR' && !isPago(t.status))
+    .filter(
+      (t) =>
+        t.tipo === 'PAGAR' &&
+        !isPago(t.status) &&
+        !isCanceladoTitulo(t.status) &&
+        !isEstornoPendente(t.status)
+    )
     .reduce((acc, t) => acc + t.saldoDevedor, 0);
 
   const formatarMoeda = (valor: number) => {
@@ -341,6 +374,20 @@ export function GestaoTitulosPage() {
   };
 
   const getStatusBadge = (status: string) => {
+    if (isEstornoPendente(status)) {
+      return (
+        <span className="inline-flex w-max max-w-[220px] items-center gap-1 rounded-full border border-amber-400/35 bg-amber-500/15 px-3 py-1 text-[10px] font-black uppercase leading-tight tracking-[0.12em] text-amber-100">
+          <AlertTriangle className="h-3 w-3 shrink-0" /> Estorno pendente
+        </span>
+      );
+    }
+    if (isCanceladoTitulo(status)) {
+      return (
+        <span className="inline-flex w-max items-center gap-1 rounded-full border border-slate-500/30 bg-slate-600/20 px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-slate-200">
+          <X className="h-3 w-3" /> Cancelado
+        </span>
+      );
+    }
     if (isAguardandoLiquidacao(status)) {
       return (
         <span className="inline-flex w-max items-center gap-1 rounded-full border border-sky-400/30 bg-sky-500/15 px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-sky-200 shadow-[0_0_12px_rgba(56,189,248,0.2)]">
@@ -510,6 +557,8 @@ export function GestaoTitulosPage() {
                   { id: 'TODOS' as const, label: 'Todos' },
                   { id: 'ABERTOS' as const, label: 'Abertos / pendentes' },
                   { id: 'AGUARDANDO_LIQUIDACAO' as const, label: 'Aguard. liquidação (cartões)' },
+                  { id: 'PENDENTES_ESTORNO' as const, label: 'Estorno pendente' },
+                  { id: 'CANCELADOS' as const, label: 'Cancelados' },
                   { id: 'PAGOS' as const, label: 'Pagos' },
                   { id: 'VENCIDOS' as const, label: 'Vencidos' },
                 ] as const
@@ -553,6 +602,8 @@ export function GestaoTitulosPage() {
                     </option>
                     <option value="PAGOS">Pagos / Baixados</option>
                     <option value="VENCIDOS">Vencidos / Atrasados</option>
+                    <option value="PENDENTES_ESTORNO">Pendentes de estorno (caixa)</option>
+                    <option value="CANCELADOS">Cancelados</option>
                   </select>
                 </div>
 
@@ -661,6 +712,10 @@ export function GestaoTitulosPage() {
                 ) : (
                   titulosFiltrados.map((titulo) => {
                     const isPendenteConciliacao = titulo.planoContas?.includes('Pendente') || !titulo.planoContas;
+                    const st = String(titulo.status || '');
+                    const exibeEstorno = (isPago(st) || isEstornoPendente(st)) && !isCanceladoTitulo(st);
+                    const exibeBaixa =
+                      !isCanceladoTitulo(st) && !isEstornoPendente(st) && !isPago(st);
 
                     return (
                       <tr key={titulo.id} className="group cursor-pointer transition-colors hover:bg-white/5" onClick={() => abrirModalEdit(titulo)}>
@@ -722,11 +777,12 @@ export function GestaoTitulosPage() {
                         <td className="p-4 sm:p-5">
                           <div className="flex justify-end gap-3 opacity-0 transition-opacity group-hover:opacity-100">
                             <button onClick={(e) => { e.stopPropagation(); abrirModalEdit(titulo); }} className="rounded-xl border border-white/10 bg-[#0b1324] p-2.5 text-slate-400 hover:border-violet-400/20 hover:bg-violet-500/10 hover:text-violet-300" title="Ver Detalhes"><Edit2 className="h-4 w-4" /></button>
-                            {!isPago(titulo.status) ? (
+                            {exibeBaixa ? (
                               <button onClick={(e) => { e.stopPropagation(); abrirModalBaixa(titulo); }} className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-black uppercase tracking-[0.14em] transition-all shadow-sm ${titulo.tipo === 'RECEBER' ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-600 hover:text-white' : 'border-rose-400/20 bg-rose-500/10 text-rose-300 hover:bg-rose-600 hover:text-white'}`} title="Realizar Baixa"><HandCoins className="h-4 w-4" /> Baixar</button>
-                            ) : (
+                            ) : null}
+                            {exibeEstorno ? (
                               <button onClick={(e) => { e.stopPropagation(); confirmarEstorno(titulo); }} className="inline-flex items-center gap-2 rounded-xl border border-amber-400/20 bg-amber-500/10 px-4 py-2.5 text-xs font-black uppercase tracking-[0.14em] text-amber-300 hover:bg-amber-500/20"><RotateCcw className="h-3.5 w-3.5" /> Estornar</button>
-                            )}
+                            ) : null}
                             {titulo.origem === 'MANUAL' && titulo.valor === titulo.saldoDevedor && (
                               <button onClick={(e) => { e.stopPropagation(); confirmarExclusao(titulo); }} className="rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-rose-300 hover:bg-rose-500/20" title="Excluir Título"><Trash2 className="h-4 w-4" /></button>
                             )}

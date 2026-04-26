@@ -19,8 +19,11 @@ export interface IUsuario {
 }
 
 export interface ILoginResponse {
-  token: string;
+  token?: string;
+  accessToken?: string;
+  refreshToken?: string;
   usuario: IUsuario;
+  session?: { refreshTokenExpiresAt?: string };
 }
 
 export interface IAuthError {

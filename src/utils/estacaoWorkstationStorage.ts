@@ -1,6 +1,10 @@
 import type { AxiosInstance } from 'axios';
 
 const LS_NOME_ESTACAO = '@PDV:NomeEstacaoExibicao';
+/** Fallback local do modo NFCE/Consumidor por estação (`aurya_pdv_mode_<estacaoId>`). */
+const LS_MODO_PDV_PREFIX = 'aurya_pdv_mode_';
+
+export type ModoPdvEstacaoPersistido = 'NFCE' | 'CONSUMIDOR';
 const LS_CAIXA_FISCAL = '@PDV:CaixaFiscalId';
 const LS_SESSAO_CAIXA = '@PDV:SessaoCaixaId';
 const LS_TERMINAL_FISCAL = '@PDV_Terminal_Name';
@@ -100,6 +104,17 @@ export function persistirContextoPosAberturaCaixa(opts: {
   }
 }
 
+export function getModoPdvLocalFallback(estacaoId: string): ModoPdvEstacaoPersistido | undefined {
+  const raw = localStorage.getItem(`${LS_MODO_PDV_PREFIX}${estacaoId}`)?.trim().toUpperCase();
+  if (raw === 'CONSUMIDOR') return 'CONSUMIDOR';
+  if (raw === 'NFCE') return 'NFCE';
+  return undefined;
+}
+
+export function persistirModoPdvLocal(estacaoId: string, modo: ModoPdvEstacaoPersistido): void {
+  localStorage.setItem(`${LS_MODO_PDV_PREFIX}${estacaoId}`, modo);
+}
+
 /** Sempre lê o ID no momento da chamada (evita URL sem query por closure/stale state). */
 export function montarUrlVerificarCaixa(): string | null {
   const id = getEstacaoTrabalhoIdPdv();
@@ -133,6 +148,8 @@ export async function descobrirEstacaoPorIp(
       data?: {
         id?: string;
         nome?: string;
+        tipoTerminal?: string;
+        modoPdv?: string;
         caixaId?: string | null;
         caixa?: { id?: string } | null;
       };
@@ -147,6 +164,10 @@ export async function descobrirEstacaoPorIp(
         (typeof row?.caixaId === 'string' && row.caixaId.trim()) ||
         (row?.caixa && typeof row.caixa.id === 'string' ? row.caixa.id.trim() : '');
       if (cx) persistirCaixaFiscalId(cx);
+      if (row?.tipoTerminal === 'PDV') {
+        const md = row.modoPdv === 'CONSUMIDOR' ? 'CONSUMIDOR' : 'NFCE';
+        persistirModoPdvLocal(id, md);
+      }
       return 'descoberto';
     }
     return 'erro_rede';

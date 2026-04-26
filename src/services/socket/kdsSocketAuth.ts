@@ -5,6 +5,8 @@ const UUID_RE =
 
 /**
  * Auth do handshake Socket.io alinhado ao `socketAuthMiddleware` do backend.
+ * Envia `lojaSalaId` sempre que houver `lojaId` válido no usuário (não só SUPER_ADMIN),
+ * para ingressar na sala correta e receber `novo-pedido-cozinha` / `status-pedido-atualizado`.
  */
 export function buildKdsSocketAuth(): { token: string; lojaSalaId?: string } | null {
   const token = localStorage.getItem(AUTH_TOKEN_KEY)?.trim();
@@ -16,14 +18,13 @@ export function buildKdsSocketAuth(): { token: string; lojaSalaId?: string } | n
     const raw = localStorage.getItem(AUTH_USER_KEY);
     if (raw) {
       const u = JSON.parse(raw) as { role?: string; lojaId?: string | null };
-      if (u.role === 'SUPER_ADMIN') {
-        const lid = u.lojaId?.trim();
-        if (lid && UUID_RE.test(lid)) {
-          lojaSalaId = lid;
-        } else {
-          const env = (import.meta.env.VITE_KDS_LOJA_SALA_ID as string | undefined)?.trim();
-          if (env && UUID_RE.test(env)) lojaSalaId = env;
-        }
+      const lid = u.lojaId?.trim();
+      if (lid && UUID_RE.test(lid)) {
+        lojaSalaId = lid;
+      }
+      if (u.role === 'SUPER_ADMIN' && !lojaSalaId) {
+        const env = (import.meta.env.VITE_KDS_LOJA_SALA_ID as string | undefined)?.trim();
+        if (env && UUID_RE.test(env)) lojaSalaId = env;
       }
     }
   } catch {

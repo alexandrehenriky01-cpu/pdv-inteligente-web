@@ -196,7 +196,10 @@ export function GestaoNotas() {
     setCarregando(true);
     try {
       // 🚀 FIM DO ANY: Tipagem blindada
-      const response = await api.get<IVendaFiscalCompleta[] | { vendas: IVendaFiscalCompleta[] }>('/api/vendas');
+      const response = await api.get<IVendaFiscalCompleta[] | { vendas: IVendaFiscalCompleta[] }>(
+        '/api/vendas',
+        { params: { apenasDocumentoFiscalEmitido: true } }
+      );
       const data = Array.isArray(response.data) ? response.data : (response.data.vendas || []);
       
       const vendasOrdenadas = data.sort((a: IVendaFiscalCompleta, b: IVendaFiscalCompleta) => {

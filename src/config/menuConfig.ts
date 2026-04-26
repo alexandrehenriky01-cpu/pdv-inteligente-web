@@ -16,6 +16,11 @@ export type MenuItemConfig = {
   activeUnlessPathIncludes?: string;
   /** Exige também acesso a estas features (todas). */
   extraRequiredFeatures?: string[];
+  /**
+   * Se true, a `feature` deve constar nas features efetivas da loja (JWT pós-`resolveFeaturesForLoja`),
+   * além do mapeamento RBAC em `FEATURE_MASTER_MAP`.
+   */
+  requireLojaFeature?: boolean;
 };
 
 export type MenuSectionConfig = {
@@ -111,6 +116,12 @@ export const MENU_CONFIG: MenuConfigEntry[] = [
       { label: 'PDV Food', path: '/pdv-food', icon: 'UtensilsCrossed', feature: 'PDV.FOOD_VIEW' },
       { label: 'Cadastro de Cardápio', path: '/cardapio/gestao', icon: 'Pizza', feature: 'FOOD_SERVICE.CARDAPIO_VIEW' },
       { label: 'KDS (Cozinha)', path: '/kds', icon: 'ChefHat', feature: 'FOOD_SERVICE.KDS_VIEW' },
+      {
+        label: 'KDS Chamada (Balcão)',
+        path: '/kds-chamada-balcao',
+        icon: 'Megaphone',
+        feature: 'FOOD_SERVICE.KDS_VIEW',
+      },
       { label: 'Gestão Delivery / Pedidos', path: '/vendas/gestao-delivery', icon: 'Truck', feature: 'FOOD_SERVICE.DELIVERY_VIEW' },
       {
         label: 'Gestão Food / Expedição',
@@ -124,6 +135,13 @@ export const MENU_CONFIG: MenuConfigEntry[] = [
       { label: 'Garçom (mesas)', path: '/garcom/mesas', icon: 'UtensilsCrossed', feature: 'FOOD_SERVICE.MESAS_VIEW' },
       { label: 'Campanhas e promoções', path: '/vendas/campanhas-promocionais', icon: 'Sparkles', feature: 'COMERCIAL.CAMPAIGN_VIEW' },
       { label: 'Gestão de turnos / caixa', path: '/vendas/gestao-turnos-caixa', icon: 'Timer', feature: 'PDV.TURNO_VIEW' },
+      {
+        label: 'Gestão de Vendas',
+        path: '/vendas/gestao-vendas',
+        icon: 'ListOrdered',
+        feature: 'VENDAS.GESTAO_VENDAS_VIEW',
+        requireLojaFeature: true,
+      },
     ],
   },
   { macroTitle: 'Suprimentos & Logística' },

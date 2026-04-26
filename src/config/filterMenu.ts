@@ -70,6 +70,19 @@ function collectNormalizedFeatures(user: MenuUser): string[] {
   return [...new Set([...u, ...l])];
 }
 
+/**
+ * Feature licenciada para a loja/sessão (lista vinda do JWT após `resolveFeaturesForLoja`).
+ * Não confundir com `userCanAccessFeature` (que valida permissão RBAC mapeada à feature).
+ */
+function userLojaTemFeatureLicenciada(user: MenuUser, feature: string): boolean {
+  if (isSuperAdminRole(user.role)) return true;
+  const key = normalizeFeature(feature);
+  if (!key) return false;
+  const merged = collectNormalizedFeatures(user);
+  if (merged.includes('*')) return true;
+  return merged.includes(key);
+}
+
 /** Permissões efetivas = diretas do usuário + derivadas das features (espelho do build do JWT). */
 export function buildEffectivePermissionSet(user: MenuUser): Set<string> {
   const base = (user.permissoes || []).map((p) => resolvePermission(String(p).trim().toUpperCase()));
@@ -120,7 +133,9 @@ function itemVisible(user: MenuUser, item: MenuItemConfig): boolean {
     const r = String(user.role || '').trim().toUpperCase();
     if (!item.anyRole.map((x) => x.toUpperCase()).includes(r)) return false;
   }
-  
+
+  if (item.requireLojaFeature && !userLojaTemFeatureLicenciada(user, item.feature)) return false;
+
   if (!userCanAccessFeature(user, item.feature)) return false;
   
   // Verificar features extras requeridas

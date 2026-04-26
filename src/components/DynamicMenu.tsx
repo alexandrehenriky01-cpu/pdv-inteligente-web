@@ -51,6 +51,7 @@ import {
   PackageSearch,
   Pizza,
   ChefHat,
+  Megaphone,
 } from 'lucide-react';
 import { useAuryaTheme } from '../theme/ThemeContext';
 import { isMenuFlatLinks, isMenuMacro, isMenuSection } from '../config/menuConfig';
@@ -107,6 +108,7 @@ const ICONS: Record<string, ElementType> = {
   PackageSearch,
   Pizza,
   ChefHat,
+  Megaphone,
 };
 
 function iconComponent(name: string): ElementType {
@@ -287,7 +289,7 @@ export function DynamicMenu({ usuario, sidebarCollapsed }: DynamicMenuProps) {
         ['/produtos', '/categorias', '/embalagens', '/pessoas', '/equipe', '/permissoes', '/configuracoes-loja', '/layout-etiquetas', '/estacoes-trabalho', '/locais-cobranca', '/configuracao-caixas-pdv', '/configuracao-tef', '/balancas'].some((p) => path.includes(p)),
       operacaoVendas:
         prev.operacaoVendas ||
-        ['/frente-caixa', '/self-checkout', '/pdv-food', '/cardapio/gestao', '/gestao-food', '/garcom', '/vendas/campanhas-promocionais', '/vendas/gestao-turnos-caixa', '/kds', '/vendas/gestao-delivery', '/entregas/mobile', '/comanda-mobile'].some((p) => path.includes(p)),
+        ['/frente-caixa', '/self-checkout', '/pdv-food', '/cardapio/gestao', '/gestao-food', '/garcom', '/vendas/campanhas-promocionais', '/vendas/gestao-turnos-caixa', '/vendas/gestao-vendas', '/kds', '/kds-chamada-balcao', '/vendas/gestao-delivery', '/entregas/mobile', '/comanda-mobile'].some((p) => path.includes(p)),
       comprasSuprimentos:
         prev.comprasSuprimentos || ['/compras', '/entrada-notas', '/ListarNfe'].some((p) => path.includes(p)),
       fiscalInteligente: prev.fiscalInteligente || ['/notas', '/notas-fiscais', '/regras-fiscais', '/cadastrocfop'].some((p) => path.includes(p)),

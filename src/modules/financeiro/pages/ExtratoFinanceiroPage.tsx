@@ -33,6 +33,8 @@ export interface ILancamentoExtrato {
   valor: number;
   saldoMomento: number;
   formaPagamento: string;
+  /** Vinculado a título marcado como estorno pendente após cancelamento operacional (ex.: KDS). */
+  estornoPendente?: boolean;
 }
 
 export function ExtratoFinanceiroPage() {
@@ -261,14 +263,20 @@ export function ExtratoFinanceiroPage() {
                 ) : (
                   extrato.map((linha, index) => {
                     const isEntrada = linha.tipo === 'DEBITO'; // Na conta banco, Débito = Entrada de grana
+                    const dataRef = linha.data || (linha as { dataLancamento?: string }).dataLancamento;
                     return (
                       <tr key={linha.id} className="hover:bg-white/5 transition-colors group">
                         <td className="p-4 text-sm text-slate-400 font-medium whitespace-nowrap">
-                          {formatarData(linha.data)}
+                          {formatarData(dataRef ?? '')}
                         </td>
                         <td className="p-4">
                           <p className="text-white font-bold text-sm mb-1">{linha.historico}</p>
                           <p className="text-[10px] text-slate-500 font-mono uppercase tracking-widest">{linha.documento}</p>
+                          {linha.estornoPendente && (
+                            <p className="mt-2 inline-flex rounded-lg border border-amber-500/40 bg-amber-500/15 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-amber-200">
+                              Estorno pendente
+                            </p>
+                          )}
                         </td>
                         <td className="p-4 text-center">
                           <div className="inline-flex items-center justify-center p-2 bg-[#0b1324] border border-white/5 rounded-lg shadow-inner" title={linha.formaPagamento}>

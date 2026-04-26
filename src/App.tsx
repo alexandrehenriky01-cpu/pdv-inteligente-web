@@ -22,6 +22,7 @@ import { TotemCheckoutPage } from './modules/totem/pages/TotemCheckoutPage';
 import { PdvFoodService } from './modules/operacoes/PdvFoodService';
 import { ComandaMobile } from './modules/operacoes/ComandaMobile';
 import { KdsPage } from './modules/kds/KdsPage';
+import { KdsChamadaBalcaoPage } from './modules/kds/KdsChamadaBalcaoPage';
 import { PainelSenhasPage } from './modules/kds/PainelSenhasPage';
 import { DeliveryLayout } from './modules/delivery/DeliveryLayout';
 import { DeliveryMenuPage } from './modules/delivery/DeliveryMenuPage';
@@ -104,6 +105,7 @@ import { CaixasConfigPage } from './modules/vendas/pages/CaixasConfigPage';
 import { AdquirentesPage } from './modules/vendas/pages/AdquirentesPage';
 import { CampanhasPromocionaisPage } from './modules/vendas/pages/CampanhasPromocionaisPage';
 import { GestaoTurnosCaixaPage } from './modules/vendas/pages/GestaoTurnosCaixaPage';
+import { GestaoVendasPage } from './modules/vendas/pages/GestaoVendasPage';
 import { GestaoPedidosFoodPage } from './modules/vendas/pages/GestaoPedidosFoodPage';
 import { GestaoCardapioPage } from './modules/vendas/pages/GestaoCardapioPage';
 import { GarcomLayout } from './modules/garcom/GarcomLayout';
@@ -195,6 +197,7 @@ function App() {
           </Route>
           <Route path="/pdv-food" element={<PdvFoodService />} />
           <Route path="/kds" element={<KdsPage />} />
+          <Route path="/kds-chamada-balcao" element={<KdsChamadaBalcaoPage />} />
           <Route path="/painel-senhas" element={<PainelSenhasPage />} />
           <Route path="/comanda-mobile" element={<ComandaMobile />} />
           <Route path="/garcom" element={<GarcomLayout />}>
@@ -206,6 +209,7 @@ function App() {
           </Route>
           <Route path="/vendas/campanhas-promocionais" element={<CampanhasPromocionaisPage />} />
           <Route path="/vendas/gestao-turnos-caixa" element={<GestaoTurnosCaixaPage />} />
+          <Route path="/vendas/gestao-vendas" element={<GestaoVendasPage />} />
           <Route path="/gestao-food" element={<GestaoPedidosFoodPage />} />
           <Route path="/vendas/gestao-delivery" element={<GestaoDeliveryPage />} />
           <Route path="/entregas/mobile/:token" element={<EntregasMobilePage />} />

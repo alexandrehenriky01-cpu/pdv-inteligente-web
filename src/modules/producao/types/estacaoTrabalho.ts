@@ -35,6 +35,13 @@ export interface EstacaoTrabalho {
   ativo: boolean;
   observacao?: string | null;
 
+  tipoTerminal?: 'PDV' | 'TOTEM';
+  modoPdv?: 'NFCE' | 'CONSUMIDOR';
+  totemEmitirNfceAutomatico?: boolean | null;
+  totemImprimirComprovante?: boolean | null;
+  totemExigirCpf?: boolean | null;
+  totemPermitirInformarNome?: boolean | null;
+
   createdAt: string;
   updatedAt: string;
 

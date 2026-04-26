@@ -49,6 +49,9 @@ export interface TotemMockProduto {
   tamanhos: TotemMockTamanho[];
   precoBase: number;
   imagemUrl: string;
+  /** Código curto do produto ERP (quando o cardápio expõe). */
+  codigo?: string;
+  codigoBarras?: string;
   adicionais: TotemMockAdicional[];
 }
 

@@ -80,9 +80,15 @@ export function useMesas(options: UseMesasOptions = {}) {
       });
     };
 
+    const onMesaContaAtualizada = () => {
+      void carregar();
+    };
+
     socket.on('mesa-liberada', onMesaLiberada);
+    socket.on('mesa-conta-atualizada', onMesaContaAtualizada);
     return () => {
       socket.off('mesa-liberada', onMesaLiberada);
+      socket.off('mesa-conta-atualizada', onMesaContaAtualizada);
       socket.disconnect();
     };
   }, [enabled, carregar]);

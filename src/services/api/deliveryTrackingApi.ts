@@ -8,7 +8,8 @@ export type TrackingStatusCliente =
   | 'SAIU_PARA_ENTREGA'
   | 'ENTREGUE'
   | 'PRONTO_PARA_RETIRADA'
-  | 'RETIRADO';
+  | 'RETIRADO'
+  | 'CANCELADO_LOJA';
 
 export interface DeliveryPedidoTrackingDTO {
   id: string;
@@ -19,6 +20,8 @@ export interface DeliveryPedidoTrackingDTO {
   statusEntrega?: string | null;
   statusPreparo: string | null;
   trackingStatus?: TrackingStatusCliente;
+  mensagemCliente?: string;
+  motivoCancelamentoResumo?: string;
   valorTotal: number;
   enderecoEntrega: string | null;
   itens: Array<{ nome: string; descricao: string | null; quantidade: number }>;

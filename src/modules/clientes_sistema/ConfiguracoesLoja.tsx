@@ -1,6 +1,6 @@
 import { useEffect, useState, type ChangeEvent, type FC } from 'react';
 import { isAxiosError } from 'axios';
-import { Upload, Save, Building2, Phone, MapPin, UserSquare2, FileText, ShieldCheck, Key, Hash, CloudCog, Scale, Trash2, RefreshCw, Link2 } from 'lucide-react';
+import { Upload, Save, Building2, Phone, MapPin, UserSquare2, FileText, ShieldCheck, Key, Hash, CloudCog, Scale, Trash2, RefreshCw, Link2, MonitorSmartphone } from 'lucide-react';
 // 🚀 1. IMPORTAMOS O HOOK DE NAVEGAÇÃO
 import { useNavigate } from 'react-router-dom'; 
 import { api } from '../../services/api'; 
@@ -45,6 +45,13 @@ interface CompanySettings {
   slug: string;
   /** Taxa de entrega padrão para o cardápio digital (em centavos, ex.: 800 = R$ 8,00). */
   taxaEntregaPadrao: number;
+
+  totemSettings: {
+    emitirNfceAutomatico: boolean;
+    imprimirComprovante: boolean;
+    exigirCpf: boolean;
+    permitirInformarNome: boolean;
+  };
   
   nfeHomologacaoSerie: string;
   nfeHomologacaoNumero: string;
@@ -114,6 +121,12 @@ export const ConfiguracoesLoja: FC = () => {
     cteHomologacaoSerie: '', cteHomologacaoNumero: '', cteProducaoSerie: '', cteProducaoNumero: '', cteToggle: false,
     mdfeHomologacaoSerie: '', mdfeHomologacaoNumero: '', mdfeProducaoSerie: '', mdfeProducaoNumero: '', mdfeToggle: false,
     taxaEntregaPadrao: 0,
+    totemSettings: {
+      emitirNfceAutomatico: false,
+      imprimirComprovante: true,
+      exigirCpf: false,
+      permitirInformarNome: true,
+    },
     ambienteFiscal: 'HOMOLOGACAO',
     focusTokenHomologacao: '',
     focusTokenProducao: '',
@@ -221,6 +234,23 @@ export const ConfiguracoesLoja: FC = () => {
             logoUrl: lojaDB.logoUrl ?? prev.logoUrl,
             slug: typeof lojaDB.slug === 'string' ? lojaDB.slug : prev.slug,
             taxaEntregaPadrao: Number(lojaDB.taxaEntregaPadrao) || 0,
+            totemSettings: (() => {
+              const raw = lojaDB.totemSettings as Record<string, unknown> | null | undefined;
+              if (!raw || typeof raw !== 'object') {
+                return {
+                  emitirNfceAutomatico: false,
+                  imprimirComprovante: true,
+                  exigirCpf: false,
+                  permitirInformarNome: true,
+                };
+              }
+              return {
+                emitirNfceAutomatico: raw.emitirNfceAutomatico === true,
+                imprimirComprovante: raw.imprimirComprovante !== false,
+                exigirCpf: raw.exigirCpf === true,
+                permitirInformarNome: raw.permitirInformarNome !== false,
+              };
+            })(),
             possuiCertificado: Boolean(lojaDB.possuiCertificado),
             certificadoNome: lojaDB.certificadoNome ?? prev.certificadoNome,
             certificadoValidade: lojaDB.certificadoValidade ?? prev.certificadoValidade,
@@ -344,6 +374,7 @@ export const ConfiguracoesLoja: FC = () => {
             { id: 'endereco', label: 'Endereço', icon: MapPin },
             { id: 'responsavel', label: 'Responsável', icon: UserSquare2 },
             { id: 'documentos', label: 'Documentos Fiscais', icon: FileText },
+            { id: 'totem', label: 'Totem', icon: MonitorSmartphone },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -984,6 +1015,86 @@ export const ConfiguracoesLoja: FC = () => {
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'totem' && (
+            <div className={`animate-in fade-in duration-300 ${cardClass}`}>
+              <div className="flex items-center gap-2 mb-4 border-b border-white/5 pb-3">
+                <MonitorSmartphone className="w-5 h-5 text-violet-400" />
+                <h3 className="font-bold text-lg text-white">Totem / autoatendimento</h3>
+              </div>
+              <p className="text-sm text-slate-400 mb-5">
+                Fallback quando a estação totem não possui valores próprios. PDVs usam o modo NFc/Consumidor por
+                terminal (F9 no caixa).
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="rounded border-white/20"
+                    checked={settings.totemSettings.emitirNfceAutomatico}
+                    onChange={(e) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        totemSettings: {
+                          ...prev.totemSettings,
+                          emitirNfceAutomatico: e.target.checked,
+                        },
+                      }))
+                    }
+                  />
+                  <span className="text-sm text-white font-medium">Emitir NFC-e automaticamente</span>
+                </label>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="rounded border-white/20"
+                    checked={settings.totemSettings.imprimirComprovante}
+                    onChange={(e) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        totemSettings: {
+                          ...prev.totemSettings,
+                          imprimirComprovante: e.target.checked,
+                        },
+                      }))
+                    }
+                  />
+                  <span className="text-sm text-white font-medium">Imprimir comprovante de conferência</span>
+                </label>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="rounded border-white/20"
+                    checked={settings.totemSettings.exigirCpf}
+                    onChange={(e) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        totemSettings: { ...prev.totemSettings, exigirCpf: e.target.checked },
+                      }))
+                    }
+                  />
+                  <span className="text-sm text-white font-medium">Exigir CPF</span>
+                </label>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="rounded border-white/20"
+                    checked={settings.totemSettings.permitirInformarNome}
+                    onChange={(e) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        totemSettings: {
+                          ...prev.totemSettings,
+                          permitirInformarNome: e.target.checked,
+                        },
+                      }))
+                    }
+                  />
+                  <span className="text-sm text-white font-medium">Permitir informar nome</span>
+                </label>
               </div>
             </div>
           )}

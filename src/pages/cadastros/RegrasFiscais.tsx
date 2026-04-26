@@ -43,7 +43,7 @@ export function RegrasFiscais() {
     try {
       setLoading(true);
       // 🚀 FIM DO ANY: Tipagem estrita e rota padronizada
-      const response = await api.get<RegraFiscal[]>('/api/regras-fiscais');
+      const response = await api.get<RegraFiscal[]>('/api/fiscal/regras-fiscais');
       setRegras(response.data);
     } catch (error) {
       console.error("Erro ao carregar regras:", error);
@@ -71,10 +71,10 @@ export function RegrasFiscais() {
 
       if (regraAtual.id) {
         // 🚀 Rota padronizada
-        await api.put<RegraFiscal>(`/api/regras-fiscais/${regraAtual.id}`, payload);
+        await api.put<RegraFiscal>(`/api/fiscal/regras-fiscais/${regraAtual.id}`, payload);
       } else {
         // 🚀 Rota padronizada
-        await api.post<RegraFiscal>('/api/regras-fiscais', payload);
+        await api.post<RegraFiscal>('/api/fiscal/regras-fiscais', payload);
       }
       
       setModalAberto(false);

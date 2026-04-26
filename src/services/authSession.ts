@@ -1,11 +1,20 @@
 import { api } from './api';
-import { AUTH_TOKEN_KEY, AUTH_USER_KEY, clearStoredAuth } from './authStorage';
+import { AUTH_USER_KEY } from './authStorage';
+import {
+  clearSessionTokens,
+  getAccessToken,
+  setAccessToken,
+  setRefreshToken,
+  syncAuthTokensFromStorage,
+} from './authTokenService';
+import { stopSessionRefreshScheduler } from './sessionRefreshScheduler';
 
 /**
  * Reaplica o Bearer no cliente Axios a partir do localStorage (ex.: após F5).
  */
 export function syncAxiosAuthorizationFromStorage(): void {
-  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  syncAuthTokensFromStorage();
+  const token = getAccessToken();
   if (token) {
     api.defaults.headers.common.Authorization = `Bearer ${token}`;
   } else {
@@ -14,7 +23,8 @@ export function syncAxiosAuthorizationFromStorage(): void {
 }
 
 export function clearAuthSessionAndAxios(): void {
-  clearStoredAuth();
+  stopSessionRefreshScheduler();
+  clearSessionTokens();
   delete api.defaults.headers.common.Authorization;
 }
 
@@ -33,6 +43,10 @@ export function persistSessionFromApiData(data: unknown): PersistSessionResult {
   const d = data as Record<string, unknown>;
   const tokenRaw = d.token ?? d.accessToken ?? d.access_token;
   const token = typeof tokenRaw === 'string' && tokenRaw.length > 0 ? tokenRaw.trim() : undefined;
+
+  const refreshRaw = d.refreshToken ?? d.refresh_token;
+  const refreshTokenValue =
+    typeof refreshRaw === 'string' && refreshRaw.trim().length > 0 ? refreshRaw.trim() : null;
 
   const usuarioRaw = d.usuario ?? d.user;
   if (!token) {
@@ -70,11 +84,9 @@ export function persistSessionFromApiData(data: unknown): PersistSessionResult {
   }
 
   try {
-    localStorage.setItem(AUTH_TOKEN_KEY, token);
+    setRefreshToken(refreshTokenValue);
+    setAccessToken(token, true);
     localStorage.setItem(AUTH_USER_KEY, JSON.stringify(usuarioArmazenado));
-
-    console.log('[AuthSession] Token salvo no localStorage:', token.substring(0, 30) + '...');
-    console.log('[AuthSession] Usuario salvo:', JSON.stringify(usuarioArmazenado).substring(0, 50) + '...');
   } catch {
     return { ok: false, reason: 'Não foi possível salvar a sessão localmente.' };
   }

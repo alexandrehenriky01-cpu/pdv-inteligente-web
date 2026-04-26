@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../../services/api';
 import { MesaComandaPickerGrid } from '../mesas/MesaComandaPickerGrid';
 import { useMesas } from '../mesas/useMesas';
 import { 
@@ -9,6 +8,7 @@ import {
 } from 'lucide-react';
 import { AxiosError } from 'axios';
 import { getCardapioTotem } from '../../services/api/cardapioTotemApi';
+import { adicionarItensNaMesa } from '../../services/api/mesaContaApi';
 
 interface IProduto {
   id: string;
@@ -140,12 +140,12 @@ export function ComandaMobile() {
         valorTotal: item.subtotal,
         observacao: item.observacao,
       }));
-      const response = await api.post(`/api/pdv/mesas/${mesaSelecionada}/adicionar`, { itens: itensPayload });
+      const response = await adicionarItensNaMesa(mesaSelecionada, itensPayload);
       
       alert(`✅ Pedido enviado para a Mesa ${mesaSelecionada}!`);
       
       // 🚀 MÁGICA DA IMPRESSÃO INVISÍVEL
-      if (response.data.ticketHtml) {
+      if (response.ticketHtml) {
         // Cria um iframe invisível na tela
         const iframe = document.createElement('iframe');
         iframe.style.display = 'none';
@@ -153,7 +153,7 @@ export function ComandaMobile() {
         
         // Escreve o HTML do ticket dentro do iframe
         iframe.contentWindow?.document.open();
-        iframe.contentWindow?.document.write(response.data.ticketHtml);
+        iframe.contentWindow?.document.write(response.ticketHtml);
         iframe.contentWindow?.document.close();
         
         // Manda o comando de imprimir pro navegador/celular

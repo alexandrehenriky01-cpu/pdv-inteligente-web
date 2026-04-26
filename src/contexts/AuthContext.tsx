@@ -7,6 +7,7 @@ import React, {
   useMemo,
   useState,
 } from 'react';
+import { toast } from 'react-toastify';
 import {
   clearAuthSessionAndAxios,
   persistSessionFromApiData,
@@ -14,6 +15,11 @@ import {
   syncAxiosAuthorizationFromStorage,
 } from '../services/authSession';
 import { AUTH_USER_KEY } from '../services/authStorage';
+import {
+  AUTH_SESSION_EXPIRED_EVENT,
+  startSessionRefreshScheduler,
+  stopSessionRefreshScheduler,
+} from '../services/sessionRefreshScheduler';
 
 export type UsuarioSessao = Record<string, unknown> | null;
 
@@ -45,14 +51,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  useEffect(() => {
-    reloadUsuarioFromStorage();
-  }, [reloadUsuarioFromStorage]);
+  const logout = useCallback(() => {
+    clearAuthSessionAndAxios();
+    setUsuario(null);
+  }, []);
 
   const signInFromApiResponse = useCallback((data: unknown) => {
-    if (import.meta.env.DEV) {
+    if (import.meta.env.DEV && data && typeof data === 'object') {
+      const d = data as Record<string, unknown>;
       // eslint-disable-next-line no-console
-      console.log('Resposta da API no Login:', data);
+      console.log('[Auth] Login OK', {
+        hasUsuario: d.usuario != null || d.user != null,
+        hasAccessToken: d.token != null || d.accessToken != null || d.access_token != null,
+        hasRefreshToken: d.refreshToken != null || d.refresh_token != null,
+      });
     }
     const result = persistSessionFromApiData(data);
     if (result.ok) {
@@ -61,10 +73,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return result;
   }, []);
 
-  const logout = useCallback(() => {
-    clearAuthSessionAndAxios();
-    setUsuario(null);
-  }, []);
+  useEffect(() => {
+    reloadUsuarioFromStorage();
+  }, [reloadUsuarioFromStorage]);
+
+  useEffect(() => {
+    if (usuario) {
+      startSessionRefreshScheduler();
+    } else {
+      stopSessionRefreshScheduler();
+    }
+  }, [usuario]);
+
+  useEffect(() => {
+    const onExpired = (): void => {
+      toast.error('Sessão expirada. Faça login novamente.');
+      logout();
+    };
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, onExpired);
+  }, [logout]);
 
   const value = useMemo<AuthContextValue>(
     () => ({

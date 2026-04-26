@@ -9,7 +9,7 @@ import {
   getCardapioTotem,
   mapCardapioItemToTotemProduto,
 } from '../../../services/api/cardapioTotemApi';
-import { api } from '../../../services/api';
+import { adicionarItensNaMesa } from '../../../services/api/mesaContaApi';
 import {
   useGarcomCartStore,
   selectTotalItensGarcom,
@@ -112,7 +112,7 @@ export function GarcomPedirPage() {
         };
       });
 
-      await api.post(`/api/pdv/mesas/${n}/adicionar`, { itens });
+      await adicionarItensNaMesa(n, itens);
       toast.success('Pedido lançado na cozinha!');
       limparCarrinho();
       navigate(`/garcom/mesa/${n}`);
@@ -326,6 +326,7 @@ export function GarcomPedirPage() {
         produto={produtoModal}
         aberto={modalAberto}
         presentation="sheet"
+        catalogoImagens={produtos}
         onFechar={() => {
           setModalAberto(false);
           setProdutoModal(null);

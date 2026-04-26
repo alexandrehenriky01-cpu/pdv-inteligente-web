@@ -31,7 +31,9 @@ import {
   getTerminalFiscalPdv,
   montarUrlVerificarCaixa,
   persistirContextoPosAberturaCaixa,
+  persistirModoPdvLocal,
   persistirTerminalFiscalPdv,
+  getModoPdvLocalFallback,
 } from '../../utils/estacaoWorkstationStorage';
 
 export interface IProdutoPDV {
@@ -257,6 +259,46 @@ export function FrenteCaixa() {
 
   /** Sem estação resolvida (IP + retaguarda) = PDV bloqueado. */
   const pdvTerminalBloqueado = estacaoDiscovery !== 'ready';
+
+  const [perfilTerminalPdv, setPerfilTerminalPdv] = useState<{
+    tipo: 'PDV' | 'TOTEM';
+    modoPdv: 'NFCE' | 'CONSUMIDOR';
+  } | null>(null);
+
+  useEffect(() => {
+    if (pdvTerminalBloqueado) {
+      setPerfilTerminalPdv(null);
+      return;
+    }
+    const estId = getEstacaoTrabalhoIdPdv()?.trim();
+    if (!estId) {
+      setPerfilTerminalPdv(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data } = await api.get<{
+          success?: boolean;
+          data?: { tipoTerminal?: string; modoPdv?: string };
+        }>('/api/estacoes-trabalho/meu-terminal');
+        if (cancelled) return;
+        const row = data?.data;
+        const tipo: 'PDV' | 'TOTEM' = row?.tipoTerminal === 'TOTEM' ? 'TOTEM' : 'PDV';
+        const modoPdv: 'NFCE' | 'CONSUMIDOR' =
+          row?.modoPdv === 'CONSUMIDOR' ? 'CONSUMIDOR' : 'NFCE';
+        setPerfilTerminalPdv({ tipo, modoPdv });
+        if (tipo === 'PDV') persistirModoPdvLocal(estId, modoPdv);
+      } catch {
+        if (cancelled) return;
+        const fb = getModoPdvLocalFallback(estId);
+        setPerfilTerminalPdv({ tipo: 'PDV', modoPdv: fb ?? 'NFCE' });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pdvTerminalBloqueado, estacaoDiscovery]);
 
   const [busca, setBusca] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
@@ -710,6 +752,26 @@ export function FrenteCaixa() {
       console.error("Erro ao carregar fila:", error);
     } finally {
       setCarregandoPendentes(false);
+    }
+  };
+
+  const alternarModoDocumentoPdv = async () => {
+    const estId = getEstacaoTrabalhoIdPdv()?.trim();
+    if (!estId || perfilTerminalPdv?.tipo !== 'PDV') return;
+    const next: 'NFCE' | 'CONSUMIDOR' =
+      perfilTerminalPdv.modoPdv === 'NFCE' ? 'CONSUMIDOR' : 'NFCE';
+    try {
+      await api.patch(`/api/estacoes-trabalho/${estId}/modo-pdv`, { modoPdv: next });
+      persistirModoPdvLocal(estId, next);
+      setPerfilTerminalPdv((p) => (p && p.tipo === 'PDV' ? { ...p, modoPdv: next } : p));
+      toast.info(next === 'NFCE' ? 'NFc' : 'Consumidor', {
+        autoClose: 1400,
+        position: 'bottom-center',
+      });
+    } catch (err: unknown) {
+      const ax = err as { response?: { data?: { message?: string; erro?: string } } };
+      const msg = ax.response?.data?.message || ax.response?.data?.erro;
+      toast.error(typeof msg === 'string' && msg ? msg : 'Não foi possível alterar o modo do documento.');
     }
   };
 
@@ -1535,6 +1597,7 @@ export function FrenteCaixa() {
     finalizarVenda,
     pausarVendaSegura,
     abrirFilaDeEspera,
+    alternarModoDocumentoPdv,
     aplicarDescontoSeguro,
     solicitarFechamentoCaixa, 
     focarBusca: () => buscaInputRef.current?.focus()
@@ -1555,6 +1618,7 @@ export function FrenteCaixa() {
       finalizarVenda,
       pausarVendaSegura,
       abrirFilaDeEspera,
+      alternarModoDocumentoPdv,
       aplicarDescontoSeguro,
       solicitarFechamentoCaixa,
       focarBusca: () => buscaInputRef.current?.focus()
@@ -1621,9 +1685,13 @@ export function FrenteCaixa() {
           e.preventDefault();
           actionsRef.current.pausarVendaSegura();
           break;
-        case 'F9':
+        case 'F7':
           e.preventDefault();
           actionsRef.current.abrirFilaDeEspera();
+          break;
+        case 'F9':
+          e.preventDefault();
+          void actionsRef.current.alternarModoDocumentoPdv();
           break;
         case 'F10':
           e.preventDefault();
@@ -1953,6 +2021,14 @@ export function FrenteCaixa() {
               <span className="text-sm font-bold text-white flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-pulse"></div>
                 {nomeOperador}
+                {perfilTerminalPdv?.tipo === 'PDV' ? (
+                  <span
+                    className="ml-1 rounded-md border border-white/15 bg-[#0b1324] px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-slate-300"
+                    title="Modo de documento deste PDV (F9)"
+                  >
+                    {perfilTerminalPdv.modoPdv === 'CONSUMIDOR' ? 'Consumidor' : 'NFc'}
+                  </span>
+                ) : null}
               </span>
             </div>
 
@@ -1961,7 +2037,7 @@ export function FrenteCaixa() {
               className="bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-300 px-5 py-4 rounded-2xl flex flex-col items-center justify-center gap-1 transition-colors shadow-inner min-w-[100px]"
             >
               <Clock className="w-5 h-5"/>
-              <span className="text-[10px] font-black uppercase tracking-widest">Fila <span className="text-amber-500 ml-1">[F9]</span></span>
+              <span className="text-[10px] font-black uppercase tracking-widest">Fila <span className="text-amber-500 ml-1">[F7]</span></span>
             </button>
             <button 
               onClick={pausarVendaSegura}
@@ -2347,7 +2423,8 @@ export function FrenteCaixa() {
         <span><strong className="text-slate-400">F2</strong> Busca</span>
         <span><strong className="text-slate-400">F4</strong> Desconto</span>
         <span><strong className="text-slate-400">F8</strong> Pausar</span>
-        <span><strong className="text-slate-400">F9</strong> Fila</span>
+        <span><strong className="text-slate-400">F7</strong> Fila</span>
+        <span><strong className="text-slate-400">F9</strong> NFc / Consumidor</span>
         <span><strong className="text-slate-400">F10</strong> Finalizar</span>
         <span><strong className="text-red-400">F12</strong> Fechar Caixa</span>
         <span><strong className="text-slate-400">ESC</strong> Cancelar</span>

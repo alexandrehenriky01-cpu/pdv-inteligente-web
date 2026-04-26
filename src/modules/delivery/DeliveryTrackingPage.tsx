@@ -44,6 +44,7 @@ function getCustomerTrackingStatus(
     'ENTREGUE',
     'PRONTO_PARA_RETIRADA',
     'RETIRADO',
+    'CANCELADO_LOJA',
   ]);
   if (validExplicit.has(explicit)) {
     return explicit as TrackingStatusCliente;
@@ -51,6 +52,12 @@ function getCustomerTrackingStatus(
 
   const entrega = String(statusEntrega ?? '').toUpperCase().trim();
   const preparo = String(statusPreparo ?? '').toUpperCase().trim();
+  if (preparo === 'CANCELADO') {
+    return 'CANCELADO_LOJA';
+  }
+  if (entrega === 'CANCELADO') {
+    return 'CANCELADO_LOJA';
+  }
 
   if (ehRetiradaPedido(tipoPedido)) {
     if (entrega === 'ENTREGUE' || preparo === 'ENTREGUE') return 'RETIRADO';
@@ -120,14 +127,27 @@ export function DeliveryTrackingPage() {
       const st = p.statusPreparo;
       setPedido((prev) => {
         if (!prev) return prev;
+        const trackingFromPayload =
+          p.trackingStatus != null
+            ? (String(p.trackingStatus) as DeliveryPedidoTrackingDTO['trackingStatus'])
+            : undefined;
+        const mensagemCliente =
+          typeof p.mensagemCliente === 'string' && p.mensagemCliente.trim() !== ''
+            ? p.mensagemCliente.trim()
+            : undefined;
+        const motivoRes =
+          typeof p.motivoResumido === 'string' && p.motivoResumido.trim() !== ''
+            ? p.motivoResumido.trim()
+            : typeof p.motivoCancelamentoResumo === 'string' && p.motivoCancelamentoResumo.trim() !== ''
+              ? p.motivoCancelamentoResumo.trim()
+              : undefined;
         return {
           ...prev,
           statusEntrega: p.statusEntrega != null ? String(p.statusEntrega) : prev.statusEntrega,
           statusPreparo: st != null ? String(st) : prev.statusPreparo,
-          trackingStatus:
-            p.trackingStatus != null
-              ? (String(p.trackingStatus) as DeliveryPedidoTrackingDTO['trackingStatus'])
-              : undefined,
+          trackingStatus: trackingFromPayload,
+          ...(mensagemCliente ? { mensagemCliente } : {}),
+          ...(motivoRes ? { motivoCancelamentoResumo: motivoRes } : {}),
           ...(typeof p.numeroPedido === 'number' ? { numeroPedido: p.numeroPedido } : {}),
           ...(p.tipoPedido != null && String(p.tipoPedido).trim() !== ''
             ? { tipoPedido: String(p.tipoPedido) as TipoPedidoTracking }
@@ -193,12 +213,14 @@ export function DeliveryTrackingPage() {
     socket.on('disconnect', onDisconnect);
     socket.on('connect_error', onConnectError);
     socket.on('status-pedido-atualizado', aplicarPayloadStatus);
+    socket.on('pedido-cancelado', aplicarPayloadStatus);
 
     return () => {
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
       socket.off('connect_error', onConnectError);
       socket.off('status-pedido-atualizado', aplicarPayloadStatus);
+      socket.off('pedido-cancelado', aplicarPayloadStatus);
       socket.disconnect();
     };
   }, [pedidoId, idLojaParaChecagem, pedido, erro, aplicarPayloadStatus]);
@@ -215,6 +237,8 @@ export function DeliveryTrackingPage() {
       ),
     [pedido?.statusEntrega, pedido?.statusPreparo, pedido?.trackingStatus, pedido?.tipoPedido]
   );
+
+  const pedidoCanceladoPelaLoja = trackingStatus === 'CANCELADO_LOJA';
 
   const stepAtivo = useMemo(
     () => stepIndexFromTrackingStatus(trackingStatus, ehRetirada),
@@ -247,6 +271,8 @@ export function DeliveryTrackingPage() {
   }
 
   const senha = formatSenha(pedido.numeroPedido, pedido.numeroVenda);
+  const textoCancelamento =
+    pedido.mensagemCliente?.trim() || 'Seu pedido foi cancelado pela loja';
 
   return (
     <div className="px-4 pb-24 pt-2">
@@ -298,11 +324,26 @@ export function DeliveryTrackingPage() {
         <p className="mt-2 text-sm text-white/50">Total {formatBrl(pedido.valorTotal)}</p>
       </div>
 
+      {pedidoCanceladoPelaLoja && (
+        <div
+          className="mb-6 rounded-2xl border border-red-500/40 bg-red-950/40 p-4 text-red-50"
+          role="alert"
+        >
+          <p className="text-sm font-semibold leading-snug">{textoCancelamento}</p>
+          {pedido.motivoCancelamentoResumo && (
+            <p className="mt-2 text-xs leading-relaxed text-red-100/85">
+              Motivo informado: {pedido.motivoCancelamentoResumo}
+            </p>
+          )}
+        </div>
+      )}
+
       <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-white/45">
         Acompanhe o status
       </h2>
 
       {/* Stepper: timeline vertical com animação no passo atual */}
+      {!pedidoCanceladoPelaLoja && (
       <div className="relative mb-8 pl-2">
                <div
           className="absolute bottom-4 left-[1.15rem] top-4 w-px bg-gradient-to-b from-violet-500/50 via-white/15 to-emerald-500/40"
@@ -355,6 +396,7 @@ export function DeliveryTrackingPage() {
           })}
         </ol>
       </div>
+      )}
 
       <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
         <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-white/80">

@@ -67,6 +67,7 @@ export interface VendaGestaoFoodApi {
   origemVenda?: string;
   statusPreparo?: string | null;
   statusEntrega?: string | null;
+  status?: string | null;
   numeroPedido?: number | null;
   numeroVenda?: number;
   nomeCliente?: string | null;
@@ -77,6 +78,8 @@ export interface VendaGestaoFoodApi {
   itens?: unknown;
   pagamentos?: PagamentoApi[];
   loja?: LojaResumoApi | null;
+  estornoFinanceiroPendente?: boolean;
+  cancelamentoFiscalPendente?: boolean;
 }
 
 function numDec(v: unknown): number {
@@ -304,6 +307,7 @@ export function GestaoPedidosFoodPage() {
   const refetchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [aba, setAba] = useState<'pedidos' | 'mesas'>('pedidos');
+  const [pedidosListaAba, setPedidosListaAba] = useState<'ativos' | 'cancelados'>('ativos');
   const [mesasAguardando, setMesasAguardando] = useState<MesaApi[]>([]);
   const [carregandoMesas, setCarregandoMesas] = useState(false);
   const [mesaDetalhe, setMesaDetalhe] = useState<MesaApi | null>(null);
@@ -318,7 +322,10 @@ export function GestaoPedidosFoodPage() {
   const carregar = useCallback(async () => {
     setCarregando(true);
     try {
-      const { data } = await api.get<VendaGestaoFoodApi[]>('/api/vendas/gestao-food');
+      const abaApi = pedidosListaAba === 'cancelados' ? 'cancelados' : 'ativos';
+      const { data } = await api.get<VendaGestaoFoodApi[]>('/api/vendas/gestao-food', {
+        params: { aba: abaApi, escopo: 'food' },
+      });
       setPedidos(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error('Gestão food: falha ao listar', e);
@@ -326,7 +333,7 @@ export function GestaoPedidosFoodPage() {
     } finally {
       setCarregando(false);
     }
-  }, []);
+  }, [pedidosListaAba]);
 
   const agendarRecarga = useCallback(() => {
     if (refetchDebounce.current) clearTimeout(refetchDebounce.current);
@@ -517,7 +524,7 @@ export function GestaoPedidosFoodPage() {
       }
     }, POLLING_INTERVAL);
     return () => clearInterval(interval);
-  }, [aba, carregando, carregar]);
+  }, [aba, carregando, carregar, pedidosListaAba]);
 
   const despachar = async (id: string) => {
     setSavingIds((s) => new Set(s).add(id));
@@ -699,6 +706,36 @@ export function GestaoPedidosFoodPage() {
               </button>
             </div>
           </div>
+
+          {aba === 'pedidos' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Lista:</span>
+              <div className="flex rounded-xl border border-white/10 bg-[#08101f] p-1">
+                <button
+                  type="button"
+                  onClick={() => setPedidosListaAba('ativos')}
+                  className={`rounded-lg px-3 py-2 text-xs font-black uppercase tracking-wide transition-all ${
+                    pedidosListaAba === 'ativos'
+                      ? 'bg-violet-600 text-white'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Ativos
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPedidosListaAba('cancelados')}
+                  className={`rounded-lg px-3 py-2 text-xs font-black uppercase tracking-wide transition-all ${
+                    pedidosListaAba === 'cancelados'
+                      ? 'bg-red-600/90 text-white'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Cancelados
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="rounded-[28px] border border-white/10 bg-[#08101f]/90 backdrop-blur-xl shadow-[0_25px_60px_rgba(0,0,0,0.35)] overflow-hidden">
             {aba === 'mesas' ? (

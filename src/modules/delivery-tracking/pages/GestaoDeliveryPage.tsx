@@ -42,12 +42,16 @@ interface PedidoDelivery {
   valorTotal: number;
   statusPreparo: string;
   statusEntrega: string;
+  /** Status operacional da venda (ex.: CANCELADO após KDS). */
+  status?: string;
   createdAt: string;
   observacoes?: string | null;
   pagamentos?: { tipoPagamento: string; valor: number }[];
   origemVenda?: string;
   tipoPedido?: string | null;
   updatedAt?: string;
+  estornoFinanceiroPendente?: boolean;
+  cancelamentoFiscalPendente?: boolean;
 }
 
 interface PedidoAtualizado {
@@ -77,6 +81,9 @@ function formatTime(dateString: string): string {
 
 function badgeStatusEntrega(status: string | null | undefined): { label: string; className: string } {
   const u = String(status ?? 'PENDENTE').toUpperCase();
+  if (u === 'CANCELADO' || u === 'CANCELADA') {
+    return { label: 'CANCELADO', className: 'bg-red-500/15 text-red-200 border border-red-500/35' };
+  }
   if (u === 'SAIU_ENTREGA') {
     return { label: 'SAIU PARA ENTREGA', className: 'bg-amber-500/15 text-amber-300 border border-amber-500/35' };
   }
@@ -87,6 +94,7 @@ function badgeStatusEntrega(status: string | null | undefined): { label: string;
 }
 
 type FilterStatus = 'TODOS' | 'PRONTO' | 'SAIU_ENTREGA' | 'ENTREGUE';
+type DeliveryListagemAba = 'operacao' | 'cancelados';
 type SocketStatus = 'idle' | 'connecting' | 'connected' | 'error';
 
 const SOCKET_EVENTS = {
@@ -101,6 +109,9 @@ export function GestaoDeliveryPage() {
   const [pedidos, setPedidos] = useState<PedidoDelivery[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('TODOS');
+  const [deliveryListagemAba, setDeliveryListagemAba] = useState<DeliveryListagemAba>('operacao');
+  const deliveryListagemAbaRef = useRef<DeliveryListagemAba>('operacao');
+  deliveryListagemAbaRef.current = deliveryListagemAba;
   const [socketStatus, setSocketStatus] = useState<SocketStatus>('idle');
   const [realtimeActive, setRealtimeActive] = useState(false);
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
@@ -161,8 +172,11 @@ export function GestaoDeliveryPage() {
   const carregarPedidos = useCallback(async () => {
     try {
       setLoadingAtualizacao(true);
+      const abaApi = deliveryListagemAba === 'cancelados' ? 'cancelados' : 'ativos';
       const [pedidosRes, lojaRes] = await Promise.all([
-        api.get<PedidoDelivery[]>('/api/vendas/gestao-food'),
+        api.get<PedidoDelivery[]>('/api/vendas/gestao-food', {
+          params: { aba: abaApi, escopo: 'entrega' },
+        }),
         api.get<{ nome?: string; nomeFantasia?: string }>('/api/lojas/minha-loja').catch(() => ({ data: { nome: 'Restaurante', nomeFantasia: undefined } as { nome?: string; nomeFantasia?: string } })),
       ]);
 
@@ -172,10 +186,14 @@ export function GestaoDeliveryPage() {
 
       const lojaNome = lojaRes.data?.nomeFantasia || lojaRes.data?.nome || 'Restaurante';
 
-      const previousIds = new Set(pedidos.map((p) => p.id));
       setPedidos((prev) => {
+        const previousIds = new Set(prev.map((p) => p.id));
         const novosPedidos = deliveryPedidos.filter((p) => !previousIds.has(p.id));
-        if (novosPedidos.length > 0 && previousIds.size > 0) {
+        if (
+          deliveryListagemAba === 'operacao' &&
+          novosPedidos.length > 0 &&
+          previousIds.size > 0
+        ) {
           novosPedidos.forEach((novo) => {
             void imprimirPedidoAutomatico(novo as CupomPedidoData, lojaNome);
           });
@@ -188,8 +206,9 @@ export function GestaoDeliveryPage() {
       console.error('Gestão Delivery: falha ao listar', e);
     } finally {
       setLoadingAtualizacao(false);
+      setLoading(false);
     }
-  }, [impressaoAutomatica, agentOnline, imprimirPedidoAutomatico]);
+  }, [deliveryListagemAba, imprimirPedidoAutomatico]);
 
   const toggleStatusLoja = useCallback(async () => {
     if (loadingStatusRef.current) return;
@@ -252,15 +271,11 @@ export function GestaoDeliveryPage() {
   useEffect(() => {
     let isMounted = true;
 
-    const carregarDadosIniciais = async () => {
+    const carregarConfigLoja = async () => {
       if (!isMounted) return;
 
       try {
-        const [pedidosRes, lojaRes, statusLojaRes, configImpressaoRes] = await Promise.all([
-          api.get<PedidoDelivery[]>('/api/vendas/gestao-food'),
-          api
-            .get<{ nome?: string; nomeFantasia?: string }>('/api/lojas/minha-loja')
-            .catch(() => ({ data: { nome: 'Restaurante', nomeFantasia: undefined } })),
+        const [statusLojaRes, configImpressaoRes] = await Promise.all([
           api
             .get<{ aberto: boolean }>('/api/lojas/minha-loja')
             .catch(() => ({ data: { aberto: true } })),
@@ -271,37 +286,29 @@ export function GestaoDeliveryPage() {
 
         if (!isMounted) return;
 
-        const deliveryPedidos = (Array.isArray(pedidosRes.data) ? pedidosRes.data : []).filter(
-          (p) => String(p.origemVenda || '').toUpperCase() === 'DELIVERY'
-        );
-
-        const previousIds = new Set(pedidos.map((p) => p.id));
-        setPedidos((prev) => {
-          const novosPedidos = deliveryPedidos.filter((p) => !previousIds.has(p.id));
-          if (novosPedidos.length > 0 && previousIds.size > 0) {
-            const lojaNome = lojaRes.data?.nomeFantasia || lojaRes.data?.nome || 'Restaurante';
-            novosPedidos.forEach((novo) => {
-              void imprimirPedidoAutomatico(novo as CupomPedidoData, lojaNome);
-            });
-          }
-          return deliveryPedidos;
-        });
-
         setLojaAberta(statusLojaRes.data?.aberto ?? null);
         setImpressaoAutomatica(configImpressaoRes.data?.impressaoAutomatica ?? null);
-        setLoading(false);
       } catch (e) {
         console.error('Gestão Delivery: falha ao carregar dados iniciais', e);
-        setLoading(false);
       }
     };
 
-    carregarDadosIniciais();
+    void carregarConfigLoja();
 
     return () => {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    void carregarPedidos();
+  }, [carregarPedidos]);
+
+  useEffect(() => {
+    if (deliveryListagemAba === 'cancelados') {
+      setFilterStatus('TODOS');
+    }
+  }, [deliveryListagemAba]);
 
   const socketOptions = useMemo(
     () => ({
@@ -424,6 +431,7 @@ export function GestaoDeliveryPage() {
         console.log('[Delivery] Novo pedido via Socket:', payload);
         setLastUpdate(new Date());
         setPedidos((prev) => {
+          if (deliveryListagemAbaRef.current !== 'operacao') return prev;
           const exists = prev.find((p) => p.id === payload.id);
           if (exists) return prev;
           return [payload, ...prev];
@@ -604,6 +612,7 @@ export function GestaoDeliveryPage() {
   };
 
   const filteredPedidos = pedidos.filter((p) => {
+    if (deliveryListagemAba === 'cancelados') return true;
     if (filterStatus === 'TODOS') return true;
     if (filterStatus === 'PRONTO') return p.statusEntrega === 'PENDENTE';
     return p.statusEntrega === filterStatus;
@@ -690,6 +699,34 @@ export function GestaoDeliveryPage() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex rounded-xl border border-white/10 bg-[#08101f] p-1">
+                <button
+                  type="button"
+                  onClick={() => setDeliveryListagemAba('operacao')}
+                  className={`rounded-lg px-3 py-2 text-xs font-black uppercase tracking-wide transition-all ${
+                    deliveryListagemAba === 'operacao'
+                      ? 'bg-teal-600 text-white'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Em operação
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDeliveryListagemAba('cancelados')}
+                  className={`rounded-lg px-3 py-2 text-xs font-black uppercase tracking-wide transition-all ${
+                    deliveryListagemAba === 'cancelados'
+                      ? 'bg-red-600/90 text-white'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Cancelados
+                </button>
+              </div>
+              <div
+                className={`flex rounded-xl border border-white/10 bg-[#08101f] p-1 ${
+                  deliveryListagemAba === 'cancelados' ? 'opacity-40 pointer-events-none' : ''
+                }`}
+              >
                 {(['TODOS', 'PRONTO', 'SAIU_ENTREGA', 'ENTREGUE'] as FilterStatus[]).map((status) => (
                   <button
                     key={status}
@@ -945,6 +982,12 @@ export function GestaoDeliveryPage() {
                             >
                               {statusBadge.label}
                             </span>
+                            {(row.estornoFinanceiroPendente || row.cancelamentoFiscalPendente) && (
+                              <div className="mt-1.5 space-y-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-200/90">
+                                {row.estornoFinanceiroPendente ? <div>Estorno caixa pendente</div> : null}
+                                {row.cancelamentoFiscalPendente ? <div>Cancel. fiscal pendente</div> : null}
+                              </div>
+                            )}
                           </td>
                           <td className="px-4 py-4 text-right font-mono font-bold text-emerald-300">
                             {formatCurrency(row.valorTotal)}

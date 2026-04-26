@@ -1,7 +1,8 @@
 import { api, resolveApiBaseUrl } from '../api';
 import type { TotemMockCategoria, TotemMockProduto, TotemSaborOpcao } from '../../modules/totem/types';
 
-const IMAGEM_FALLBACK =
+/** Fallback Aurya quando o item não tem foto (compartilhado com PDV / delivery / modal). */
+export const IMAGEM_FALLBACK_FOOD =
   'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"%3E%3Crect fill="%231a1a2e" width="800" height="600"/%3E%3Ccircle cx="400" cy="300" r="120" fill="%232d2d44"/%3E%3C/svg%3E';
 
 export interface CardapioAdicionalApi {
@@ -35,6 +36,8 @@ export interface CardapioItemApi {
     imagemUrl?: string | null;
     imageUrl?: string | null;
     fotoUrl?: string | null;
+    codigo?: string | null;
+    codigoBarras?: string | null;
   } | null;
   categoria: string;
   produtoId: string;
@@ -68,7 +71,7 @@ function unwrapCardapioResponse(data: CardapioApiWrapped): CardapioTotemResponse
   return { itens };
 }
 
-function resolveItemImage(item: CardapioItemApi): string {
+export function resolveItemImage(item: CardapioItemApi): string {
   const imageCandidates = [
     item.imagemUrl,
     item.imageUrl,
@@ -93,7 +96,7 @@ function resolveItemImage(item: CardapioItemApi): string {
     return base64.startsWith('data:') ? base64 : `data:image/png;base64,${base64}`;
   }
 
-  return IMAGEM_FALLBACK;
+  return IMAGEM_FALLBACK_FOOD;
 }
 
 export async function getCardapioTotem(): Promise<CardapioTotemResponse> {
@@ -164,6 +167,8 @@ export function mapCardapioItemToTotemProduto(row: CardapioItemApi): TotemMockPr
     })),
     precoBase: row.precoVenda,
     imagemUrl: resolveItemImage(row),
+    codigo: row.produto?.codigo?.trim() || undefined,
+    codigoBarras: row.produto?.codigoBarras?.trim() || undefined,
     adicionais: row.adicionais.map((a) => ({
       id: a.id,
       nome: a.nome,

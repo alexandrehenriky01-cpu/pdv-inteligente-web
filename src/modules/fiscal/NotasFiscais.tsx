@@ -61,7 +61,9 @@ export function NotasFiscais() {
   const carregarNotas = async () => {
     setLoading(true);
     try {
-      const response = await api.get<IVendaFiscal[] | IApiResponseVendas>('/api/vendas');
+      const response = await api.get<IVendaFiscal[] | IApiResponseVendas>('/api/vendas', {
+        params: { apenasDocumentoFiscalEmitido: true },
+      });
 
       let data: IVendaFiscal[] = [];
       if (Array.isArray(response.data)) {

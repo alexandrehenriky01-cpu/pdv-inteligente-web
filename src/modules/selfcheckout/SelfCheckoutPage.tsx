@@ -40,6 +40,20 @@ import {
 
 type Step = 'welcome' | 'cpf' | 'scan' | 'payment' | 'done';
 
+type TotemConfigEfetivo = {
+  emitirNfceAutomatico: boolean;
+  imprimirComprovante: boolean;
+  exigirCpf: boolean;
+  permitirInformarNome: boolean;
+};
+
+const TOTEM_UI_PADRAO: TotemConfigEfetivo = {
+  emitirNfceAutomatico: false,
+  imprimirComprovante: true,
+  exigirCpf: false,
+  permitirInformarNome: true,
+};
+
 interface ProdutoApi {
   id: string;
   nome: string;
@@ -151,6 +165,7 @@ export function SelfCheckoutPage() {
     totalLiquido: number;
   } | null>(null);
   const [recalculandoPromo, setRecalculandoPromo] = useState(false);
+  const [totemConfigUi, setTotemConfigUi] = useState<TotemConfigEfetivo>(TOTEM_UI_PADRAO);
 
   const { falar, muted, toggleMute } = useVoiceGuidance();
   const speechGenRef = useRef(0);
@@ -194,6 +209,36 @@ export function SelfCheckoutPage() {
   };
 
   const totemEstacaoPronta = estacaoDiscovery === 'ready';
+
+  useEffect(() => {
+    if (!totemEstacaoPronta) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data } = await api.get<{
+          success?: boolean;
+          data?: { totemConfigEfetivo?: Partial<TotemConfigEfetivo> };
+        }>('/api/estacoes-trabalho/meu-terminal');
+        if (cancelled) return;
+        const t = data?.data?.totemConfigEfetivo;
+        if (t && typeof t === 'object') {
+          setTotemConfigUi({
+            emitirNfceAutomatico: t.emitirNfceAutomatico === true,
+            imprimirComprovante: t.imprimirComprovante !== false,
+            exigirCpf: t.exigirCpf === true,
+            permitirInformarNome: t.permitirInformarNome !== false,
+          });
+        } else {
+          setTotemConfigUi(TOTEM_UI_PADRAO);
+        }
+      } catch {
+        if (!cancelled) setTotemConfigUi(TOTEM_UI_PADRAO);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [totemEstacaoPronta]);
 
   const assinaturaCarrinho = useMemo(
     () =>
@@ -788,6 +833,7 @@ export function SelfCheckoutPage() {
         ...(estacaoId ? { estacaoTrabalhoId: estacaoId } : {}),
         terminal: terminalNome,
         origem: 'SELF_CHECKOUT',
+        origemVenda: 'TOTEM' as const,
         modeloNota: '65',
         valorTotal: totalVenda,
         valorDesconto: 0,
@@ -1041,7 +1087,7 @@ export function SelfCheckoutPage() {
           />
           <button
             type="button"
-            onClick={() => setStep('cpf')}
+            onClick={() => setStep(totemConfigUi.exigirCpf ? 'cpf' : 'scan')}
             className="w-full max-w-xl rounded-xl py-10 px-8 text-2xl sm:text-3xl font-black uppercase tracking-wide text-white bg-gradient-to-r from-violet-600 to-fuchsia-600 shadow-[0_0_15px_rgba(139,92,246,0.30)] hover:scale-[1.02] active:scale-[0.98] transition-all"
           >
             <span className="flex items-center justify-center gap-4">
@@ -1064,7 +1110,9 @@ export function SelfCheckoutPage() {
         <div className="flex-1 flex flex-col items-center justify-center px-4 py-8 max-w-lg mx-auto w-full">
           <h2 className="text-2xl font-black text-center mb-2 text-white">CPF na nota?</h2>
           <p className="text-slate-400 text-center mb-8 text-sm">
-            Opcional — informe para constar no cupom fiscal.
+            {totemConfigUi.exigirCpf
+              ? 'Obrigatório neste totem — 11 dígitos.'
+              : 'Opcional — informe para constar quando houver documento fiscal.'}
           </p>
           <div className="w-full rounded-[30px] border border-white/10 bg-[#08101f]/90 backdrop-blur-xl shadow-[0_25px_60px_rgba(0,0,0,0.35)] p-6 mb-6">
             <p className="text-center text-3xl font-mono tracking-widest text-white min-h-[2.5rem]">
@@ -1090,16 +1138,25 @@ export function SelfCheckoutPage() {
             ))}
           </div>
           <div className="flex flex-col sm:flex-row gap-3 w-full max-w-sm">
+            {!totemConfigUi.exigirCpf ? (
+              <button
+                type="button"
+                onClick={() => setStep('scan')}
+                className="flex-1 py-5 rounded-xl font-black bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10"
+              >
+                Pular
+              </button>
+            ) : null}
             <button
               type="button"
-              onClick={() => setStep('scan')}
-              className="flex-1 py-5 rounded-xl font-black bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10"
-            >
-              Pular
-            </button>
-            <button
-              type="button"
-              onClick={() => setStep('scan')}
+              onClick={() => {
+                const d = cpfDigits.replace(/\D/g, '');
+                if (totemConfigUi.exigirCpf && d.length !== 11) {
+                  alert('Informe um CPF válido (11 dígitos).');
+                  return;
+                }
+                setStep('scan');
+              }}
               className="flex-1 py-5 rounded-xl font-black bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-[0_0_15px_rgba(139,92,246,0.30)] hover:scale-[1.02] transition-all"
             >
               Continuar

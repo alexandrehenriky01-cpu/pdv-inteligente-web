@@ -1,11 +1,11 @@
 import { isAxiosError, type AxiosError } from 'axios';
 import { api } from '../api';
 import type { CartItem } from '../../modules/totem/types';
-import { validarLinhasCarrinhoDelivery } from '../../modules/delivery/store/deliveryCartStore';
-
-function arredondar2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
+import {
+  arredondar2,
+  montarLinhaVendaApiFromCartItem,
+  validarLinhasCarrinhoFood,
+} from '../../modules/food/composition/foodItemComposition';
 
 export type FormaPagamentoDelivery = 'NA_ENTREGA' | 'PIX';
 
@@ -89,7 +89,7 @@ export function montarPayloadVendaDelivery(params: FinalizarPedidoDeliveryParams
     throw new Error('Carrinho vazio.');
   }
 
-  const erroCarrinho = validarLinhasCarrinhoDelivery(carrinho);
+  const erroCarrinho = validarLinhasCarrinhoFood(carrinho);
   if (erroCarrinho) {
     throw new Error(erroCarrinho);
   }
@@ -97,56 +97,7 @@ export function montarPayloadVendaDelivery(params: FinalizarPedidoDeliveryParams
   const itens: NovaVendaDeliveryBody['itens'] = [];
 
   for (const line of carrinho) {
-    const itemCardapioId = line.produto.itemCardapioId?.trim();
-    if (!itemCardapioId) {
-      throw new Error(`Item «${line.produto.nome}» sem vínculo de cardápio.`);
-    }
-    const produtoId = (line.produto.produtoId ?? line.produto.id).trim();
-    if (!produtoId) {
-      throw new Error(`Produto «${line.produto.nome}» sem identificador.`);
-    }
-    const q = line.quantidade;
-    if (q <= 0) continue;
-    const valorUnitario = arredondar2(line.subtotal / q);
-    const adicionais = Object.entries(line.adicionais)
-      .filter(([, n]) => n > 0)
-      .map(([id, quantidade]) => {
-        const meta = line.produto.adicionais.find((a) => a.id === id);
-        if (meta?.origem === 'CATALOGO') {
-          return { itemCardapioAdicionalId: id, quantidade };
-        }
-        return { adicionalCardapioId: id, quantidade };
-      });
-
-    const precisaTam = (line.produto.tamanhos ?? []).filter((t) => t.ativo !== false).length > 0;
-    const tid = line.itemCardapioTamanhoId?.trim();
-    if (precisaTam && !tid) {
-      throw new Error(`Selecione o tamanho para «${line.produto.nome}».`);
-    }
-
-    const pizzaMulti =
-      line.produto.tipoItem === 'PIZZA' &&
-      line.produto.permiteMultiplosSabores === true &&
-      (line.saboresItemCardapioIds?.length ?? 0) > 0;
-
-    itens.push({
-      produtoId,
-      quantidade: q,
-      valorUnitario,
-      itemCardapioId,
-      ...(tid ? { itemCardapioTamanhoId: tid } : {}),
-      ...(line.produto.tipoItem === 'COMIDA' && line.partidoAoMeio === true ? { partidoAoMeio: true } : {}),
-      ...(pizzaMulti && line.saboresItemCardapioIds
-        ? {
-            sabores: line.saboresItemCardapioIds.map((id) => ({ itemCardapioId: id })),
-          }
-        : {}),
-      ...(line.observacao.trim() !== '' &&
-      line.produto.tipoItem !== 'BEBIDA'
-        ? { observacoes: line.observacao.trim() }
-        : {}),
-      ...(adicionais.length > 0 ? { adicionais } : {}),
-    });
+    itens.push(montarLinhaVendaApiFromCartItem(line));
   }
 
   const taxaFinal = tipoPedido === 'RETIRADA_BALCAO' ? 0 : taxaEntrega;

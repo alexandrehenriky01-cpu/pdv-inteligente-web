@@ -27,6 +27,18 @@ import {
 import { api } from '../../../services/api';
 import { EstacaoTrabalho, ModoOperacaoEstacao } from '../types/estacaoTrabalho';
 
+type TriBool = '' | 'true' | 'false';
+
+function triFromDb(v: boolean | null | undefined): TriBool {
+  if (v === null || v === undefined) return '';
+  return v ? 'true' : 'false';
+}
+
+function triToPayload(s: TriBool): boolean | null {
+  if (s === '') return null;
+  return s === 'true';
+}
+
 const API_BASE = '/api/producao/configuracoes/estacoes-trabalho';
 /** Lista de layouts cadastrados na loja (rota registrada em `routes.ts`). */
 const LAYOUT_ETIQUETAS_API = '/api/layout-etiquetas';
@@ -83,6 +95,12 @@ type FormState = {
   usarImpressoraPadrao: boolean;
   nomeImpressora: string;
   observacao: string;
+  tipoTerminal: 'PDV' | 'TOTEM';
+  modoPdv: 'NFCE' | 'CONSUMIDOR';
+  totemEmitir: TriBool;
+  totemImprimir: TriBool;
+  totemExigirCpf: TriBool;
+  totemPermitirNome: TriBool;
 };
 
 const initialState: FormState = {
@@ -101,6 +119,12 @@ const initialState: FormState = {
   usarImpressoraPadrao: true,
   nomeImpressora: '',
   observacao: '',
+  tipoTerminal: 'PDV',
+  modoPdv: 'NFCE',
+  totemEmitir: '',
+  totemImprimir: '',
+  totemExigirCpf: '',
+  totemPermitirNome: '',
 };
 
 const getModoIcon = (modo: string) => {
@@ -174,6 +198,12 @@ const EstacaoTrabalhoFormModal: FC<Props> = ({
         usarImpressoraPadrao: estacao.usarImpressoraPadrao,
         nomeImpressora: estacao.nomeImpressora || '',
         observacao: estacao.observacao || '',
+        tipoTerminal: estacao.tipoTerminal === 'TOTEM' ? 'TOTEM' : 'PDV',
+        modoPdv: estacao.modoPdv === 'CONSUMIDOR' ? 'CONSUMIDOR' : 'NFCE',
+        totemEmitir: triFromDb(estacao.totemEmitirNfceAutomatico),
+        totemImprimir: triFromDb(estacao.totemImprimirComprovante),
+        totemExigirCpf: triFromDb(estacao.totemExigirCpf),
+        totemPermitirNome: triFromDb(estacao.totemPermitirInformarNome),
       });
     } else {
       setForm(initialState);
@@ -300,7 +330,7 @@ const EstacaoTrabalhoFormModal: FC<Props> = ({
     setLoading(true);
 
     const u = (s: string) => s.trim().toUpperCase();
-    const payload = {
+    const payload: Record<string, unknown> = {
       nome: u(form.nome),
       identificadorMaquina: u(form.identificadorMaquina),
       descricao: form.descricao.trim() ? u(form.descricao) : null,
@@ -320,6 +350,19 @@ const EstacaoTrabalhoFormModal: FC<Props> = ({
         : u(form.nomeImpressora),
       observacao: form.observacao.trim() ? u(form.observacao) : null,
     };
+    payload.tipoTerminal = form.tipoTerminal;
+    if (form.tipoTerminal === 'PDV') {
+      payload.modoPdv = form.modoPdv;
+      payload.totemEmitirNfceAutomatico = null;
+      payload.totemImprimirComprovante = null;
+      payload.totemExigirCpf = null;
+      payload.totemPermitirInformarNome = null;
+    } else {
+      payload.totemEmitirNfceAutomatico = triToPayload(form.totemEmitir);
+      payload.totemImprimirComprovante = triToPayload(form.totemImprimir);
+      payload.totemExigirCpf = triToPayload(form.totemExigirCpf);
+      payload.totemPermitirInformarNome = triToPayload(form.totemPermitirNome);
+    }
 
     try {
       if (estacao) {
@@ -467,6 +510,106 @@ const EstacaoTrabalhoFormModal: FC<Props> = ({
                   className={inputClass}
                 />
               </div>
+            </div>
+          </div>
+
+          <div className="space-y-4 rounded-2xl border border-violet-500/20 bg-[#131b2f]/40 p-5">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2 border-b border-gray-800 pb-2">
+              <MonitorSmartphone size={16} className="text-violet-400" />
+              PDV / Totem (documento e autoatendimento)
+            </h3>
+            <p className="text-[11px] text-gray-500 leading-relaxed">
+              PDV: modo NFc ou Consumidor (F9 no caixa). Totem: use &quot;Padrão da loja&quot; ou defina
+              overrides abaixo (valores vazios herdam a loja).
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className={labelClass}>Tipo de terminal</label>
+                <select
+                  value={form.tipoTerminal}
+                  onChange={(e) =>
+                    handleChange('tipoTerminal', e.target.value as 'PDV' | 'TOTEM')
+                  }
+                  className={inputClass}
+                >
+                  <option value="PDV">PDV (caixa / balcão)</option>
+                  <option value="TOTEM">Totem / autoatendimento</option>
+                </select>
+              </div>
+              {form.tipoTerminal === 'PDV' ? (
+                <div>
+                  <label className={labelClass}>Modo padrão do PDV</label>
+                  <select
+                    value={form.modoPdv}
+                    onChange={(e) =>
+                      handleChange('modoPdv', e.target.value as 'NFCE' | 'CONSUMIDOR')
+                    }
+                    className={inputClass}
+                  >
+                    <option value="NFCE">NFc (NFC-e)</option>
+                    <option value="CONSUMIDOR">Consumidor (sem NFC-e automática)</option>
+                  </select>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className={labelClass}>Emitir NFC-e automaticamente</label>
+                    <select
+                      value={form.totemEmitir}
+                      onChange={(e) =>
+                        handleChange('totemEmitir', e.target.value as TriBool)
+                      }
+                      className={inputClass}
+                    >
+                      <option value="">Padrão da loja</option>
+                      <option value="true">Sim</option>
+                      <option value="false">Não</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelClass}>Imprimir comprovante</label>
+                    <select
+                      value={form.totemImprimir}
+                      onChange={(e) =>
+                        handleChange('totemImprimir', e.target.value as TriBool)
+                      }
+                      className={inputClass}
+                    >
+                      <option value="">Padrão da loja</option>
+                      <option value="true">Sim</option>
+                      <option value="false">Não</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelClass}>Exigir CPF</label>
+                    <select
+                      value={form.totemExigirCpf}
+                      onChange={(e) =>
+                        handleChange('totemExigirCpf', e.target.value as TriBool)
+                      }
+                      className={inputClass}
+                    >
+                      <option value="">Padrão da loja</option>
+                      <option value="true">Sim</option>
+                      <option value="false">Não</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelClass}>Permitir informar nome</label>
+                    <select
+                      value={form.totemPermitirNome}
+                      onChange={(e) =>
+                        handleChange('totemPermitirNome', e.target.value as TriBool)
+                      }
+                      className={inputClass}
+                    >
+                      <option value="">Padrão da loja</option>
+                      <option value="true">Sim</option>
+                      <option value="false">Não</option>
+                    </select>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 

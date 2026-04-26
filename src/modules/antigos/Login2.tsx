@@ -25,7 +25,12 @@ export function Login() {
         senha
       });
 
-      const { token, usuario } = response.data;
+      const { usuario } = response.data;
+      const token = response.data.token ?? response.data.accessToken;
+      if (typeof token !== 'string' || token.length === 0) {
+        setErro('Token não retornado pelo servidor.');
+        return;
+      }
 
       localStorage.setItem('@PDVToken', token);
       localStorage.setItem('@PDVUsuario', JSON.stringify(usuario));
