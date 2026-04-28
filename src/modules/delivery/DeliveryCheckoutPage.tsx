@@ -265,22 +265,30 @@ export function DeliveryCheckoutPage() {
       );
     } catch (e) {
       const err = e as { response?: { status?: number; data?: { error?: string } } };
-      if (err.response?.status === 400) {
-        const msg = err.response.data?.error || '';
-        if (msg.includes('itens')) {
+      const statusCode = err.response?.status;
+      const apiMsg = err.response?.data?.error || '';
+
+      if (statusCode === 400 || statusCode === 409 || statusCode === 422) {
+        if (apiMsg.includes('itens') || apiMsg.includes('carrinho')) {
           toast.error('Seu pedido está vazio. Adicione itens ao carrinho.');
-        } else if (msg.includes('pagamento')) {
+        } else if (apiMsg.includes('pagamento')) {
           toast.error('Selecione uma forma de pagamento.');
-        } else if (msg.includes('Cidade')) {
+        } else if (apiMsg.includes('Cidade') || apiMsg.includes('cidade')) {
           toast.error('Preencha o campo Cidade corretamente.');
-        } else if (msg.includes('taxa')) {
+        } else if (apiMsg.includes('taxa') || apiMsg.includes('Taxa')) {
           toast.error('Taxa de entrega não configurada. Contate o restaurante.');
+        } else if (apiMsg.includes('idempotency') || apiMsg.includes('Idempotency')) {
+          toast.error('Erro de chave de idempotência. Recarregue a página e tente novamente.');
+        } else if (apiMsg) {
+          toast.error(apiMsg);
         } else {
-          toast.error('Verifique se preencheu todos os campos (Cidade e Endereço) corretamente.');
+          toast.error(mensagemErroDeliveryApi(e));
         }
       } else {
         toast.error(mensagemErroDeliveryApi(e));
       }
+
+      console.error('[DeliveryCheckout] erro ao enviar pedido', { statusCode, apiMsg, raw: e });
     } finally {
       setEnviando(false);
     }
