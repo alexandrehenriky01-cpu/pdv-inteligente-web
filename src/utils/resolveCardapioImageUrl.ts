@@ -31,6 +31,10 @@ export function resolveCardapioImageUrl(url: string | null | undefined): string 
     } catch {
       return raw;
     }
+    // Upgrade http → https to prevent mixed-content errors in production.
+    if (raw.startsWith('http://')) {
+      return raw.replace(/^http:\/\//, 'https://');
+    }
     return raw;
   }
 

@@ -73,6 +73,24 @@ type AuryaSugestoes = {
   provider?: string;
 };
 
+function isValidImage(image: string | null | undefined): boolean {
+  if (!image) return false;
+  const value = image.trim();
+  if (!value) return false;
+  if (value.startsWith('data:image/')) {
+    return value.length > 1000;
+  }
+  if (value.startsWith('http')) {
+    try {
+      new URL(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 function resolveOrigemImagemBanner(
   provider: string | undefined,
   fallback: boolean,
@@ -638,7 +656,7 @@ export function GestaoCardapioPage() {
       const dados = response.data.dados;
       const rawBase64 = dados?.imageBase64?.trim();
       const rawUrl = dados?.imagemUrl ?? dados?.imageUrl;
-      const imageSource =
+      const imagemIA =
         rawBase64 && rawBase64.length > 0
           ? rawBase64.startsWith('data:')
             ? rawBase64
@@ -647,23 +665,28 @@ export function GestaoCardapioPage() {
             ? resolveCardapioImageUrl(rawUrl)
             : '';
 
-      if (response.data.sucesso && imageSource) {
-        const fallbackUsado = !!(dados?.fallbackUsed ?? dados?.fallback);
-        const provider = dados?.provider;
+      const optionsResolved = (dados?.imageOptions ?? [])
+        .map((opt) => ({ ...opt, url: resolveCardapioImageUrl(opt.url) }))
+        .filter((opt) => !!opt.url);
+
+      if (import.meta.env.DEV) {
+        console.log('[AuryaAI] provider:', dados?.provider);
+        console.log('[AuryaAI] imagemIA:', imagemIA.slice(0, 120));
+        console.log('[AuryaAI] isValidImage:', isValidImage(imagemIA));
+        console.log('[AuryaAI] imageOptions count:', optionsResolved.length);
+      }
+
+      const fallbackUsado = !!(dados?.fallbackUsed ?? dados?.fallback);
+      const provider = dados?.provider;
+
+      if (response.data.sucesso && isValidImage(imagemIA)) {
         const banner = resolveOrigemImagemBanner(provider, fallbackUsado, dados?.aviso);
         setMensagemOrigemImagem(banner.text);
         setTipoMensagemOrigem(banner.tipo);
 
-        const optionsResolved = (dados?.imageOptions ?? [])
-          .map((opt) => ({
-            ...opt,
-            url: resolveCardapioImageUrl(opt.url),
-          }))
-          .filter((opt) => !!opt.url);
-
         const imagensSugeridas = optionsResolved.length > 0
           ? optionsResolved.map((opt) => opt.url)
-          : [imageSource];
+          : [imagemIA];
 
         setSugestoesAurya({
           imagens: imagensSugeridas,
@@ -675,9 +698,26 @@ export function GestaoCardapioPage() {
           avisoFallback: dados?.aviso || dados?.motivoFallback,
           provider,
         });
-        setImagemSelecionada(imageSource);
+        setImagemSelecionada(imagemIA);
+      } else if (optionsResolved.length > 0) {
+        const banner = resolveOrigemImagemBanner(provider, true, dados?.aviso);
+        setMensagemOrigemImagem(banner.text);
+        setTipoMensagemOrigem(banner.tipo);
+
+        const imagensSugeridas = optionsResolved.map((opt) => opt.url);
+        setSugestoesAurya({
+          imagens: imagensSugeridas,
+          imageOptions: optionsResolved,
+          fallbacks: [],
+          descricao: `${sourceNome} - Deliciosa opção preparada com ingredientes selecionados.`,
+          categoria: sourceCategoria,
+          fallbackUsado: true,
+          avisoFallback: dados?.aviso || dados?.motivoFallback,
+          provider,
+        });
+        setImagemSelecionada(imagensSugeridas[0]);
       } else {
-        setErroGeracao(response.data.erro || 'Erro ao gerar imagem.');
+        setErroGeracao(response.data.erro || 'Não foi possível gerar imagem. Tente novamente ou envie uma foto.');
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Erro de conexão ao gerar imagem.';
