@@ -1,15 +1,8 @@
 import React, { FormEvent, useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { Layout } from '../../../components/Layout';
 import { api } from '../../../services/api';
+import { resolveCardapioImageUrl } from '../../../utils/resolveCardapioImageUrl';
 import { Sparkles, ImageIcon, X, Upload, AlertCircle, Loader2 } from 'lucide-react';
-
-const API_URL = 'http://localhost:3333';
-
-function resolveImageUrl(url?: string | null): string {
-  if (!url) return '';
-  if (url.startsWith('http') || url.startsWith('data:')) return url;
-  return `${API_URL}${url}`;
-}
 
 function normalizarDecimal(valor: number | string | null | undefined): number {
   if (typeof valor === 'number') return Number.isFinite(valor) ? valor : 0;
@@ -465,7 +458,7 @@ export function GestaoCardapioPage() {
   }, []);
 
   const ImagePreview = React.memo(function ImagePreview({ src, alt, className }: { src?: string | null; alt: string; className?: string }) {
-    const resolvedSrc = resolveImageUrl(src);
+    const resolvedSrc = resolveCardapioImageUrl(src);
     
     if (!resolvedSrc) {
       return (
@@ -651,7 +644,7 @@ export function GestaoCardapioPage() {
             ? rawBase64
             : `data:image/png;base64,${rawBase64}`
           : rawUrl
-            ? resolveImageUrl(rawUrl)
+            ? resolveCardapioImageUrl(rawUrl)
             : '';
 
       if (response.data.sucesso && imageSource) {
@@ -664,7 +657,7 @@ export function GestaoCardapioPage() {
         const optionsResolved = (dados?.imageOptions ?? [])
           .map((opt) => ({
             ...opt,
-            url: resolveImageUrl(opt.url),
+            url: resolveCardapioImageUrl(opt.url),
           }))
           .filter((opt) => !!opt.url);
 
@@ -876,7 +869,7 @@ function fecharModalAurya() {
               />
             </div>
           )}
-          {novo.imagemUrl && !imagensComErro.has(novo.imagemUrl) && (
+          {novo.imagemUrl && !imagensComErro.has(resolveCardapioImageUrl(novo.imagemUrl)) && (
             <div className="col-span-full flex items-center gap-4 mt-2 p-3 bg-slate-900/50 border border-slate-700 rounded-xl">
               <ImagePreview
                 src={novo.imagemUrl}
@@ -891,7 +884,7 @@ function fecharModalAurya() {
               </div>
             </div>
           )}
-          {novo.imagemUrl && imagensComErro.has(novo.imagemUrl) && (
+          {novo.imagemUrl && imagensComErro.has(resolveCardapioImageUrl(novo.imagemUrl)) && (
             <div className="col-span-full flex items-center gap-4 mt-2 p-3 bg-red-500/10 border border-red-500/30 rounded-xl">
               <div className="w-16 h-16 rounded-lg bg-slate-800 border border-red-500/30 flex items-center justify-center text-red-400">
                 <AlertCircle size={20} />
@@ -1208,7 +1201,7 @@ function fecharModalAurya() {
                 placeholder="Descricao"
               />
             </div>
-            {edicao.imagemUrl && !imagensComErro.has(edicao.imagemUrl) && (
+            {edicao.imagemUrl && !imagensComErro.has(resolveCardapioImageUrl(edicao.imagemUrl)) && (
               <div className="flex items-center gap-4 p-3 bg-slate-900/50 border border-slate-700 rounded-xl">
                 <ImagePreview
                   src={edicao.imagemUrl}
@@ -1223,7 +1216,7 @@ function fecharModalAurya() {
                 </div>
               </div>
             )}
-            {edicao.imagemUrl && imagensComErro.has(edicao.imagemUrl) && (
+            {edicao.imagemUrl && imagensComErro.has(resolveCardapioImageUrl(edicao.imagemUrl)) && (
               <div className="flex items-center gap-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl">
                 <div className="w-16 h-16 rounded-lg bg-slate-800 border border-red-500/30 flex items-center justify-center text-red-400">
                   <AlertCircle size={20} />

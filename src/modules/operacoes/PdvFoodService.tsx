@@ -12,11 +12,11 @@ import {
   getSessaoCaixaIdPdv,
   persistirModoPdvLocal,
 } from '../../utils/estacaoWorkstationStorage';
-import { 
-  Search, ShoppingCart, CreditCard, Banknote, QrCode, 
-  Trash2, Check, User, UtensilsCrossed, Monitor, 
+import {
+  Search, ShoppingCart, CreditCard, Banknote, QrCode,
+  Trash2, Check, User, UtensilsCrossed, Monitor,
   Bike, Plus, Minus, Tag, Coffee, Pizza, AlertCircle, RefreshCw,
-  Users, Calculator, Bot, ShieldAlert, XCircle, Keyboard
+  Users, Calculator, Bot, ShieldAlert, XCircle, Keyboard, Printer, ClipboardList, MapPin,
 } from 'lucide-react';
 import { AxiosError } from 'axios';
 import { toast } from 'react-toastify';
@@ -58,12 +58,37 @@ import {
   tefPosVendaSucessoCnc,
 } from '../../services/tefCncFlow';
 import { getHardwareAgent } from '../../services/hardwareAgent';
+import { useCep } from '../../hooks/useCep';
+import type {
+  ClienteEntregaPdv,
+  ComposicaoSaborSnapshot,
+  FormaPagamentoFood,
+  PacoteImpressaoPosPdv,
+  PendenteRecebimentoBalcaoPdv,
+  PayloadFinalizacaoFood,
+} from './pdvFoodTypes';
+import {
+  CLIENTE_ENTREGA_PDV_INICIAL,
+  enderecoEntregaPdvParaApi,
+  montarEnderecoEntregaTextoMenuOnline,
+  montarObservacoesVendaEntregaPdv,
+  resumoPagamentosPdvFood,
+  rotuloFormaPagamentoFood,
+  taxaLojaCentavosParaReais,
+} from './pdvFoodDeliveryHelpers';
+
+type FinalizarFoodOptions = {
+  /** Balcão: envia à cozinha com pagamento posterior, sem abrir o modal de cobrança. */
+  balcaoEnviarCozinhaSemPagamento?: boolean;
+  /** Entrega: envia à cozinha com pagamento na entrega (pendente), sem modal de cobrança. */
+  deliveryEnviarCozinhaPagarNaEntrega?: boolean;
+};
 
 type PdvFoodCartLine = CartItem & {
   itemMesaId?: string;
   nomeExibicaoSnapshot?: string | null;
   tamanhoNomeSnapshot?: string | null;
-  saboresSnapshotJson?: unknown;
+  saboresSnapshotJson?: ComposicaoSaborSnapshot[] | null;
   /** Metadados do cardápio retornados em GET `/api/pdv/mesas` (validação / payload de venda). */
   mesaCardapioMeta?: CardapioMesaMetaVenda | null;
   adicionaisSnapshotJson?: unknown;
@@ -82,6 +107,8 @@ interface PizzaComposicaoPdvState {
   observacao: string;
   itemCardapioTamanhoId: string | null;
   saboresItemCardapioIds: string[];
+  /** Alinhado ao Menu Online (`maxSabores` do cardápio). */
+  maxSabores: number;
 }
 
 interface IMesa {
@@ -98,14 +125,41 @@ interface IPagamentoParcial {
   canalAdquirente?: 'POS' | 'TEF';
 }
 
-interface PacoteImpressaoPos {
-  formato: string;
-  payload: string;
+function rotuloStatusPreparoPdvFood(sp: string | null | undefined): string {
+  const u = String(sp ?? 'NENHUM').toUpperCase();
+  const map: Record<string, string> = {
+    NENHUM: 'Aguardando',
+    RECEBIDO: 'Recebido',
+    PREPARANDO: 'Em preparo',
+    PRONTO: 'Pronto',
+    ENTREGUE: 'Entregue',
+    CANCELADO: 'Cancelado',
+  };
+  return map[u] ?? u;
+}
+
+function pendenteBalcaoPodeCancelarNoPdv(sp: string | null | undefined): boolean {
+  const raw = String(sp ?? 'NENHUM').toUpperCase().trim().replace(/\s+/g, '_');
+  const n =
+    raw === 'TODO' || raw === 'NOVO'
+      ? 'RECEBIDO'
+      : raw === 'EM_PREPARO'
+        ? 'PREPARANDO'
+        : raw;
+  if (['PRONTO', 'ENTREGUE', 'FINALIZADO', 'CANCELADO'].includes(n)) return false;
+  return ['NENHUM', 'RECEBIDO', 'PREPARANDO'].includes(n);
 }
 
 const LS_PDV_FOOD_AUTO_PRINT = '@PDV_FOOD:autoPrint';
 
-function isAutoPrintFoodEnabled(): boolean {
+const OPCOES_FORMA_PAGAMENTO_PREVISTA_ENTREGA: { value: FormaPagamentoFood; label: string }[] = [
+  { value: 'DINHEIRO', label: 'Dinheiro' },
+  { value: 'PIX', label: 'PIX' },
+  { value: 'CARTAO_CREDITO', label: 'Cartão de crédito' },
+  { value: 'CARTAO_DEBITO', label: 'Cartão de débito' },
+];
+
+function readImprimirAutomaticoInitial(): boolean {
   const raw = localStorage.getItem(LS_PDV_FOOD_AUTO_PRINT);
   if (raw == null) return true;
   const v = raw.trim().toLowerCase();
@@ -113,7 +167,7 @@ function isAutoPrintFoodEnabled(): boolean {
 }
 
 async function enviarPacoteImpressaoPosAoAgent(
-  pacoteImpressaoPos: PacoteImpressaoPos
+  pacoteImpressaoPos: PacoteImpressaoPosPdv
 ): Promise<boolean> {
   const agent = getHardwareAgent();
   const url = agent.getUrl ? agent.getUrl() : 'ws://localhost:8080';
@@ -376,7 +430,53 @@ export function PdvFoodService() {
 
   // --- ESTADOS DO CARRINHO ---
   const [carrinho, setCarrinho] = useState<PdvFoodCartLine[]>([]);
-  const [clienteDelivery, setClienteDelivery] = useState({ nome: '', telefone: '', endereco: '' });
+  const [clienteEntregaPdv, setClienteEntregaPdv] = useState<ClienteEntregaPdv>(() => ({
+    ...CLIENTE_ENTREGA_PDV_INICIAL,
+    endereco: { ...CLIENTE_ENTREGA_PDV_INICIAL.endereco },
+  }));
+  const [taxaEntregaReais, setTaxaEntregaReais] = useState(0);
+  const [formaPagamentoPrevistaEntrega, setFormaPagamentoPrevistaEntrega] =
+    useState<FormaPagamentoFood>('DINHEIRO');
+  const { addressData, isLoading: carregandoCep, fetchAddress } = useCep();
+  const [clienteBalcao, setClienteBalcao] = useState<{ nome: string; telefone: string }>({
+    nome: '',
+    telefone: '',
+  });
+  const [imprimirAutomatico, setImprimirAutomatico] = useState(readImprimirAutomaticoInitial);
+  useEffect(() => {
+    localStorage.setItem(LS_PDV_FOOD_AUTO_PRINT, imprimirAutomatico ? 'true' : 'false');
+  }, [imprimirAutomatico]);
+
+  useEffect(() => {
+    let ativo = true;
+    void (async () => {
+      try {
+        const res = await api.get<{ taxaEntregaPadrao?: number | null }>('/api/lojas/minha-loja');
+        if (!ativo) return;
+        setTaxaEntregaReais(taxaLojaCentavosParaReais(res.data?.taxaEntregaPadrao));
+      } catch {
+        if (ativo) setTaxaEntregaReais(0);
+      }
+    })();
+    return () => {
+      ativo = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!addressData) return;
+    setClienteEntregaPdv((prev) => ({
+      ...prev,
+      endereco: {
+        ...prev.endereco,
+        rua: addressData.logradouro || prev.endereco.rua,
+        bairro: addressData.bairro || prev.endereco.bairro,
+        cidade: addressData.cidade || prev.endereco.cidade,
+        uf: addressData.uf || prev.endereco.uf,
+        complemento: addressData.complemento || prev.endereco.complemento,
+      },
+    }));
+  }, [addressData]);
 
   // --- ESTADOS DE MESAS ---
   const [mesas, setMesas] = useState<IMesa[]>(
@@ -399,6 +499,44 @@ export function PdvFoodService() {
   const [finalizando, setFinalizando] = useState(false);
   const [tefFoodBusy, setTefFoodBusy] = useState(false);
   const [mesaSyncBusy, setMesaSyncBusy] = useState(false);
+
+  const [pendentesRecebimentoBalcao, setPendentesRecebimentoBalcao] = useState<
+    PendenteRecebimentoBalcaoPdv[]
+  >([]);
+  const [carregandoPendentesBalcao, setCarregandoPendentesBalcao] = useState(false);
+  const [modalRecebimentoBalcao, setModalRecebimentoBalcao] = useState(false);
+  const [pendenteRecebimentoAlvo, setPendenteRecebimentoAlvo] =
+    useState<PendenteRecebimentoBalcaoPdv | null>(null);
+  const [formaPagamentoRecebimento, setFormaPagamentoRecebimento] = useState('PIX');
+  const [valorDigitadoRecebimento, setValorDigitadoRecebimento] = useState('');
+  const [pagamentosRecebimento, setPagamentosRecebimento] = useState<IPagamentoParcial[]>([]);
+  const [dividirPorRecebimento, setDividirPorRecebimento] = useState(1);
+  const [finalizandoRecebimento, setFinalizandoRecebimento] = useState(false);
+
+  const carregarPendentesRecebimentoBalcao = useCallback(async () => {
+    setCarregandoPendentesBalcao(true);
+    try {
+      const res = await api.get<PendenteRecebimentoBalcaoPdv[]>(
+        '/api/vendas/pendentes-recebimento-balcao'
+      );
+      setPendentesRecebimentoBalcao(Array.isArray(res.data) ? res.data : []);
+    } catch (err: unknown) {
+      const ax = err as AxiosError<{ error?: string }>;
+      const msg = ax.response?.data?.error ?? 'Não foi possível carregar pedidos em aberto.';
+      toast.error(msg);
+      setPendentesRecebimentoBalcao([]);
+    } finally {
+      setCarregandoPendentesBalcao(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (modoAtendimento === 'BALCAO') {
+      void carregarPendentesRecebimentoBalcao();
+    } else {
+      setPendentesRecebimentoBalcao([]);
+    }
+  }, [modoAtendimento, carregarPendentesRecebimentoBalcao]);
 
   const cancelarModalPagamento = useCallback(() => {
     for (const p of pagamentosAdicionados) {
@@ -500,7 +638,9 @@ export function PdvFoodService() {
               subtotal: Number(item.valorTotal),
               nomeExibicaoSnapshot: item.nomeExibicaoSnapshot ?? null,
               tamanhoNomeSnapshot: item.tamanhoNome ?? null,
-              saboresSnapshotJson: item.saboresSnapshot ?? undefined,
+              saboresSnapshotJson: Array.isArray(item.saboresSnapshot)
+                ? (item.saboresSnapshot as ComposicaoSaborSnapshot[])
+                : null,
               mesaCardapioMeta,
               adicionaisSnapshotJson: item.adicionaisSnapshot ?? undefined,
             } satisfies PdvFoodCartLine;
@@ -732,6 +872,7 @@ export function PdvFoodService() {
         observacao: payload.observacao,
         itemCardapioTamanhoId: payload.itemCardapioTamanhoId ?? null,
         saboresItemCardapioIds: [...(payload.saboresItemCardapioIds ?? [])],
+        maxSabores: Math.min(20, Math.max(1, payload.produto.maxSabores ?? 1)),
       });
       return;
     }
@@ -840,7 +981,7 @@ export function PdvFoodService() {
         toast.info('Termine ou cancele a montagem da pizza antes de adicionar outro item.');
         return;
       }
-      const maxS = Math.min(20, Math.max(1, base.maxSabores ?? 1));
+      const maxS = pizzaEmComposicao.maxSabores;
       const sabores = [...pizzaEmComposicao.saboresItemCardapioIds];
       if (sabores.includes(novoSabor)) {
         toast.info('Este sabor já está na pizza.');
@@ -1026,17 +1167,67 @@ export function PdvFoodService() {
 
   // --- LÓGICA DE PAGAMENTO (SPLIT BILL) ---
   const totalCarrinho = useMemo(() => getCarrinhoAtual().reduce((acc, item) => acc + item.subtotal, 0), [getCarrinhoAtual]);
-  
+
+  const totalPedidoComTaxa = useMemo(
+    () => arredondar2(totalCarrinho + (modoAtendimento === 'DELIVERY' ? taxaEntregaReais : 0)),
+    [totalCarrinho, modoAtendimento, taxaEntregaReais]
+  );
+
   const totalPago = useMemo(() => pagamentosAdicionados.reduce((acc, p) => acc + p.valor, 0), [pagamentosAdicionados]);
-  const saldoDevedor = Math.max(0, totalCarrinho - totalPago);
-  const troco = Math.max(0, totalPago - totalCarrinho);
+  const saldoDevedor = Math.max(0, totalPedidoComTaxa - totalPago);
+  const troco = Math.max(0, totalPago - totalPedidoComTaxa);
 
   const cobrancaPosteriorAtiva =
-    timingCobrancaFood === 'POSTERIOR' &&
-    (modoAtendimento === 'BALCAO' || modoAtendimento === 'DELIVERY');
+    timingCobrancaFood === 'POSTERIOR' && modoAtendimento === 'BALCAO';
   const podeFinalizarCobranca = cobrancaPosteriorAtiva || saldoDevedor <= 0.01;
-  
-  const valorPorPessoa = useMemo(() => totalCarrinho / dividirPor, [totalCarrinho, dividirPor]);
+
+  const valorPorPessoa = useMemo(() => totalPedidoComTaxa / dividirPor, [totalPedidoComTaxa, dividirPor]);
+
+  const totalRecebimentoAlvo = useMemo(
+    () => Number(pendenteRecebimentoAlvo?.saldoPendente ?? 0),
+    [pendenteRecebimentoAlvo]
+  );
+  const totalPagoRecebimento = useMemo(
+    () => pagamentosRecebimento.reduce((acc, p) => acc + p.valor, 0),
+    [pagamentosRecebimento]
+  );
+  const saldoDevedorRecebimento = Math.max(0, totalRecebimentoAlvo - totalPagoRecebimento);
+  const trocoRecebimento = Math.max(0, totalPagoRecebimento - totalRecebimentoAlvo);
+  const valorPorPessoaRecebimento = useMemo(
+    () => (totalRecebimentoAlvo > 0 ? totalRecebimentoAlvo / dividirPorRecebimento : 0),
+    [totalRecebimentoAlvo, dividirPorRecebimento]
+  );
+  const podeFinalizarRecebimento =
+    totalRecebimentoAlvo > 0.009 && saldoDevedorRecebimento <= 0.01;
+
+  useEffect(() => {
+    if (!modalRecebimentoBalcao) return;
+    if (dividirPorRecebimento > 1 && pagamentosRecebimento.length < dividirPorRecebimento - 1) {
+      setValorDigitadoRecebimento(valorPorPessoaRecebimento.toFixed(2));
+    } else {
+      setValorDigitadoRecebimento(saldoDevedorRecebimento.toFixed(2));
+    }
+  }, [
+    modalRecebimentoBalcao,
+    saldoDevedorRecebimento,
+    dividirPorRecebimento,
+    valorPorPessoaRecebimento,
+    pagamentosRecebimento.length,
+  ]);
+
+  const cancelarModalRecebimentoBalcao = useCallback(() => {
+    setPagamentosRecebimento((prev) => {
+      for (const p of prev) {
+        if (p.transacaoTefId) {
+          void tefCancelarAutorizacaoPendente(p.transacaoTefId).catch(() => undefined);
+        }
+      }
+      return [];
+    });
+    setPendenteRecebimentoAlvo(null);
+    setDividirPorRecebimento(1);
+    setModalRecebimentoBalcao(false);
+  }, []);
 
   useEffect(() => {
     if (modalPagamento) {
@@ -1052,7 +1243,7 @@ export function PdvFoodService() {
     const valor = Number(valorDigitado.replace(',', '.'));
     if (valor <= 0) return;
     if (valor > saldoDevedor + 0.009) {
-      alert(
+      toast.error(
         `O valor (R$ ${valor.toFixed(2)}) não pode ser maior que o saldo devedor (R$ ${saldoDevedor.toFixed(2)}).`
       );
       return;
@@ -1077,7 +1268,7 @@ export function PdvFoodService() {
           },
         ]);
       } catch (e) {
-        alert(e instanceof Error ? e.message : 'Falha na autorização TEF.');
+        toast.error(e instanceof Error ? e.message : 'Falha na autorização TEF.');
       } finally {
         setTefFoodBusy(false);
       }
@@ -1098,10 +1289,239 @@ export function PdvFoodService() {
     setPagamentosAdicionados((prev) => prev.filter((p) => p.id !== id));
   };
 
+  const adicionarPagamentoRecebimento = async () => {
+    const valor = Number(valorDigitadoRecebimento.replace(',', '.'));
+    if (valor <= 0) return;
+    if (valor > saldoDevedorRecebimento + 0.009) {
+      toast.error(
+        `O valor (R$ ${valor.toFixed(2)}) não pode ser maior que o saldo (R$ ${saldoDevedorRecebimento.toFixed(2)}).`
+      );
+      return;
+    }
+
+    if (formaPagamentoRecebimento === 'CREDITO_TEF' || formaPagamentoRecebimento === 'DEBITO_TEF') {
+      setTefFoodBusy(true);
+      try {
+        const { transacaoTefId } = await aguardarAutorizacaoTefHardware({
+          valor,
+          tipoCartao: formaPagamentoRecebimento === 'CREDITO_TEF' ? 'CREDITO' : 'DEBITO',
+          terminal: 'FOOD-SERVICE',
+        });
+        setPagamentosRecebimento((prev) => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            tipoPagamento:
+              formaPagamentoRecebimento === 'CREDITO_TEF' ? 'CARTAO_CREDITO' : 'CARTAO_DEBITO',
+            valor,
+            transacaoTefId,
+            canalAdquirente: 'TEF',
+          },
+        ]);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Falha na autorização TEF.');
+      } finally {
+        setTefFoodBusy(false);
+      }
+      return;
+    }
+
+    setPagamentosRecebimento((prev) => [
+      ...prev,
+      { id: Date.now().toString(), tipoPagamento: formaPagamentoRecebimento, valor },
+    ]);
+  };
+
+  const removerPagamentoRecebimento = (id: string) => {
+    const pag = pagamentosRecebimento.find((p) => p.id === id);
+    if (pag?.transacaoTefId) {
+      void tefCancelarAutorizacaoPendente(pag.transacaoTefId).catch(() => undefined);
+    }
+    setPagamentosRecebimento((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  const abrirRecebimentoPendente = (p: PendenteRecebimentoBalcaoPdv) => {
+    setPendenteRecebimentoAlvo(p);
+    setPagamentosRecebimento([]);
+    setDividirPorRecebimento(1);
+    setFormaPagamentoRecebimento('PIX');
+    setModalRecebimentoBalcao(true);
+  };
+
+  const confirmarRecebimentoPendenteBalcao = async () => {
+    if (!pendenteRecebimentoAlvo || !podeFinalizarRecebimento) return;
+    const vendaId = pendenteRecebimentoAlvo.id;
+    const pagamentosFinais = [...pagamentosRecebimento];
+    if (trocoRecebimento > 0) {
+      const pagDinheiro = pagamentosFinais.find((x) => x.tipoPagamento === 'DINHEIRO');
+      if (pagDinheiro) pagDinheiro.valor -= trocoRecebimento;
+    }
+    const tefIdsSnapshot = pagamentosFinais
+      .map((p) => p.transacaoTefId)
+      .filter((id): id is string => typeof id === 'string' && id.trim().length > 0);
+
+    setFinalizandoRecebimento(true);
+    try {
+      const estacaoId = getEstacaoTrabalhoIdPdv()?.trim();
+      const sessaoId = getSessaoCaixaIdPdv()?.trim();
+      const res = await api.post<{
+        pacoteImpressaoPos?: PacoteImpressaoPosPdv | null;
+        venda?: { id: string };
+      }>(
+        `/api/vendas/${vendaId}/receber-pagamento-balcao`,
+        {
+          pagamentos: pagamentosFinais.map((p) => ({
+            tipoPagamento: p.tipoPagamento,
+            valor: p.valor,
+            ...(p.transacaoTefId
+              ? { transacaoTefId: p.transacaoTefId, canalAdquirente: 'TEF' as const }
+              : p.tipoPagamento === 'CARTAO_CREDITO' || p.tipoPagamento === 'CARTAO_DEBITO'
+                ? { canalAdquirente: 'POS' as const }
+                : {}),
+          })),
+          ...(estacaoId ? { estacaoTrabalhoId: estacaoId } : {}),
+          ...(sessaoId ? { sessaoCaixaId: sessaoId } : {}),
+        },
+        { headers: { 'Idempotency-Key': crypto.randomUUID() } }
+      );
+
+      if (tefIdsSnapshot.length > 0) {
+        try {
+          await tefPosVendaSucessoCnc(tefIdsSnapshot, { vendaId });
+        } catch (tefErr) {
+          console.error(tefErr);
+          toast.error('Pagamento registrado, mas a confirmação TEF falhou. Verifique a maquininha.');
+        }
+      }
+
+      const pacote = res.data?.pacoteImpressaoPos;
+      if (imprimirAutomatico && pacote) {
+        try {
+          const ok = await enviarPacoteImpressaoPosAoAgent(pacote);
+          if (!ok) toast.error('Erro na impressão do cupom; recebimento concluído.');
+        } catch {
+          toast.error('Erro na impressão do cupom; recebimento concluído.');
+        }
+      }
+
+      toast.success('Pagamento recebido. Pedido liquidado.', { toastId: 'pdv-food-receb-balcao-ok' });
+      cancelarModalRecebimentoBalcao();
+      void carregarPendentesRecebimentoBalcao();
+    } catch (err: unknown) {
+      const ax = err as AxiosError<{ error?: string }>;
+      const tefIdsRollback = pagamentosRecebimento
+        .map((p) => p.transacaoTefId)
+        .filter((id): id is string => typeof id === 'string' && id.trim().length > 0);
+      if (tefIdsRollback.length > 0) {
+        void tefFalhaSalvarVendaCnc(tefIdsRollback).catch(() => undefined);
+      }
+      toast.error(ax.response?.data?.error ?? 'Não foi possível concluir o recebimento.', {
+        toastId: 'pdv-food-receb-balcao-erro',
+      });
+    } finally {
+      setFinalizandoRecebimento(false);
+    }
+  };
+
+  const reimprimirPendenteBalcao = async (p: PendenteRecebimentoBalcaoPdv) => {
+    try {
+      const res = await api.get<{ pacoteImpressaoPos?: PacoteImpressaoPosPdv }>(
+        `/api/vendas/${p.id}/pacote-conferencia`,
+        { validateStatus: (s) => s === 200 || s === 204 }
+      );
+      if (res.status === 204 || !res.data?.pacoteImpressaoPos) {
+        toast.info('Nenhum cupom de conferência para este pedido.');
+        return;
+      }
+      const ok = await enviarPacoteImpressaoPosAoAgent(res.data.pacoteImpressaoPos);
+      if (!ok) toast.error('Não foi possível enviar à impressora.');
+      else toast.success('Impressão enviada.');
+    } catch (err: unknown) {
+      const ax = err as AxiosError<{ error?: string }>;
+      toast.error(ax.response?.data?.error ?? 'Falha ao gerar cupom.');
+    }
+  };
+
+  const cancelarPendenteBalcao = async (p: PendenteRecebimentoBalcaoPdv) => {
+    const motivo = window.prompt(
+      'Motivo do cancelamento (obrigatório):',
+      'Cancelado no caixa PDV'
+    );
+    if (motivo == null) return;
+    const m = motivo.trim();
+    if (!m) {
+      toast.error('Informe o motivo para cancelar.');
+      return;
+    }
+    try {
+      await api.post(`/api/vendas/${p.id}/cancelar`, {
+        origem: 'PDV_FOOD_BALCAO',
+        motivo: m,
+      });
+      toast.success('Pedido cancelado.');
+      void carregarPendentesRecebimentoBalcao();
+    } catch (err: unknown) {
+      const ax = err as AxiosError<{ error?: string; sucesso?: boolean; erro?: string }>;
+      const data = ax.response?.data;
+      const msg =
+        (data && typeof data === 'object' && 'error' in data && typeof data.error === 'string'
+          ? data.error
+          : null) ??
+        (data && typeof data === 'object' && 'erro' in data && typeof data.erro === 'string'
+          ? data.erro
+          : null) ??
+        'Não foi possível cancelar o pedido.';
+      toast.error(msg);
+    }
+  };
+
+  const validarDadosEntregaPdv = useCallback((): boolean => {
+    const c = clienteEntregaPdv;
+    if (!c.nomeCompleto.trim()) {
+      toast.error('Informe o nome completo do cliente.');
+      return false;
+    }
+    if (!c.whatsapp.trim()) {
+      toast.error('Informe o WhatsApp do cliente.');
+      return false;
+    }
+    const cepDig = c.endereco.cep.replace(/\D/g, '');
+    if (cepDig.length !== 8) {
+      toast.error('Informe um CEP válido (8 dígitos).');
+      return false;
+    }
+    if (!c.endereco.rua.trim()) {
+      toast.error('Informe a rua (logradouro).');
+      return false;
+    }
+    if (!c.endereco.numero.trim()) {
+      toast.error('Informe o número do endereço.');
+      return false;
+    }
+    if (!c.endereco.bairro.trim()) {
+      toast.error('Informe o bairro.');
+      return false;
+    }
+    if (!c.endereco.cidade.trim()) {
+      toast.error('Informe a cidade.');
+      return false;
+    }
+    if (c.endereco.uf.trim().length !== 2) {
+      toast.error('Informe a UF (estado) com 2 letras.');
+      return false;
+    }
+    return true;
+  }, [clienteEntregaPdv]);
+
   const abrirModalPagamento = () => {
+    if (modoAtendimento === 'DELIVERY' && !validarDadosEntregaPdv()) {
+      return;
+    }
+    if (modoAtendimento === 'BALCAO' || modoAtendimento === 'DELIVERY') {
+      setTimingCobrancaFood('AGORA');
+    }
     setPagamentosAdicionados([]);
     setDividirPor(1);
-    setTimingCobrancaFood('AGORA');
     setModalPagamento(true);
   };
 
@@ -1118,12 +1538,37 @@ export function PdvFoodService() {
   }, [timingCobrancaFood]);
 
   // --- FINALIZAÇÃO DE VENDA ---
-  const finalizarVenda = useCallback(async () => {
+  const finalizarVenda = useCallback(
+    async (opts?: FinalizarFoodOptions) => {
+    const balcaoCozinha = opts?.balcaoEnviarCozinhaSemPagamento === true;
+    const deliveryCozinhaPagarEntrega = opts?.deliveryEnviarCozinhaPagarNaEntrega === true;
+    if (balcaoCozinha && modoAtendimento !== 'BALCAO') return;
+    if (deliveryCozinhaPagarEntrega && modoAtendimento !== 'DELIVERY') return;
+
     if (getCarrinhoAtual().length === 0) return;
     const pagPosteriorFood =
-      timingCobrancaFood === 'POSTERIOR' &&
-      (modoAtendimento === 'BALCAO' || modoAtendimento === 'DELIVERY');
+      balcaoCozinha || deliveryCozinhaPagarEntrega
+        ? true
+        : timingCobrancaFood === 'POSTERIOR' && modoAtendimento === 'BALCAO';
     if (!pagPosteriorFood && saldoDevedor > 0.01) return;
+
+    if (balcaoCozinha) {
+      const nomeB = clienteBalcao.nome.trim();
+      if (!nomeB) {
+        toast.error('Informe o nome do cliente para enviar o pedido à cozinha.');
+        return;
+      }
+    }
+
+    if (deliveryCozinhaPagarEntrega) {
+      const previstaOk = OPCOES_FORMA_PAGAMENTO_PREVISTA_ENTREGA.some(
+        (o) => o.value === formaPagamentoPrevistaEntrega
+      );
+      if (!previstaOk) {
+        toast.error('Selecione a forma de pagamento prevista para pagamento na entrega.');
+        return;
+      }
+    }
 
     if (modoAtendimento === 'MESA') {
       for (const line of getCarrinhoAtual()) {
@@ -1134,6 +1579,9 @@ export function PdvFoodService() {
         }
       }
     } else {
+      if (modoAtendimento === 'DELIVERY' && !validarDadosEntregaPdv()) {
+        return;
+      }
       const linhasVal = getCarrinhoAtual().map(paraCartItemBase);
       const errCarrinho = validarLinhasCarrinhoFood(linhasVal);
       if (errCarrinho) {
@@ -1161,21 +1609,82 @@ export function PdvFoodService() {
       const sessaoId = getSessaoCaixaIdPdv()?.trim();
       const caixaFiscalId = getCaixaFiscalIdPdv()?.trim();
 
-      const payload = {
+      const nomeClienteBalcao =
+        modoAtendimento === 'BALCAO' && clienteBalcao.nome.trim() !== ''
+          ? clienteBalcao.nome.trim()
+          : undefined;
+      const telefoneClienteBalcao =
+        modoAtendimento === 'BALCAO' && clienteBalcao.telefone.trim() !== ''
+          ? clienteBalcao.telefone.trim()
+          : undefined;
+
+      const observacoesEntrega =
+        modoAtendimento === 'DELIVERY'
+          ? montarObservacoesVendaEntregaPdv({
+              nome: clienteEntregaPdv.nomeCompleto,
+              whatsapp: clienteEntregaPdv.whatsapp,
+              observacaoPedido: clienteEntregaPdv.observacaoPedido,
+            })
+          : undefined;
+
+      const enderecoTextoMenu =
+        modoAtendimento === 'DELIVERY'
+          ? montarEnderecoEntregaTextoMenuOnline(clienteEntregaPdv.endereco)
+          : '';
+
+      let enderecoEntregaPayload: PayloadFinalizacaoFood['enderecoEntrega'] | undefined;
+      if (modoAtendimento === 'DELIVERY') {
+        try {
+          enderecoEntregaPayload = enderecoEntregaPdvParaApi(clienteEntregaPdv.endereco);
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : 'Endereço inválido.');
+          setFinalizando(false);
+          return;
+        }
+      }
+
+      const formaPagamentoResumo =
+        modoAtendimento === 'DELIVERY'
+          ? pagPosteriorFood
+            ? rotuloFormaPagamentoFood(formaPagamentoPrevistaEntrega)
+            : resumoPagamentosPdvFood(pagamentosFinais)
+          : undefined;
+
+      const payload: PayloadFinalizacaoFood = {
         modo: modoAtendimento,
         modoAtendimento,
         tipoAtendimento: modoAtendimento,
         mesa: mesaSelecionada ?? undefined,
         mesaId: mesaSelecionada ?? undefined,
         mesaNumero: mesaSelecionada ?? undefined,
-        clienteDelivery: modoAtendimento === 'DELIVERY' ? clienteDelivery : null,
+        clienteDelivery:
+          modoAtendimento === 'DELIVERY'
+            ? {
+                nome: clienteEntregaPdv.nomeCompleto.trim(),
+                telefone: clienteEntregaPdv.whatsapp.trim(),
+                endereco: enderecoTextoMenu,
+              }
+            : null,
+        ...(nomeClienteBalcao ? { nomeCliente: nomeClienteBalcao } : {}),
+        ...(telefoneClienteBalcao ? { telefoneCliente: telefoneClienteBalcao } : {}),
+        ...(modoAtendimento === 'DELIVERY'
+          ? {
+              nomeCliente: clienteEntregaPdv.nomeCompleto.trim(),
+              telefoneCliente: clienteEntregaPdv.whatsapp.trim(),
+              observacoes: observacoesEntrega ?? '',
+              taxaEntrega: taxaEntregaReais,
+              cidade: clienteEntregaPdv.endereco.cidade.trim(),
+              enderecoEntrega: enderecoEntregaPayload,
+              ...(formaPagamentoResumo ? { formaPagamento: formaPagamentoResumo } : {}),
+            }
+          : {}),
         itens:
           modoAtendimento === 'MESA'
             ? getCarrinhoAtual().map((ln) => mapItemMesaParaLinhaVendaApi(mesaCartLineParaVendaInput(ln)))
             : getCarrinhoAtual().map((i) => montarLinhaVendaApiFromCartItem(paraCartItemBase(i))),
-        valorTotal: totalCarrinho,
+        valorTotal: totalPedidoComTaxa,
         pagamentos: pagPosteriorFood
-          ? [{ tipoPagamento: 'CREDIARIO' as const, valor: totalCarrinho }]
+          ? [{ tipoPagamento: 'CREDIARIO' as const, valor: totalPedidoComTaxa }]
           : pagamentosFinais.map((p) => ({
               tipoPagamento: p.tipoPagamento,
               valor: p.valor,
@@ -1215,7 +1724,7 @@ export function PdvFoodService() {
       const resVenda = await api.post<{
         venda?: { id: string };
         id?: string;
-        pacoteImpressaoPos?: PacoteImpressaoPos | null;
+        pacoteImpressaoPos?: PacoteImpressaoPosPdv | null;
         auryaCorrecoesTributarias?: { nomeProduto: string; cstAnterior: string; csosnNovo: string }[];
       }>('/api/vendas', payload, {
         headers: {
@@ -1254,8 +1763,7 @@ export function PdvFoodService() {
         vendaId: vendaIdLog,
         temPacote: Boolean(pacoteImpressaoPos),
       });
-      const autoPrint = isAutoPrintFoodEnabled();
-      if (autoPrint) {
+      if (imprimirAutomatico) {
         if (!pacoteImpressaoPos) {
           console.warn('[PDV FOOD][PRINT] pacoteImpressaoPos não retornado');
         } else {
@@ -1271,12 +1779,17 @@ export function PdvFoodService() {
         }
       }
 
-      alert(
+      toast.success(
         modoAtendimento === 'MESA'
-          ? '✅ Venda finalizada com sucesso! Mesa liberada.'
-          : pagPosteriorFood
-            ? '✅ Pedido registrado. Pagamento pendente na retirada/entrega; cozinha notificada.'
-            : '✅ Venda finalizada com sucesso!'
+          ? 'Venda finalizada com sucesso. Mesa liberada.'
+          : balcaoCozinha
+            ? 'Pedido enviado à cozinha. Use Pedidos em aberto para receber quando o cliente pagar.'
+            : deliveryCozinhaPagarEntrega
+              ? 'Pedido enviado à cozinha. Pagamento na entrega; acompanhe na Gestão Delivery e na Gestão Food.'
+              : pagPosteriorFood
+                ? 'Pedido registrado. Pagamento pendente na retirada; cozinha notificada.'
+                : 'Venda finalizada com sucesso!',
+        { toastId: 'pdv-food-final-ok' }
       );
       
       if (modoAtendimento === 'MESA' && mesaSelecionada) {
@@ -1285,7 +1798,16 @@ export function PdvFoodService() {
         carregarMesas();
       } else {
         setCarrinho([]);
-        setClienteDelivery({ nome: '', telefone: '', endereco: '' });
+        setClienteEntregaPdv({
+          ...CLIENTE_ENTREGA_PDV_INICIAL,
+          endereco: { ...CLIENTE_ENTREGA_PDV_INICIAL.endereco },
+        });
+        setFormaPagamentoPrevistaEntrega('DINHEIRO');
+        setClienteBalcao({ nome: '', telefone: '' });
+        setTimingCobrancaFood('AGORA');
+        if (modoAtendimento === 'BALCAO' && pagPosteriorFood) {
+          void carregarPendentesRecebimentoBalcao();
+        }
       }
       setModalPagamento(false);
 
@@ -1303,12 +1825,13 @@ export function PdvFoodService() {
       if (mensagemErro.includes('Rejeição Sefaz Evitada')) {
         setAlertaAurya(mensagemErro);
       } else {
-        alert(`❌ Erro ao finalizar: ${mensagemErro}`);
+        toast.error(mensagemErro, { toastId: 'pdv-food-final-erro' });
       }
     } finally {
       setFinalizando(false);
     }
-  }, [
+  },
+  [
     getCarrinhoAtual,
     saldoDevedor,
     troco,
@@ -1316,10 +1839,17 @@ export function PdvFoodService() {
     timingCobrancaFood,
     modoAtendimento,
     mesaSelecionada,
-    clienteDelivery,
-    totalCarrinho,
+    clienteEntregaPdv,
+    clienteBalcao,
+    totalPedidoComTaxa,
+    taxaEntregaReais,
+    formaPagamentoPrevistaEntrega,
+    validarDadosEntregaPdv,
     carregarMesas,
-  ]);
+    imprimirAutomatico,
+    carregarPendentesRecebimentoBalcao,
+  ]
+  );
 
   // ============================================================================
   // 🚀 MÁGICA DA AURYA: AUTO-RETENTATIVA APÓS CORREÇÃO EM OUTRA ABA
@@ -1415,7 +1945,7 @@ export function PdvFoodService() {
             await adicionarAoCarrinho(totemStubCadastro(response.data[0]));
             setBusca('');
           } else {
-            alert(`Nenhum produto encontrado com o código "${busca}".`);
+            toast.error(`Nenhum produto encontrado com o código "${busca}".`);
             setBusca('');
           }
         } catch (err) {
@@ -1472,19 +2002,34 @@ export function PdvFoodService() {
           {/* SELETOR DE MODO DE ATENDIMENTO */}
           <div className="flex p-1 bg-[#0b1324] rounded-xl border border-white/10 shrink-0">
             <button 
-              onClick={() => { setModoAtendimento('BALCAO'); setMesaSelecionada(null); }}
+              type="button"
+              onClick={() => {
+                setModoAtendimento('BALCAO');
+                setMesaSelecionada(null);
+              }}
               className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all ${modoAtendimento === 'BALCAO' ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-[0_0_15px_rgba(139,92,246,0.30)]' : 'text-slate-400 hover:bg-white/5'}`}
             >
               <Monitor className="w-4 h-4" /> Balcão Rápido
             </button>
             <button 
-              onClick={() => { setModoAtendimento('MESA'); carregarMesas(); }}
+              type="button"
+              onClick={() => {
+                setClienteBalcao({ nome: '', telefone: '' });
+                setModoAtendimento('MESA');
+                carregarMesas();
+              }}
               className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all ${modoAtendimento === 'MESA' ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-[0_0_15px_rgba(139,92,246,0.30)]' : 'text-slate-400 hover:bg-white/5'}`}
             >
               <UtensilsCrossed className="w-4 h-4" /> Controle de Mesas
             </button>
             <button 
-              onClick={() => { setModoAtendimento('DELIVERY'); setMesaSelecionada(null); }}
+              type="button"
+              onClick={() => {
+                setClienteBalcao({ nome: '', telefone: '' });
+                setTimingCobrancaFood('AGORA');
+                setModoAtendimento('DELIVERY');
+                setMesaSelecionada(null);
+              }}
               className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all ${modoAtendimento === 'DELIVERY' ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-[0_0_15px_rgba(139,92,246,0.30)]' : 'text-slate-400 hover:bg-white/5'}`}
             >
               <Bike className="w-4 h-4" /> Delivery
@@ -1648,10 +2193,10 @@ export function PdvFoodService() {
           )}
         </div>
 
-        {/* LADO DIREITO: CARRINHO E PAGAMENTO */}
-        <div className="w-full lg:w-[400px] flex flex-col bg-[#08101f]/90 backdrop-blur-xl rounded-[30px] border border-white/10 shadow-[0_25px_60px_rgba(0,0,0,0.35)] overflow-hidden shrink-0">
+        {/* LADO DIREITO: CARRINHO E PAGAMENTO — min-h-0 + coluna flex permite lista com scroll em DELIVERY */}
+        <div className="flex w-full shrink-0 flex-col min-h-0 overflow-hidden bg-[#08101f]/90 backdrop-blur-xl rounded-[30px] border border-white/10 shadow-[0_25px_60px_rgba(0,0,0,0.35)] lg:h-full lg:max-h-full lg:w-[400px]">
           
-          <div className="bg-[#0b1324] p-5 border-b border-white/10 flex items-center justify-between gap-2 flex-wrap">
+          <div className="bg-[#0b1324] p-5 border-b border-white/10 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-col gap-1">
               <div className="inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-violet-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-violet-300 w-fit">
                 Food Service Intelligence
@@ -1660,12 +2205,302 @@ export function PdvFoodService() {
             <h2 className="text-lg font-black text-white flex items-center gap-2">
               <ShoppingCart className="w-5 h-5 text-violet-300" /> Pedido Atual
             </h2>
-            <span className="bg-violet-500/10 text-violet-300 text-xs font-bold px-3 py-1 rounded-full border border-violet-500/20">
-              {getCarrinhoAtual().length} itens
-            </span>
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex cursor-pointer items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 shrink-0 rounded border-white/20 bg-[#08101f] accent-violet-500"
+                  checked={imprimirAutomatico}
+                  onChange={(e) => setImprimirAutomatico(e.target.checked)}
+                />
+                <Printer className="h-3.5 w-3.5 text-violet-400" aria-hidden />
+                Imprimir ao enviar
+              </label>
+              <span className="bg-violet-500/10 text-violet-300 text-xs font-bold px-3 py-1 rounded-full border border-violet-500/20">
+                {getCarrinhoAtual().length} itens
+              </span>
+            </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+          {modoAtendimento === 'BALCAO' ? (
+            <>
+              <div className="shrink-0 space-y-2 border-b border-white/10 bg-[#0b1324]/90 px-4 py-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Cliente (balcão)</p>
+                <input
+                  type="text"
+                  autoComplete="name"
+                  placeholder="Nome do cliente (obrigatório para enviar à cozinha sem pagamento)"
+                  value={clienteBalcao.nome}
+                  onChange={(e) => setClienteBalcao((c) => ({ ...c, nome: e.target.value }))}
+                  className="w-full rounded-xl border border-white/10 bg-[#08101f] px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-violet-500/40 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
+                />
+                <input
+                  type="tel"
+                  autoComplete="tel"
+                  placeholder="Telefone / WhatsApp (opcional)"
+                  value={clienteBalcao.telefone}
+                  onChange={(e) => setClienteBalcao((c) => ({ ...c, telefone: e.target.value }))}
+                  className="w-full rounded-xl border border-white/10 bg-[#08101f] px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-violet-500/40 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
+                />
+                <p className="text-[11px] text-slate-500 leading-snug">
+                  Em <span className="text-slate-400 font-semibold">Cobrar pedido</span>, o nome é opcional; se preencher, será impresso e exibido na cozinha e na gestão.
+                </p>
+              </div>
+              <div className="shrink-0 border-b border-white/10 bg-[#0b1324]/95 px-4 py-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-amber-200/90">
+                    <ClipboardList className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                    Pedidos em aberto
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void carregarPendentesRecebimentoBalcao()}
+                    disabled={carregandoPendentesBalcao}
+                    className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-[#08101f] px-2 py-1 text-[10px] font-bold uppercase text-slate-400 hover:border-violet-500/30 hover:text-violet-200 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-3 w-3 shrink-0 ${carregandoPendentesBalcao ? 'animate-spin' : ''}`} />
+                    Atualizar
+                  </button>
+                </div>
+                {pendentesRecebimentoBalcao.length === 0 ? (
+                  <p className="py-4 text-center text-xs text-slate-600">
+                    {carregandoPendentesBalcao ? 'Carregando…' : 'Nenhum pedido aguardando pagamento no caixa.'}
+                  </p>
+                ) : (
+                  <ul className="custom-scrollbar max-h-[220px] space-y-2 overflow-y-auto pr-1">
+                    {pendentesRecebimentoBalcao.map((row) => {
+                      let hora = '—';
+                      try {
+                        const d = new Date(row.createdAt);
+                        if (!Number.isNaN(d.getTime())) {
+                          hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                        }
+                      } catch {
+                        hora = '—';
+                      }
+                      const nome =
+                        row.nomeCliente != null && String(row.nomeCliente).trim() !== ''
+                          ? String(row.nomeCliente).trim()
+                          : 'Cliente';
+                      const tel =
+                        row.telefoneCliente != null && String(row.telefoneCliente).trim() !== ''
+                          ? String(row.telefoneCliente).trim()
+                          : null;
+                      const podeCancelar = pendenteBalcaoPodeCancelarNoPdv(row.statusPreparo);
+                      return (
+                        <li
+                          key={row.id}
+                          className="rounded-xl border border-amber-500/20 bg-[#08101f]/90 p-3 text-xs text-slate-300"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <p className="font-bold text-white">{nome}</p>
+                              {tel ? <p className="text-slate-400">{tel}</p> : null}
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                {hora} · {row.qtdItens} it. · {rotuloStatusPreparoPdvFood(row.statusPreparo)}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-black text-emerald-300">R$ {row.saldoPendente.toFixed(2)}</p>
+                              {row.numeroPedido != null ? (
+                                <p className="text-[10px] text-slate-500">Ped. #{row.numeroPedido}</p>
+                              ) : null}
+                            </div>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => abrirRecebimentoPendente(row)}
+                              disabled={finalizando || finalizandoRecebimento}
+                              className="min-w-[88px] flex-1 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 py-2 text-[10px] font-black uppercase text-white disabled:opacity-50"
+                            >
+                              Receber
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void reimprimirPendenteBalcao(row)}
+                              className="rounded-lg border border-white/15 bg-[#0b1324] px-3 py-2 text-[10px] font-bold uppercase text-slate-300 hover:border-violet-500/35"
+                            >
+                              Reimprimir
+                            </button>
+                            {podeCancelar ? (
+                              <button
+                                type="button"
+                                onClick={() => void cancelarPendenteBalcao(row)}
+                                className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[10px] font-bold uppercase text-red-200 hover:bg-red-500/20"
+                              >
+                                Cancelar
+                              </button>
+                            ) : null}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            </>
+          ) : null}
+
+          {modoAtendimento === 'DELIVERY' ? (
+            <div className="max-h-[min(42vh,300px)] shrink-0 overflow-y-auto overflow-x-hidden border-b border-white/10 bg-[#0b1324]/90 px-3 py-2 custom-scrollbar sm:max-h-[min(38vh,280px)] lg:max-h-[260px]">
+              <p className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                <MapPin className="h-3.5 w-3.5 shrink-0 text-violet-400" aria-hidden />
+                Cliente e entrega
+              </p>
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  autoComplete="name"
+                  placeholder="Nome completo"
+                  value={clienteEntregaPdv.nomeCompleto}
+                  onChange={(e) =>
+                    setClienteEntregaPdv((c) => ({ ...c, nomeCompleto: e.target.value }))
+                  }
+                  className="w-full rounded-lg border border-white/10 bg-[#08101f] px-2.5 py-1.5 text-sm text-white placeholder:text-slate-500 focus:border-violet-500/40 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
+                />
+                <input
+                  type="tel"
+                  autoComplete="tel"
+                  placeholder="WhatsApp (obrigatório)"
+                  value={clienteEntregaPdv.whatsapp}
+                  onChange={(e) => setClienteEntregaPdv((c) => ({ ...c, whatsapp: e.target.value }))}
+                  className="w-full rounded-lg border border-white/10 bg-[#08101f] px-2.5 py-1.5 text-sm text-white placeholder:text-slate-500 focus:border-violet-500/40 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
+                />
+                <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-0.5 block text-[9px] font-bold uppercase text-slate-500">CEP</label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="postal-code"
+                      placeholder="00000000"
+                      value={clienteEntregaPdv.endereco.cep}
+                      onChange={(e) => {
+                        const onlyNums = e.target.value.replace(/\D/g, '').slice(0, 8);
+                        setClienteEntregaPdv((c) => ({
+                          ...c,
+                          endereco: { ...c.endereco, cep: onlyNums },
+                        }));
+                        if (onlyNums.length === 8) {
+                          void fetchAddress(onlyNums);
+                        }
+                      }}
+                      className="w-full rounded-lg border border-white/10 bg-[#08101f] px-2.5 py-1.5 text-sm text-white placeholder:text-slate-500 focus:border-violet-500/40 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
+                    />
+                    {carregandoCep ? (
+                      <p className="mt-0.5 text-[9px] text-slate-500">Consultando CEP…</p>
+                    ) : null}
+                  </div>
+                  <div>
+                    <label className="mb-0.5 block text-[9px] font-bold uppercase text-slate-500">UF</label>
+                    <input
+                      type="text"
+                      maxLength={2}
+                      placeholder="SP"
+                      value={clienteEntregaPdv.endereco.uf}
+                      onChange={(e) =>
+                        setClienteEntregaPdv((c) => ({
+                          ...c,
+                          endereco: {
+                            ...c.endereco,
+                            uf: e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2),
+                          },
+                        }))
+                      }
+                      className="w-full rounded-lg border border-white/10 bg-[#08101f] px-2.5 py-1.5 text-sm text-white placeholder:text-slate-500 focus:border-violet-500/40 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
+                    />
+                  </div>
+                </div>
+                <input
+                  type="text"
+                  placeholder="Rua / logradouro"
+                  value={clienteEntregaPdv.endereco.rua}
+                  onChange={(e) =>
+                    setClienteEntregaPdv((c) => ({
+                      ...c,
+                      endereco: { ...c.endereco, rua: e.target.value },
+                    }))
+                  }
+                  className="w-full rounded-lg border border-white/10 bg-[#08101f] px-2.5 py-1.5 text-sm text-white placeholder:text-slate-500 focus:border-violet-500/40 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
+                />
+                <div className="grid grid-cols-2 gap-1.5">
+                  <input
+                    type="text"
+                    placeholder="Número"
+                    value={clienteEntregaPdv.endereco.numero}
+                    onChange={(e) =>
+                      setClienteEntregaPdv((c) => ({
+                        ...c,
+                        endereco: { ...c.endereco, numero: e.target.value },
+                      }))
+                    }
+                    className="w-full rounded-lg border border-white/10 bg-[#08101f] px-2.5 py-1.5 text-sm text-white placeholder:text-slate-500 focus:border-violet-500/40 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Bairro"
+                    value={clienteEntregaPdv.endereco.bairro}
+                    onChange={(e) =>
+                      setClienteEntregaPdv((c) => ({
+                        ...c,
+                        endereco: { ...c.endereco, bairro: e.target.value },
+                      }))
+                    }
+                    className="w-full rounded-lg border border-white/10 bg-[#08101f] px-2.5 py-1.5 text-sm text-white placeholder:text-slate-500 focus:border-violet-500/40 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
+                  />
+                </div>
+                <input
+                  type="text"
+                  placeholder="Cidade"
+                  value={clienteEntregaPdv.endereco.cidade}
+                  onChange={(e) =>
+                    setClienteEntregaPdv((c) => ({
+                      ...c,
+                      endereco: { ...c.endereco, cidade: e.target.value },
+                    }))
+                  }
+                  className="w-full rounded-lg border border-white/10 bg-[#08101f] px-2.5 py-1.5 text-sm text-white placeholder:text-slate-500 focus:border-violet-500/40 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
+                />
+                <input
+                  type="text"
+                  placeholder="Complemento (opcional)"
+                  value={clienteEntregaPdv.endereco.complemento}
+                  onChange={(e) =>
+                    setClienteEntregaPdv((c) => ({
+                      ...c,
+                      endereco: { ...c.endereco, complemento: e.target.value },
+                    }))
+                  }
+                  className="w-full rounded-lg border border-white/10 bg-[#08101f] px-2.5 py-1.5 text-sm text-white placeholder:text-slate-500 focus:border-violet-500/40 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
+                />
+                <textarea
+                  placeholder="Observações do pedido (opcional)"
+                  value={clienteEntregaPdv.observacaoPedido}
+                  onChange={(e) =>
+                    setClienteEntregaPdv((c) => ({ ...c, observacaoPedido: e.target.value }))
+                  }
+                  rows={2}
+                  className="min-h-[2.75rem] w-full resize-none rounded-lg border border-white/10 bg-[#08101f] px-2.5 py-1.5 text-sm text-white placeholder:text-slate-500 focus:border-violet-500/40 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
+                />
+                <p className="text-[10px] leading-snug text-slate-500">
+                  Taxa entrega:{' '}
+                  <span className="font-semibold text-slate-300">R$ {taxaEntregaReais.toFixed(2)}</span>
+                </p>
+              </div>
+            </div>
+          ) : null}
+
+          {modoAtendimento === 'DELIVERY' ? (
+            <div className="shrink-0 border-b border-white/10 bg-[#08101f]/85 px-3 py-2">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                Itens do pedido
+              </p>
+            </div>
+          ) : null}
+
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="min-h-0 flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar lg:p-4 lg:space-y-3">
             {getCarrinhoAtual().length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-slate-500 space-y-3">
                 <ShoppingCart className="w-12 h-12 opacity-20" />
@@ -1712,21 +2547,103 @@ export function PdvFoodService() {
               );
               })
             )}
+            </div>
           </div>
 
           <div className="bg-[#0b1324] p-5 border-t border-white/10 shrink-0">
-            <div className="flex justify-between items-end mb-4">
-              <span className="text-slate-400 text-sm font-bold uppercase tracking-widest">Total a Pagar</span>
-              <span className="text-3xl font-black text-emerald-400">R$ {totalCarrinho.toFixed(2)}</span>
+            {modoAtendimento === 'DELIVERY' && taxaEntregaReais > 0 ? (
+              <div className="mb-2 space-y-1 text-xs text-slate-400">
+                <div className="flex justify-between">
+                  <span>Subtotal itens</span>
+                  <span>R$ {totalCarrinho.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Taxa entrega</span>
+                  <span>R$ {taxaEntregaReais.toFixed(2)}</span>
+                </div>
+              </div>
+            ) : null}
+            <div className="mb-4 flex items-end justify-between">
+              <span className="text-sm font-bold uppercase tracking-widest text-slate-400">Total a Pagar</span>
+              <span className="text-3xl font-black text-emerald-400">R$ {totalPedidoComTaxa.toFixed(2)}</span>
             </div>
-            
-            <button 
-              onClick={abrirModalPagamento}
-              disabled={getCarrinhoAtual().length === 0}
-              className="w-full py-4 bg-gradient-to-r from-emerald-600 to-teal-500 text-white rounded-xl font-black text-lg shadow-[0_0_20px_rgba(16,185,129,0.30)] transition-all disabled:opacity-50 disabled:transform-none transform hover:-translate-y-1"
-            >
-              COBRAR PEDIDO
-            </button>
+
+            {modoAtendimento === 'BALCAO' ? (
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                <button
+                  type="button"
+                  onClick={() => void finalizarVenda({ balcaoEnviarCozinhaSemPagamento: true })}
+                  disabled={getCarrinhoAtual().length === 0 || finalizando}
+                  className="sm:flex-1 order-2 sm:order-1 py-3.5 px-4 rounded-xl font-black text-sm uppercase tracking-wide border border-violet-500/40 bg-[#0b1324] text-violet-200 hover:bg-violet-500/10 transition-all disabled:opacity-45 disabled:hover:bg-[#0b1324]"
+                >
+                  {finalizando ? 'Enviando…' : 'Enviar para cozinha'}
+                </button>
+                <button
+                  type="button"
+                  onClick={abrirModalPagamento}
+                  disabled={getCarrinhoAtual().length === 0 || finalizando}
+                  className="sm:flex-[1.35] order-1 sm:order-2 py-4 bg-gradient-to-r from-emerald-600 to-teal-500 text-white rounded-xl font-black text-base sm:text-lg shadow-[0_0_20px_rgba(16,185,129,0.30)] transition-all disabled:opacity-50 disabled:transform-none transform hover:-translate-y-0.5"
+                >
+                  Cobrar pedido
+                </button>
+              </div>
+            ) : modoAtendimento === 'DELIVERY' ? (
+              <div className="flex flex-col gap-3">
+                <div className="space-y-2">
+                  <label
+                    htmlFor="pdv-food-forma-prevista-entrega"
+                    className="text-[10px] font-bold uppercase tracking-widest text-amber-200/90"
+                  >
+                    Forma de pagamento prevista (pagar na entrega)
+                  </label>
+                  <select
+                    id="pdv-food-forma-prevista-entrega"
+                    value={formaPagamentoPrevistaEntrega}
+                    onChange={(e) =>
+                      setFormaPagamentoPrevistaEntrega(e.target.value as FormaPagamentoFood)
+                    }
+                    className="w-full rounded-xl border border-amber-500/25 bg-[#08101f] px-3 py-3 text-sm font-bold text-white focus:border-amber-500/40 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                  >
+                    {OPCOES_FORMA_PAGAMENTO_PREVISTA_ENTREGA.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <p className="text-[11px] leading-snug text-slate-500">
+                  Use cobrar pedido para pagamento no caixa ou pagar na entrega para recebimento pelo
+                  entregador.
+                </p>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void finalizarVenda({ deliveryEnviarCozinhaPagarNaEntrega: true })
+                  }
+                  disabled={getCarrinhoAtual().length === 0 || finalizando}
+                  className="order-1 w-full rounded-xl border border-violet-500/40 bg-[#0b1324] py-3.5 px-4 text-[11px] font-black uppercase leading-snug tracking-wide text-violet-200 transition-all hover:bg-violet-500/10 sm:text-xs disabled:opacity-45 disabled:hover:bg-[#0b1324]"
+                >
+                  {finalizando ? 'Enviando…' : 'Enviar para cozinha — pagar na entrega'}
+                </button>
+                <button
+                  type="button"
+                  onClick={abrirModalPagamento}
+                  disabled={getCarrinhoAtual().length === 0 || finalizando}
+                  className="order-2 w-full rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 py-4 text-base font-black uppercase tracking-wide text-white shadow-[0_0_20px_rgba(16,185,129,0.30)] transition-all hover:-translate-y-0.5 disabled:transform-none disabled:opacity-50 sm:text-lg"
+                >
+                  Cobrar pedido
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={abrirModalPagamento}
+                disabled={getCarrinhoAtual().length === 0 || finalizando}
+                className="w-full py-4 bg-gradient-to-r from-emerald-600 to-teal-500 text-white rounded-xl font-black text-lg shadow-[0_0_20px_rgba(16,185,129,0.30)] transition-all disabled:opacity-50 disabled:transform-none transform hover:-translate-y-1"
+              >
+                COBRAR PEDIDO
+              </button>
+            )}
           </div>
         </div>
 
@@ -1764,7 +2681,7 @@ export function PdvFoodService() {
                 <Calculator className="w-5 h-5 text-violet-300" /> Detalhes do Pagamento
               </h2>
 
-              {modoAtendimento !== 'MESA' && (modoAtendimento === 'BALCAO' || modoAtendimento === 'DELIVERY') ? (
+              {modoAtendimento === 'BALCAO' ? (
                 <div className="mb-6 space-y-2">
                   <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Cobrança</span>
                   <div className="flex flex-wrap gap-2">
@@ -1788,16 +2705,22 @@ export function PdvFoodService() {
                           : 'border-white/10 bg-[#0b1324]/70 text-slate-400 hover:border-white/20'
                       }`}
                     >
-                      {modoAtendimento === 'BALCAO' ? 'Pagar na retirada' : 'Pagar na entrega'}
+                      Pagar na retirada
                     </button>
                   </div>
                 </div>
               ) : null}
 
-              {cobrancaPosteriorAtiva ? (
+              {cobrancaPosteriorAtiva && modoAtendimento === 'BALCAO' ? (
                 <div className="mb-6 rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm leading-relaxed text-amber-50/95">
                   O valor fica <strong>pendente</strong> no financeiro. O pedido segue para a cozinha; o cliente paga na{' '}
-                  {modoAtendimento === 'BALCAO' ? 'retirada' : 'entrega'}.
+                  retirada.
+                </div>
+              ) : null}
+
+              {modoAtendimento === 'DELIVERY' ? (
+                <div className="mb-6 rounded-2xl border border-violet-500/20 bg-violet-500/10 p-4 text-sm leading-relaxed text-violet-100/95">
+                  Pagamento no <strong>caixa</strong>: lance as formas abaixo até quitar o total (itens + taxa de entrega).
                 </div>
               ) : null}
 
@@ -1882,7 +2805,7 @@ export function PdvFoodService() {
             <div className="flex-1 bg-[#0b1324]/80 p-6 flex flex-col">
               <div className="flex justify-between items-end mb-6 pb-4 border-b border-white/10">
                 <span className="text-slate-400 text-sm font-bold uppercase tracking-widest">Total do Pedido</span>
-                <span className="text-2xl font-black text-white">R$ {totalCarrinho.toFixed(2)}</span>
+                <span className="text-2xl font-black text-white">R$ {totalPedidoComTaxa.toFixed(2)}</span>
               </div>
 
               {/* Lista de Pagamentos Adicionados */}
@@ -1890,7 +2813,7 @@ export function PdvFoodService() {
                 {pagamentosAdicionados.length === 0 ? (
                   <div className="flex h-full items-center justify-center px-4 text-center text-sm text-slate-600">
                     {cobrancaPosteriorAtiva
-                      ? 'Pagamento na retirada/entrega: nada a lançar agora; finalize para gerar o pendente e enviar à cozinha.'
+                      ? 'Pagamento na retirada: nada a lançar agora; finalize para gerar o pendente e enviar à cozinha.'
                       : 'Nenhum pagamento lançado.'}
                   </div>
                 ) : (
@@ -1944,7 +2867,7 @@ export function PdvFoodService() {
                     }`}
                   >
                     R${' '}
-                    {(cobrancaPosteriorAtiva ? totalCarrinho : saldoDevedor > 0 ? saldoDevedor : troco).toFixed(2)}
+                    {(cobrancaPosteriorAtiva ? totalPedidoComTaxa : saldoDevedor > 0 ? saldoDevedor : troco).toFixed(2)}
                   </span>
                 </div>
               </div>
@@ -1959,7 +2882,7 @@ export function PdvFoodService() {
                 </button>
                 <button 
                   type="button"
-                  onClick={finalizarVenda}
+                  onClick={() => void finalizarVenda()}
                   disabled={finalizando || !podeFinalizarCobranca}
                   className="flex-[2] py-4 bg-gradient-to-r from-emerald-600 to-teal-500 text-white rounded-xl font-black shadow-[0_0_20px_rgba(16,185,129,0.30)] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                 >
@@ -1970,6 +2893,250 @@ export function PdvFoodService() {
             </div>
           </div>
         </div>,
+          document.body
+        )}
+
+      {modalRecebimentoBalcao &&
+        pendenteRecebimentoAlvo &&
+        createPortal(
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pdv-food-modal-recebimento-titulo"
+            className="fixed inset-0 z-[205] flex items-center justify-center p-2 sm:p-4 bg-[#020617]/88 backdrop-blur-md"
+            onClick={() => {
+              if (pagamentosRecebimento.length === 0) cancelarModalRecebimentoBalcao();
+            }}
+          >
+            {tefFoodBusy && (
+              <div
+                className="fixed inset-0 z-[210] flex flex-col items-center justify-center gap-3 bg-[#020617]/90 px-6 text-center"
+                role="status"
+                aria-live="polite"
+              >
+                <CreditCard className="h-10 w-10 animate-pulse text-violet-400" aria-hidden />
+                <p className="text-sm font-bold text-white">
+                  CREDITO TEF / DEBITO TEF — aguarde o PinPad (CNC).
+                </p>
+              </div>
+            )}
+            <div
+              className="relative flex w-full max-w-2xl max-h-[calc(100vh-1rem)] flex-col overflow-y-auto rounded-[28px] border border-emerald-500/20 bg-[#08101f] shadow-[0_0_60px_rgba(16,185,129,0.12),0_25px_80px_rgba(0,0,0,0.55)] md:max-h-[min(92vh,880px)] md:flex-row"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex-1 border-b border-white/10 p-6 md:max-w-[50%] md:border-b-0 md:border-r">
+                <h2
+                  id="pdv-food-modal-recebimento-titulo"
+                  className="mb-2 flex items-center gap-2 text-xl font-black text-white"
+                >
+                  <Banknote className="h-5 w-5 text-emerald-300" aria-hidden />
+                  Receber no caixa
+                </h2>
+                <p className="mb-6 text-sm leading-relaxed text-slate-400">
+                  <span className="font-semibold text-slate-200">
+                    {pendenteRecebimentoAlvo.nomeCliente?.trim() || 'Cliente'}
+                  </span>
+                  {pendenteRecebimentoAlvo.telefoneCliente != null &&
+                  String(pendenteRecebimentoAlvo.telefoneCliente).trim() !== ''
+                    ? ` · ${String(pendenteRecebimentoAlvo.telefoneCliente).trim()}`
+                    : ''}
+                  . Liquida a venda já enviada à cozinha; não cria pedido novo.
+                </p>
+
+                <div className="mb-6 rounded-2xl border border-white/10 bg-[#0b1324]/70 p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <label className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-400">
+                      <Users className="h-4 w-4" /> Dividir conta
+                    </label>
+                    <div className="flex items-center overflow-hidden rounded-lg border border-slate-700 bg-slate-900">
+                      <button
+                        type="button"
+                        onClick={() => setDividirPorRecebimento((n) => Math.max(1, n - 1))}
+                        className="flex h-8 w-8 items-center justify-center text-slate-400 hover:bg-white/5 hover:text-white"
+                      >
+                        <Minus className="h-3 w-3" />
+                      </button>
+                      <span className="w-10 text-center text-sm font-bold text-white">{dividirPorRecebimento}</span>
+                      <button
+                        type="button"
+                        onClick={() => setDividirPorRecebimento((n) => n + 1)}
+                        className="flex h-8 w-8 items-center justify-center text-indigo-400 hover:bg-white/5 hover:text-white"
+                      >
+                        <Plus className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </div>
+                  {dividirPorRecebimento > 1 ? (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-400">Por pessoa:</span>
+                      <span className="font-bold text-indigo-400">
+                        R$ {valorPorPessoaRecebimento.toFixed(2)}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+
+                <label className="mb-3 block text-xs font-bold uppercase tracking-widest text-slate-400">
+                  Forma de pagamento
+                </label>
+                <div className="mb-6 grid grid-cols-2 gap-3">
+                  {(
+                    [
+                      { id: 'PIX', label: 'PIX', icon: QrCode },
+                      { id: 'CREDITO_TEF', label: 'CREDITO TEF', icon: CreditCard },
+                      { id: 'DEBITO_TEF', label: 'DEBITO TEF', icon: CreditCard },
+                      { id: 'CARTAO_CREDITO', label: 'Crédito (POS)', icon: CreditCard },
+                      { id: 'CARTAO_DEBITO', label: 'Débito (POS)', icon: CreditCard },
+                      { id: 'DINHEIRO', label: 'Dinheiro', icon: Banknote },
+                    ] as const
+                  ).map((forma) => {
+                    const Icon = forma.icon;
+                    return (
+                      <button
+                        key={forma.id}
+                        type="button"
+                        onClick={() => {
+                          setFormaPagamentoRecebimento(forma.id);
+                          setValorDigitadoRecebimento(saldoDevedorRecebimento.toFixed(2));
+                        }}
+                        className={`flex flex-col items-center gap-2 rounded-xl border p-3 transition-all ${
+                          formaPagamentoRecebimento === forma.id
+                            ? 'border-violet-500/30 bg-violet-500/15 text-violet-300 shadow-[0_0_15px_rgba(139,92,246,0.20)]'
+                            : 'border-white/10 bg-[#0b1324]/70 text-slate-400 hover:border-white/20'
+                        }`}
+                      >
+                        <Icon className="h-5 w-5" />
+                        <span className="text-[10px] font-bold uppercase">{forma.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-slate-500">
+                      R$
+                    </span>
+                    <input
+                      type="number"
+                      value={valorDigitadoRecebimento}
+                      onChange={(e) => setValorDigitadoRecebimento(e.target.value)}
+                      className="w-full rounded-xl border border-white/10 bg-[#0b1324] p-4 pl-12 text-lg font-bold text-white outline-none focus:border-violet-500/40 focus:ring-2 focus:ring-violet-500/20"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void adicionarPagamentoRecebimento()}
+                    disabled={
+                      tefFoodBusy || Number(valorDigitadoRecebimento) <= 0 || saldoDevedorRecebimento <= 0
+                    }
+                    className="rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-6 font-bold text-white transition-colors disabled:opacity-50"
+                  >
+                    {tefFoodBusy ? 'PinPad…' : 'Adicionar'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-1 flex-col bg-[#0b1324]/80 p-6">
+                <div className="mb-6 flex items-end justify-between border-b border-white/10 pb-4">
+                  <span className="text-sm font-bold uppercase tracking-widest text-slate-400">
+                    Total a receber
+                  </span>
+                  <span className="text-2xl font-black text-white">
+                    R$ {totalRecebimentoAlvo.toFixed(2)}
+                  </span>
+                </div>
+
+                <div className="custom-scrollbar mb-6 max-h-48 flex-1 overflow-y-auto pr-2">
+                  {pagamentosRecebimento.length === 0 ? (
+                    <div className="flex h-full items-center justify-center px-4 text-center text-sm text-slate-600">
+                      Lançe as formas de pagamento até quitar o saldo.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {pagamentosRecebimento.map((pag) => (
+                        <div
+                          key={pag.id}
+                          className="flex items-center justify-between rounded-lg border border-white/10 bg-[#08101f] p-3"
+                        >
+                          <span className="rounded border border-white/10 bg-white/5 px-2 py-1 text-xs font-bold uppercase text-slate-300">
+                            {rotuloPagamento(pag)}
+                          </span>
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm font-bold text-emerald-300">
+                              R$ {pag.valor.toFixed(2)}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => removerPagamentoRecebimento(pag.id)}
+                              className="text-slate-500 hover:text-red-400"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div
+                  className={`mb-6 rounded-xl border p-4 ${
+                    saldoDevedorRecebimento > 0.01
+                      ? 'border-amber-500/20 bg-amber-500/10'
+                      : 'border-emerald-500/20 bg-emerald-500/10'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span
+                      className={`text-sm font-bold uppercase tracking-widest ${
+                        saldoDevedorRecebimento > 0.01 ? 'text-amber-300' : 'text-emerald-300'
+                      }`}
+                    >
+                      {saldoDevedorRecebimento > 0.01
+                        ? 'Falta receber'
+                        : trocoRecebimento > 0.01
+                          ? 'Troco'
+                          : 'Quitado'}
+                    </span>
+                    <span
+                      className={`text-2xl font-black ${
+                        saldoDevedorRecebimento > 0.01 ? 'text-amber-300' : 'text-emerald-300'
+                      }`}
+                    >
+                      R${' '}
+                      {(saldoDevedorRecebimento > 0.01 ? saldoDevedorRecebimento : trocoRecebimento).toFixed(
+                        2
+                      )}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-auto flex gap-3">
+                  <button
+                    type="button"
+                    onClick={cancelarModalRecebimentoBalcao}
+                    className="flex-1 rounded-xl border border-white/10 bg-white/5 py-4 font-bold text-white transition-colors hover:bg-white/10"
+                  >
+                    Voltar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void confirmarRecebimentoPendenteBalcao()}
+                    disabled={finalizandoRecebimento || !podeFinalizarRecebimento}
+                    className="flex-[2] flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 py-4 font-black text-white shadow-[0_0_20px_rgba(16,185,129,0.30)] transition-all disabled:opacity-50"
+                  >
+                    {finalizandoRecebimento ? (
+                      <span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    ) : (
+                      <Check className="h-5 w-5" />
+                    )}
+                    {finalizandoRecebimento ? 'Processando…' : 'Confirmar recebimento'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>,
           document.body
         )}
 

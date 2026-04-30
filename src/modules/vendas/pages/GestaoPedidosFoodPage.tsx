@@ -21,6 +21,8 @@ import {
 import { toast } from 'react-toastify';
 import { Layout } from '../../../components/Layout';
 import { api, resolveApiBaseUrl } from '../../../services/api';
+import { IMAGEM_FALLBACK_FOOD } from '../../../services/api/cardapioTotemApi';
+import { resolveCardapioImageUrl } from '../../../utils/resolveCardapioImageUrl';
 import { buildKdsSocketAuth } from '../../../services/socket/kdsSocketAuth';
 import { extrairSenhaPedido, vendaItensParaLinhasKds } from '../../kds/kdsPedidoUtils';
 import {
@@ -65,6 +67,8 @@ export interface VendaGestaoFoodApi {
   id: string;
   createdAt?: string;
   origemVenda?: string;
+  /** BALCAO | MESA | DELIVERY (quando persistido na venda). */
+  tipoAtendimento?: string | null;
   statusPreparo?: string | null;
   statusEntrega?: string | null;
   status?: string | null;
@@ -80,6 +84,7 @@ export interface VendaGestaoFoodApi {
   loja?: LojaResumoApi | null;
   estornoFinanceiroPendente?: boolean;
   cancelamentoFiscalPendente?: boolean;
+  pagamentoPosterior?: boolean | null;
 }
 
 function numDec(v: unknown): number {
@@ -131,8 +136,15 @@ function statusPreparoLabel(s: string | null | undefined): string {
   return map[u] ?? u;
 }
 
-function badgeOrigem(origem: string): { label: string; className: string } {
+function badgeOrigem(origem: string, tipoAtendimento?: string | null): { label: string; className: string } {
   const u = origem.toUpperCase();
+  const ta = String(tipoAtendimento ?? '').toUpperCase();
+  if (u === 'PDV' && ta === 'BALCAO') {
+    return {
+      label: 'Balcão',
+      className: 'bg-violet-500/15 text-violet-200 border border-violet-500/35',
+    };
+  }
   if (u === 'TOTEM') {
     return {
       label: 'Totem',
@@ -646,7 +658,7 @@ export function GestaoPedidosFoodPage() {
                 Gestão de pedidos Food
               </h1>
               <p className="text-slate-400 text-sm mt-1">
-                Totem e delivery do dia — impressão no caixa e despacho para o motoboy.
+                Balcão PDV, totem e delivery do dia — impressão no caixa e despacho para o motoboy.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -825,7 +837,7 @@ export function GestaoPedidosFoodPage() {
               </div>
             ) : pedidos.length === 0 ? (
               <p className="text-center text-slate-500 py-16 px-6">
-                Nenhum pedido Totem/Delivery hoje nesta loja.
+                Nenhum pedido (balcão, totem ou delivery) hoje nesta loja.
               </p>
             ) : (
               <div className="overflow-x-auto">
@@ -846,7 +858,7 @@ export function GestaoPedidosFoodPage() {
                       const raw = row as unknown as Record<string, unknown>;
                       const senha = extrairSenhaPedido(raw);
                       const origem = String(row.origemVenda ?? '').toUpperCase();
-                      const ob = badgeOrigem(origem);
+                      const ob = badgeOrigem(origem, row.tipoAtendimento);
                       const st = String(row.statusPreparo ?? '').toUpperCase();
                       const total = numDec(row.valorTotal);
                       const obs = row.observacoes != null ? String(row.observacoes) : '';
@@ -887,6 +899,11 @@ export function GestaoPedidosFoodPage() {
                                   <div className="text-xs text-slate-500 mt-1">Sem endereço</div>
                                 )}
                               </>
+                            ) : origem === 'PDV' && String(row.tipoAtendimento ?? '').toUpperCase() === 'BALCAO' ? (
+                              <>
+                                <div className="font-bold text-white">{nome || '—'}</div>
+                                <div className="text-xs text-slate-500 mt-1">Retirada balcão (PDV)</div>
+                              </>
                             ) : (
                               <span className="text-slate-500 text-xs">Retirada no balcão (Totem)</span>
                             )}
@@ -904,11 +921,13 @@ export function GestaoPedidosFoodPage() {
                                       {item.imagemUrl ? (
                                         <div className="relative">
                                           <img
-                                            src={item.imagemUrl}
+                                            src={resolveCardapioImageUrl(item.imagemUrl)}
                                             alt={item.nome}
                                             className="w-12 h-12 rounded-lg border border-white/10 object-cover shadow-sm"
                                             onError={(e) => {
-                                              (e.target as HTMLImageElement).style.display = 'none';
+                                              const el = e.currentTarget;
+                                              el.onerror = null;
+                                              el.src = IMAGEM_FALLBACK_FOOD;
                                             }}
                                           />
                                           {item.sincronizado && (
@@ -939,6 +958,13 @@ export function GestaoPedidosFoodPage() {
                             >
                               {statusPreparoLabel(row.statusPreparo)}
                             </span>
+                            {row.pagamentoPosterior === true && (
+                              <div className="mt-1.5">
+                                <span className="inline-flex rounded-lg border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-amber-100">
+                                  Pagamento pendente
+                                </span>
+                              </div>
+                            )}
                             {origem === 'DELIVERY' && statusEntrega && (
                               <span
                                 className={`inline-flex rounded-lg px-2.5 py-1 text-xs font-black uppercase tracking-wide mt-1 ${statusEntrega.className}`}

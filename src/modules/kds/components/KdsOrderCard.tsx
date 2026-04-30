@@ -3,6 +3,7 @@ import {
   ChevronRight,
   Clock,
   Truck,
+  User,
   UtensilsCrossed,
 } from 'lucide-react';
 import { colunaKdsPermiteCancelar } from '../kdsPedidoUtils';
@@ -171,6 +172,13 @@ export function KdsOrderCard({
             </span>
           </div>
         </div>
+
+        {pedido.nomeCliente ? (
+          <div className="flex items-center gap-2 rounded-xl border border-violet-400/35 bg-violet-500/10 px-3 py-2 text-sm font-semibold text-violet-100">
+            <User className="h-4 w-4 shrink-0 text-violet-300" aria-hidden />
+            <span className="truncate">{pedido.nomeCliente}</span>
+          </div>
+        ) : null}
 
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2">

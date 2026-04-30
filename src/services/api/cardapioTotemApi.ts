@@ -1,4 +1,5 @@
-import { api, resolveApiBaseUrl } from '../api';
+import { api } from '../api';
+import { resolveCardapioImageUrl } from '../../utils/resolveCardapioImageUrl';
 import type { TotemMockCategoria, TotemMockProduto, TotemSaborOpcao } from '../../modules/totem/types';
 
 /** Fallback Aurya quando o item não tem foto (compartilhado com PDV / delivery / modal). */
@@ -85,10 +86,8 @@ export function resolveItemImage(item: CardapioItemApi): string {
   for (const raw of imageCandidates) {
     const value = raw?.trim();
     if (!value) continue;
-    if (value.startsWith('data:')) return value;
-    if (value.startsWith('http://') || value.startsWith('https://')) return value;
-    if (value.startsWith('/')) return `${resolveApiBaseUrl()}${value}`;
-    return `${resolveApiBaseUrl()}/${value}`;
+    const resolved = resolveCardapioImageUrl(value);
+    if (resolved) return resolved;
   }
 
   const base64 = item.imageBase64?.trim();

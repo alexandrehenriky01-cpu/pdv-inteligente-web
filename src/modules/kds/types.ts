@@ -30,6 +30,8 @@ export interface KdsPedido {
   numeroPedidoExibicao: string;
   tipoAtendimento: TipoAtendimentoKds;
   origem: OrigemVendaKds;
+  /** Nome do consumidor (balcão PDV, delivery, etc.) quando gravado na venda. */
+  nomeCliente?: string;
   /** Preenchido quando `origem` é DELIVERY (menu online). */
   tipoPedidoMenu?: TipoPedidoMenuKds | null;
   observacoesGerais?: string;

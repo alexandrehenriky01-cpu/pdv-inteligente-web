@@ -252,6 +252,12 @@ export function vendaPayloadParaKdsPedido(
       ? String(raw.observacoes).trim()
       : undefined;
 
+  const nomeClienteRaw = raw.nomeCliente;
+  const nomeCliente =
+    nomeClienteRaw != null && String(nomeClienteRaw).trim() !== ''
+      ? String(nomeClienteRaw).trim()
+      : undefined;
+
   const itensRaw = raw.itens;
   const itens: KdsItemLinha[] = Array.isArray(itensRaw)
     ? itensRaw.map((x) => linhaItemKds(x as Record<string, unknown>))
@@ -268,6 +274,7 @@ export function vendaPayloadParaKdsPedido(
     numeroPedidoExibicao,
     tipoAtendimento,
     origem,
+    ...(nomeCliente ? { nomeCliente } : {}),
     tipoPedidoMenu,
     observacoesGerais: obsGeral,
     coluna,
@@ -337,6 +344,11 @@ export function mergeKdsPedidoNaLista(prev: KdsPedido | undefined, payload: unkn
 
   const createdMissing = !('createdAt' in raw) || raw.createdAt == null;
 
+  const nomeClienteMerged =
+    raw.nomeCliente != null && String(raw.nomeCliente).trim() !== ''
+      ? String(raw.nomeCliente).trim()
+      : fresh.nomeCliente ?? prev.nomeCliente;
+
   const merged: KdsPedido = {
     ...fresh,
     itens: itensNovos ?? prev.itens,
@@ -348,6 +360,7 @@ export function mergeKdsPedidoNaLista(prev: KdsPedido | undefined, payload: unkn
     observacoesGerais: observacaoOuPrevInRaw(raw, fresh, prev),
     tipoPedidoMenu:
       'tipoPedido' in raw && raw.tipoPedido != null ? fresh.tipoPedidoMenu : prev.tipoPedidoMenu,
+    ...(nomeClienteMerged ? { nomeCliente: nomeClienteMerged } : {}),
   };
 
   if (import.meta.env.DEV && itensNovos == null) {
