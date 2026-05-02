@@ -17,7 +17,7 @@ export function MesaSalaoGrid({
   mesaPath = (n) => `/garcom/mesa/${n}`,
 }: MesaSalaoGridProps) {
   return (
-    <div className="flex flex-col gap-4 px-3 py-4 pb-8">
+    <div className="flex flex-col gap-4 px-3 py-4 pb-8 sm:px-5 lg:px-8">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-lg font-black text-white">Mesas</h2>
         <button
@@ -35,7 +35,7 @@ export function MesaSalaoGrid({
           <p className="text-sm text-white/50">Carregando salão…</p>
         </div>
       ) : (
-        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8">
           {celulas.map((m) => {
             const ocupada = isMesaOcupada(m);
             const sub = subtotalMesa(m);

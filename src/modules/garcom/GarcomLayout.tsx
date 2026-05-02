@@ -58,7 +58,9 @@ export function GarcomLayout(): JSX.Element {
   return (
     <div className="min-h-screen bg-[#060816] text-white antialiased">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_50%_0%,rgba(16,185,129,0.08),transparent_45%)]" />
-      <div className="relative mx-auto flex min-h-screen w-full max-w-md flex-col shadow-[0_0_80px_rgba(0,0,0,0.35)]">
+      {/* Full width — sem max-w-md que centralizava com bordas pretas em telas
+          maiores que ~448px (tablet, desktop, celular em landscape). */}
+      <div className="relative flex min-h-screen w-full flex-col">
         <header className="sticky top-0 z-50 border-b border-white/10 bg-[#08101f]/92 backdrop-blur-xl">
           <div className="flex items-center gap-3 px-4 py-3">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-emerald-500/25 bg-emerald-500/10">
