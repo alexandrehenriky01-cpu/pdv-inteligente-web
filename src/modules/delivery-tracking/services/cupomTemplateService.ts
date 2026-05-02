@@ -288,6 +288,64 @@ function formatCurrency(value: number): string {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+/**
+ * Lê o corpo da resposta sem assumir JSON válido (evita `Unexpected end of JSON input`).
+ */
+async function safeReadResponseJson(
+  response: Response
+): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; error: string }> {
+  let text: string;
+  try {
+    text = await response.text();
+  } catch {
+    return { ok: false, error: 'Não foi possível ler a resposta do servidor.' };
+  }
+
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    if (response.status === 502 || response.status === 504) {
+      return {
+        ok: false,
+        error: `Resposta vazia do proxy ou gateway (HTTP ${response.status}).`,
+      };
+    }
+    return {
+      ok: false,
+      error: `Resposta vazia (HTTP ${response.status}). O servidor não devolveu corpo.`,
+    };
+  }
+
+  const ct = (response.headers.get('content-type') ?? '').toLowerCase();
+  const probablyJson =
+    ct.includes('application/json') ||
+    ct.includes('+json') ||
+    trimmed.startsWith('{') ||
+    trimmed.startsWith('[');
+
+  if (!probablyJson) {
+    return {
+      ok: false,
+      error: `Resposta não é JSON (HTTP ${response.status}; content-type: ${ct || 'ausente'}).`,
+    };
+  }
+
+  try {
+    const data = JSON.parse(trimmed) as Record<string, unknown>;
+    return { ok: true, data };
+  } catch {
+    return { ok: false, error: 'Corpo da resposta não é JSON válido.' };
+  }
+}
+
+/** Aceita payload plano ou `{ romaneio: { token, ... } }` da API. */
+function flattenRomaneioCriarBody(data: Record<string, unknown>): Record<string, unknown> {
+  const nested = data.romaneio;
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    return { ...data, ...(nested as Record<string, unknown>) };
+  }
+  return data;
+}
+
 export async function criarRomaneio(
   pedidoIds: string[],
   nomeMotoboy?: string
@@ -316,19 +374,28 @@ export async function criarRomaneio(
       body: JSON.stringify({ pedidoIds, nomeMotoboy }),
     });
 
-    const data = await response.json();
+    const parsed = await safeReadResponseJson(response);
+    if (!parsed.ok) {
+      return { sucesso: false, error: parsed.error };
+    }
 
-    if (!response.ok || !data.sucesso) {
-      return { sucesso: false, error: data.error || 'Falha ao criar romaneio' };
+    const data = flattenRomaneioCriarBody(parsed.data);
+    const indicadorSucesso = data.sucesso === true || data.ok === true;
+    if (!response.ok || !indicadorSucesso) {
+      const msg =
+        (typeof data.error === 'string' && data.error) ||
+        (typeof data.message === 'string' && data.message) ||
+        'Falha ao criar romaneio';
+      return { sucesso: false, error: msg };
     }
 
     return {
       sucesso: true,
       token: typeof data.token === 'string' ? data.token : undefined,
-      uuid: data.uuid,
-      texto: data.texto,
-      qrBase64: data.qrBase64,
-      romaneioData: data.romaneioData,
+      uuid: typeof data.uuid === 'string' ? data.uuid : undefined,
+      texto: typeof data.texto === 'string' ? data.texto : undefined,
+      qrBase64: typeof data.qrBase64 === 'string' ? data.qrBase64 : undefined,
+      romaneioData: data.romaneioData as RomaneioData | undefined,
     };
   } catch (e) {
     console.error('[criarRomaneio] Erro:', e);
