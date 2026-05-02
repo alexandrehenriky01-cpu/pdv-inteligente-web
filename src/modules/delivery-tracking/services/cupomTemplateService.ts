@@ -1,5 +1,6 @@
 import { deliveryPrintService, type ImpressaoResult } from './deliveryPrintService';
 import { AUTH_TOKEN_KEY } from '../../../services/authStorage';
+import { resolveApiBaseUrl } from '../../../services/apiBaseUrl';
 
 const IS_DEV = import.meta.env.DEV;
 
@@ -368,7 +369,11 @@ export async function criarRomaneio(
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const response = await fetch('/api/entregas/romaneios', {
+    // URL absoluta para o host da API (resolveApiBaseUrl) — em produção
+    // o frontend está em app.aurya... e a API em domínio separado, então
+    // um fetch com path relativo bateria no host errado e retornaria 405.
+    const apiBase = resolveApiBaseUrl().replace(/\/$/, '');
+    const response = await fetch(`${apiBase}/api/entregas/romaneios`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ pedidoIds, nomeMotoboy }),
