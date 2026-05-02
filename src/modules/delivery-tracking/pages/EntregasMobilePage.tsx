@@ -227,9 +227,13 @@ export function EntregasMobilePage() {
     .filter((p) => p.status === 'PENDENTE')
     .reduce((sum, p) => sum + (p.valorReceber || 0), 0) || 0;
 
-  return (
-    <Layout>
-      <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 text-white pb-24">
+  // Acesso via QR Code (token na URL) → entregador NÃO está logado no ERP,
+  // renderiza limpo sem sidebar/header administrativo. Sem token → dashboard
+  // interno usa o Layout admin com menu lateral.
+  const ehAcessoPublico = Boolean(token);
+
+  const conteudo = (
+    <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 text-white pb-24">
         <div className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur-md border-b border-white/10 px-4 py-4">
           <div className="flex items-center justify-between">
             <div>
@@ -374,8 +378,9 @@ export function EntregasMobilePage() {
           )}
         </div>
       </div>
-    </Layout>
   );
+
+  return ehAcessoPublico ? conteudo : <Layout>{conteudo}</Layout>;
 }
 
 interface ParadaCardProps {
