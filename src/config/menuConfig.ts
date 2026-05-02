@@ -96,6 +96,7 @@ export const MENU_CONFIG: MenuConfigEntry[] = [
       { label: 'Locais de cobrança', path: '/locais-cobranca', icon: 'BadgePercent', feature: 'ESTRUTURA.LOCAL_COBRANCA_VIEW', requireGestor: true },
       { label: 'Caixas PDV', path: '/configuracao-caixas-pdv', icon: 'Banknote', feature: 'ESTRUTURA.CAIXA_PDV_VIEW', requireGestor: true },
       { label: 'Gestão TEF', path: '/configuracao-tef', icon: 'CreditCard', feature: 'ESTRUTURA.TEF_VIEW', requireGestor: true },
+      { label: 'Gestão PIX', path: '/configuracao-pix', icon: 'QrCode', feature: 'ESTRUTURA.PIX_VIEW', requireGestor: true },
       { label: 'Balanças', path: '/balancas', icon: 'Scale', feature: 'ESTRUTURA.BALANCA_VIEW', requireGestor: true },
     ],
   },

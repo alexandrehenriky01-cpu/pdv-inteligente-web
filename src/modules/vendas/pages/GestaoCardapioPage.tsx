@@ -73,17 +73,19 @@ type AuryaSugestoes = {
   provider?: string;
 };
 
-function isValidImage(image: string | null | undefined): boolean {
-  if (!image) return false;
-  const value = image.trim();
+function isValidRealImage(value?: string | null): boolean {
   if (!value) return false;
-  if (value.startsWith('data:image/')) {
-    return value.length > 1000;
+  const image = value.trim();
+  if (!image) return false;
+  if (image.includes('placeholder')) return false;
+  if (image.includes('data:image/svg+xml')) return false;
+  if (image.startsWith('data:image/')) {
+    return image.length > 1000;
   }
-  if (value.startsWith('http')) {
+  if (image.startsWith('http://') || image.startsWith('https://')) {
     try {
-      new URL(value);
-      return true;
+      const url = new URL(image);
+      return !url.href.includes('localhost') && !url.pathname.includes('placeholder');
     } catch {
       return false;
     }
@@ -119,6 +121,16 @@ function resolveOrigemImagemBanner(
     return { text: 'Imagem gerada por IA', tipo: 'info' };
   }
   return { text: aviso || 'Imagem IA indisponível.', tipo: 'warning' };
+}
+
+/**
+ * Padrão Aurya: nomes/categorias/descrições do cardápio são gravados em CAIXA ALTA.
+ * O campo do form continua aceitando qualquer caso durante a digitação;
+ * a normalização acontece somente no envio para o backend.
+ */
+function toUpperAurya(value: string | null | undefined): string {
+  if (value == null) return '';
+  return String(value).trim().toLocaleUpperCase('pt-BR');
 }
 
 export function GestaoCardapioPage() {
@@ -213,8 +225,8 @@ export function GestaoCardapioPage() {
       
       const saboresIdsNovo = parseUuidList(novo.saboresPermitidosTexto);
       const response = await api.post<ApiData<ItemCardapio>>('/api/cardapio', {
-        nome: novo.nome,
-        categoria: novo.categoria,
+        nome: toUpperAurya(novo.nome),
+        categoria: toUpperAurya(novo.categoria),
         precoVenda: normalizarDecimal(novo.precoVenda),
         tipoItem: novo.tipoItem,
         permiteMultiplosSabores: novo.permiteMultiplosSabores === true,
@@ -232,7 +244,7 @@ export function GestaoCardapioPage() {
         ],
         adicionais: [],
         imagemUrl: novo.imagemUrl,
-        descricao: novo.descricao,
+        descricao: toUpperAurya(novo.descricao),
       });
       
       console.log('[Frontend] Resposta do servidor:', response.data);
@@ -342,8 +354,8 @@ export function GestaoCardapioPage() {
     try {
       const saboresIdsEd = parseUuidList(edicao.saboresPermitidosTexto);
       const payload = {
-        nome: edicao.nome,
-        categoria: edicao.categoria,
+        nome: toUpperAurya(edicao.nome),
+        categoria: toUpperAurya(edicao.categoria),
         precoVenda: normalizarDecimal(edicao.precoVenda),
         ativo: edicao.ativo,
         tipoItem: edicao.tipoItem,
@@ -356,7 +368,7 @@ export function GestaoCardapioPage() {
           : { maxSabores: null, saboresPermitidosIds: null }),
         tamanhos: edicao.tamanhos.map((t, idx) => ({
           ...(t.id ? { id: t.id } : {}),
-          nome: t.nome,
+          nome: toUpperAurya(t.nome),
           preco: normalizarDecimal(t.preco),
           ativo: t.ativo,
           ordem: Math.max(0, Math.trunc(normalizarDecimal(t.ordem ?? idx))),
@@ -367,10 +379,10 @@ export function GestaoCardapioPage() {
           maxQuantidade: v.maxQuantidade ?? null,
           ativo: v.ativo ?? true,
         })),
-        adicionais: edicao.adicionaisLegacy,
+        adicionais: edicao.adicionaisLegacy.map((a) => ({ ...a, nome: toUpperAurya(a.nome) })),
         ingredientes: edicao.ingredientes,
         imagemUrl: edicao.imagemUrl,
-        descricao: edicao.descricao,
+        descricao: toUpperAurya(edicao.descricao),
       };
       console.log('[CARDAPIO_PAYLOAD_UPDATE]', payload);
       await api.put(`/api/cardapio/${itemEdicaoId}`, payload);
@@ -390,8 +402,8 @@ export function GestaoCardapioPage() {
           ? 'Bebidas'
           : 'Revenda';
       await api.post<ApiData<ItemCardapio>>('/api/cardapio', {
-        nome: produto.nome,
-        categoria: categoriaInferida,
+        nome: toUpperAurya(produto.nome),
+        categoria: toUpperAurya(categoriaInferida),
         precoVenda: Number(produto.precoVenda ?? 0),
         tipoItem: categoriaInferida === 'Bebidas' ? 'BEBIDA' : 'COMIDA',
         ingredientes: [{ produtoId: produto.id, quantidade: 1 }],
@@ -418,6 +430,8 @@ export function GestaoCardapioPage() {
   const [gerandoAurya, setGerandoAurya] = useState(false);
   const [sugestoesAurya, setSugestoesAurya] = useState<AuryaSugestoes | null>(null);
   const [imagemSelecionada, setImagemSelecionada] = useState<string | null>(null);
+  const [imagemUpload, setImagemUpload] = useState<string | null>(null);
+  const [enviandoUpload, setEnviandoUpload] = useState(false);
   const [modoAurya, setModoAurya] = useState<'novo' | 'edicao'>('novo');
   const [imagensComErro, setImagensComErro] = useState<Set<string>>(new Set());
   const [imagensLoading, setImagensLoading] = useState<Set<string>>(new Set());
@@ -667,19 +681,24 @@ export function GestaoCardapioPage() {
 
       const optionsResolved = (dados?.imageOptions ?? [])
         .map((opt) => ({ ...opt, url: resolveCardapioImageUrl(opt.url) }))
-        .filter((opt) => !!opt.url);
-
-      if (import.meta.env.DEV) {
-        console.log('[AuryaAI] provider:', dados?.provider);
-        console.log('[AuryaAI] imagemIA:', imagemIA.slice(0, 120));
-        console.log('[AuryaAI] isValidImage:', isValidImage(imagemIA));
-        console.log('[AuryaAI] imageOptions count:', optionsResolved.length);
-      }
+        .filter((opt) => isValidRealImage(opt.url));
 
       const fallbackUsado = !!(dados?.fallbackUsed ?? dados?.fallback);
       const provider = dados?.provider;
+      const imagemIaValida = isValidRealImage(imagemIA);
 
-      if (response.data.sucesso && isValidImage(imagemIA)) {
+      if (import.meta.env.DEV) {
+        console.log('[AuryaImage] ambiente:', 'DEV');
+        console.log('[AuryaImage] endpoint chamado:', '/api/ia/gerar-imagem');
+        console.log('[AuryaImage] provider recebido:', provider);
+        console.log('[AuryaImage] imagemIA recebida:', imagemIA.slice(0, 120));
+        console.log('[AuryaImage] imagemIA válida?', imagemIaValida);
+        console.log('[AuryaImage] fallback chamado?', !imagemIaValida);
+        console.log('[AuryaImage] quantidade alternativas:', optionsResolved.length);
+      }
+
+      if (response.data.sucesso && imagemIaValida) {
+        // IA gerou imagem real válida
         const banner = resolveOrigemImagemBanner(provider, fallbackUsado, dados?.aviso);
         setMensagemOrigemImagem(banner.text);
         setTipoMensagemOrigem(banner.tipo);
@@ -687,6 +706,10 @@ export function GestaoCardapioPage() {
         const imagensSugeridas = optionsResolved.length > 0
           ? optionsResolved.map((opt) => opt.url)
           : [imagemIA];
+
+        if (import.meta.env.DEV) {
+          console.log('[AuryaImage] imagens válidas finais:', imagensSugeridas.length);
+        }
 
         setSugestoesAurya({
           imagens: imagensSugeridas,
@@ -700,11 +723,17 @@ export function GestaoCardapioPage() {
         });
         setImagemSelecionada(imagemIA);
       } else if (optionsResolved.length > 0) {
+        // IA falhou ou retornou placeholder — usar banco gratuito (imageOptions)
         const banner = resolveOrigemImagemBanner(provider, true, dados?.aviso);
         setMensagemOrigemImagem(banner.text);
         setTipoMensagemOrigem(banner.tipo);
 
         const imagensSugeridas = optionsResolved.map((opt) => opt.url);
+
+        if (import.meta.env.DEV) {
+          console.log('[AuryaImage] imagens válidas finais:', imagensSugeridas.length);
+        }
+
         setSugestoesAurya({
           imagens: imagensSugeridas,
           imageOptions: optionsResolved,
@@ -717,7 +746,32 @@ export function GestaoCardapioPage() {
         });
         setImagemSelecionada(imagensSugeridas[0]);
       } else {
-        setErroGeracao(response.data.erro || 'Não foi possível gerar imagem. Tente novamente ou envie uma foto.');
+        // Último recurso absoluto: mostrar placeholder com mensagem correta
+        const imagemPlaceholder = rawBase64 && rawBase64.length > 0
+          ? (rawBase64.startsWith('data:') ? rawBase64 : `data:image/png;base64,${rawBase64}`)
+          : rawUrl ? resolveCardapioImageUrl(rawUrl) : '';
+
+        if (import.meta.env.DEV) {
+          console.log('[AuryaImage] imagens válidas finais: 0 (último recurso: placeholder)');
+        }
+
+        if (imagemPlaceholder && response.data.sucesso) {
+          setMensagemOrigemImagem('Imagem temporária — envie uma foto ou tente novamente.');
+          setTipoMensagemOrigem('warning');
+          setSugestoesAurya({
+            imagens: [imagemPlaceholder],
+            imageOptions: [],
+            fallbacks: [],
+            descricao: `${sourceNome} - Deliciosa opção preparada com ingredientes selecionados.`,
+            categoria: sourceCategoria,
+            fallbackUsado: true,
+            avisoFallback: dados?.aviso || dados?.motivoFallback || 'Imagem temporária — envie uma foto ou tente novamente.',
+            provider: 'placeholder',
+          });
+          setImagemSelecionada(imagemPlaceholder);
+        } else {
+          setErroGeracao(response.data.erro || 'Não foi possível gerar imagem. Tente novamente ou envie uma foto.');
+        }
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Erro de conexão ao gerar imagem.';
@@ -751,17 +805,48 @@ export function GestaoCardapioPage() {
     setShowAuryaModal(false);
     setSugestoesAurya(null);
     setImagemSelecionada(null);
+    setImagemUpload(null);
   }
 
-  function handleUploadImagem(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
+  async function handleUploadImagem(event: React.ChangeEvent<HTMLInputElement>) {
+    const input = event.target;
+    const file = input.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const base64 = e.target?.result as string;
-      setImagemSelecionada(base64);
-    };
-    reader.readAsDataURL(file);
+    if (!file.type.startsWith('image/')) {
+      setErroGeracao('Formato inválido. Envie uma imagem (PNG, JPG ou WEBP).');
+      input.value = '';
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setErroGeracao('Imagem muito grande. Limite de 5 MB.');
+      input.value = '';
+      return;
+    }
+    setErroGeracao(null);
+    setEnviandoUpload(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const { data } = await api.post<ApiData<{ imagemUrl: string }>>(
+        '/api/cardapio/upload-imagem',
+        form,
+        { headers: { 'Content-Type': 'multipart/form-data' } }
+      );
+      const url = data?.dados?.imagemUrl;
+      if (!data?.sucesso || !url) {
+        throw new Error(data?.erro || 'Falha ao enviar imagem.');
+      }
+      setImagemUpload(url);
+      setImagemSelecionada(url);
+      setMensagemOrigemImagem('Imagem enviada do dispositivo.');
+      setTipoMensagemOrigem('info');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Falha ao enviar imagem.';
+      setErroGeracao(msg);
+    } finally {
+      setEnviandoUpload(false);
+      input.value = '';
+    }
   }
 
 function fecharModalAurya() {
@@ -772,6 +857,8 @@ function fecharModalAurya() {
     setShowAuryaModal(false);
     setSugestoesAurya(null);
     setImagemSelecionada(null);
+    setImagemUpload(null);
+    setEnviandoUpload(false);
     setImagensComErro(new Set());
     setGerandoAurya(false);
     setErroGeracao(null);
@@ -954,7 +1041,7 @@ function fecharModalAurya() {
               setErro(null);
               try {
                 await api.post('/api/cardapio/adicionais-catalogo', {
-                  nome: catalogNovo.nome.trim(),
+                  nome: toUpperAurya(catalogNovo.nome),
                   precoBase: normalizarDecimal(catalogNovo.precoBase),
                   tipoItem: catalogNovo.tipoItem,
                 });
@@ -1384,8 +1471,8 @@ function fecharModalAurya() {
 
         {showAuryaModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-            <div className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-xl border border-slate-700 bg-slate-950 shadow-2xl">
-              <div className="flex items-center justify-between border-b border-slate-800 p-4">
+            <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-950 shadow-2xl">
+              <div className="flex shrink-0 items-center justify-between border-b border-slate-800 p-4">
                 <div className="flex items-center gap-2">
                   <Sparkles className="h-5 w-5 text-violet-400" />
                   <h3 className="text-lg font-black">Completar com Aurya</h3>
@@ -1394,7 +1481,7 @@ function fecharModalAurya() {
                   <X className="h-4 w-4" />
                 </button>
               </div>
-              <div className="overflow-y-auto p-6">
+              <div className="flex-1 overflow-y-auto p-6">
                 {!sugestoesAurya ? (
                   <div className="text-center">
                     <p className="mb-6 text-sm text-slate-400">
@@ -1519,20 +1606,21 @@ function fecharModalAurya() {
                     <div>
                       <p className="mb-3 text-xs text-slate-500">Ou envie sua propria foto:</p>
                       <div className="flex items-center gap-3">
-                        <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-slate-600 bg-slate-900/50 px-4 py-3 text-sm text-slate-400 transition-colors hover:border-violet-500/50 hover:text-violet-400">
-                          <Upload className="h-4 w-4" />
-                          <span>Escolher arquivo</span>
+                        <label className={`flex items-center gap-2 rounded-lg border border-dashed border-slate-600 bg-slate-900/50 px-4 py-3 text-sm text-slate-400 transition-colors hover:border-violet-500/50 hover:text-violet-400 ${enviandoUpload ? 'cursor-wait opacity-60' : 'cursor-pointer'}`}>
+                          {enviandoUpload ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                          <span>{enviandoUpload ? 'Enviando…' : 'Escolher arquivo'}</span>
                           <input
                             type="file"
                             accept="image/*"
                             className="hidden"
-                            onChange={handleUploadImagem}
+                            onChange={(e) => { void handleUploadImagem(e); }}
+                            disabled={enviandoUpload}
                           />
                         </label>
-                        {imagemSelecionada && imagemSelecionada.startsWith('data:') && (
+                        {imagemUpload && imagemSelecionada === imagemUpload && (
                           <div className="relative overflow-hidden rounded-lg border-2 border-violet-500 ring-2 ring-violet-500/50">
                             <img
-                              src={imagemSelecionada}
+                              src={resolveCardapioImageUrl(imagemUpload)}
                               alt="Upload preview"
                               className="h-12 w-16 object-cover"
                             />
@@ -1544,30 +1632,35 @@ function fecharModalAurya() {
                       </div>
                     </div>
 
-                    <div className="flex gap-3">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSugestoesAurya(null);
-                          setImagemSelecionada(null);
-                          setMensagemOrigemImagem(null);
-                        }}
-                        className="flex-1 rounded border border-slate-600 px-4 py-3 font-bold transition-colors hover:bg-slate-800"
-                      >
-                        Gerar Novamente
-                      </button>
-                      <button
-                        type="button"
-                        onClick={aplicarSugestoesAurya}
-                        disabled={!imagemSelecionada}
-                        className="flex-1 rounded bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-3 font-bold text-white transition-all hover:from-emerald-500 hover:to-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        Aplicar Sugestoes
-                      </button>
-                    </div>
                   </div>
                 )}
               </div>
+              {sugestoesAurya && (
+                <div className="shrink-0 border-t border-slate-700 bg-slate-950/95 px-6 py-4 backdrop-blur supports-[backdrop-filter]:bg-slate-950/80">
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSugestoesAurya(null);
+                        setImagemSelecionada(null);
+                        setImagemUpload(null);
+                        setMensagemOrigemImagem(null);
+                      }}
+                      className="flex-1 rounded border border-slate-600 px-4 py-3 font-bold transition-colors hover:bg-slate-800"
+                    >
+                      Gerar Novamente
+                    </button>
+                    <button
+                      type="button"
+                      onClick={aplicarSugestoesAurya}
+                      disabled={!imagemSelecionada}
+                      className="flex-1 rounded bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-3 font-bold text-white transition-all hover:from-emerald-500 hover:to-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Aplicar Sugestoes
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

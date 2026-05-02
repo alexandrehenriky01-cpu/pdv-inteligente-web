@@ -41,6 +41,9 @@ export function Login() {
       case 'VENDEDOR':
         navigate('/frente-caixa'); // Operação Direta
         break;
+      case 'GARCOM':
+        navigate('/garcom/mesas'); // App de comanda no celular
+        break;
       case 'GERENTE':
       case 'DIRETOR':
       default:

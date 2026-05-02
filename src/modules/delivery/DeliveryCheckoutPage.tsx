@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useOutletContext } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { ArrowLeft, Copy, Loader2, MapPin, QrCode } from 'lucide-react';
+import { ArrowLeft, Bike, Copy, Loader2, MapPin, QrCode, ShoppingBag, Sparkles, Store, User, Wallet } from 'lucide-react';
 import {
   finalizarPedidoDelivery,
   mensagemErroDeliveryApi,
   montarPayloadVendaDelivery,
   type FormaPagamentoDelivery,
+  type PixDeliveryResposta,
   type TipoPedidoDelivery,
 } from '../../services/api/deliveryApi';
 import { extrairSenhaPedidoTotem } from '../../services/api/totemApi';
@@ -68,6 +69,8 @@ export function DeliveryCheckoutPage() {
   const [formaPagamento, setFormaPagamento] = useState<FormaPagamentoDelivery>('NA_ENTREGA');
   const [enviando, setEnviando] = useState(false);
   const [copiaColaCopiado, setCopiaColaCopiado] = useState(false);
+  const [pixServidor, setPixServidor] = useState<PixDeliveryResposta | null>(null);
+  const [vendaIdPosEnvio, setVendaIdPosEnvio] = useState<string | null>(null);
 
   const { addressData, isLoading: carregandoCep, error: erroCep, fetchAddress } = useCep();
   const [cepInput, setCepInput] = useState('');
@@ -98,94 +101,38 @@ export function DeliveryCheckoutPage() {
     [subtotalItens, taxaEntrega]
   );
 
-  const buildTLV = (tag: string, value: string): string => {
-    const len = String(value.length).padStart(2, '0');
-    return `${tag}${len}${value}`;
-  };
+  // PIX client-side legado removido — todo QR/copia-cola agora vem do backend (PSP real).
 
-  const removeAccents = (text: string): string => {
-    return text
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^A-Za-z0-9 ]/g, ' ');
-  };
-
-  const truncateUpper = (text: string, maxLen: number): string => {
-    return removeAccents(text).toUpperCase().trim().substring(0, maxLen);
-  };
-
-  const crc16CCITT = (str: string): string => {
-    let crc = 0xffff;
-
-    for (let i = 0; i < str.length; i++) {
-      crc ^= str.charCodeAt(i) << 8;
-
-      for (let j = 0; j < 8; j++) {
-        if ((crc & 0x8000) !== 0) {
-          crc = (crc << 1) ^ 0x1021;
-        } else {
-          crc <<= 1;
-        }
-        crc &= 0xffff;
-      }
-    }
-
-    return crc.toString(16).toUpperCase().padStart(4, '0');
-  };
-
-    const gerarPixCopiaCola = (
-      valor: number,
-      chavePix: string | null,
-      nomeLoja: string,
-    cidadeLoja: string
-  ): string => {
-    if (!chavePix || !chavePix.trim()) return '';
-
-    const chave = chavePix.trim();
-    const nome = truncateUpper(nomeLoja || 'LOJA', 25);
-    const cidade = truncateUpper(cidadeLoja || 'SAO PAULO', 15);
-    const gui = 'BR.GOV.BCB.PIX';
-    const txid = '***';
-
-    const guiTLV = buildTLV('00', gui);
-    const chaveTLV = buildTLV('01', chave);
-    const id26TLV = buildTLV('26', guiTLV + chaveTLV);
-
-    const txidTLV = buildTLV('05', txid);
-    const id62TLV = buildTLV('62', txidTLV);
-
-    const payload =
-      buildTLV('00', '01') +
-      buildTLV('01', '11') +
-      id26TLV +
-      buildTLV('52', '0000') +
-      buildTLV('53', '986') +
-      buildTLV('54', valor.toFixed(2)) +
-      buildTLV('58', 'BR') +
-      buildTLV('59', nome) +
-      buildTLV('60', cidade) +
-      id62TLV;
-
-    const crcInput = payload + '6304';
-    const crcValue = crc16CCITT(crcInput);
-
-    return payload + buildTLV('63', crcValue);
-  };
-
-  const pixCopiaCola =
-    formaPagamento === 'PIX'
-      ? gerarPixCopiaCola(totalPedido, loja?.chavePix ?? null, loja?.nome ?? 'LOJA', cidade.trim() || 'SAO PAULO')
-      : '';
-
-  const copiarCodigoPix = async () => {
+  /** Copia o código/chave do PIX retornado pelo backend (DINAMICO ou ESTATICO). */
+  const copiarPixServidor = async () => {
+    if (!pixServidor) return;
+    // No estático, se temos o BR Code (copia-e-cola) preferimos ele — apps de banco
+    // identificam valor e destinatário automaticamente. Só caímos na chave pura
+    // quando o BR Code não foi gerado (loja sem nome/cidade ou erro no backend).
+    const texto =
+      pixServidor.tipo === 'DINAMICO'
+        ? pixServidor.pixCopiaCola
+        : pixServidor.pixCopiaCola ?? pixServidor.chavePix;
+    if (!texto) return;
     try {
-      await navigator.clipboard.writeText(pixCopiaCola);
+      await navigator.clipboard.writeText(texto);
       setCopiaColaCopiado(true);
-      toast.success('Código PIX copiado!');
+      toast.success(pixServidor.tipo === 'DINAMICO' ? 'Código PIX copiado!' : 'Chave PIX copiada!');
       setTimeout(() => setCopiaColaCopiado(false), 2000);
     } catch {
-      toast.error('Erro ao copiar código.');
+      toast.error('Erro ao copiar.');
     }
+  };
+
+  const irParaAcompanhamento = () => {
+    if (!vendaIdPosEnvio) return;
+    // Carrinho só é limpo ao deixar a tela de PIX — assim o cliente vê o sumário
+    // (subtotal/taxa/total) enquanto copia o código.
+    limparCarrinho();
+    navigate(
+      `/menu/${encodeURIComponent(lojaPublicKey)}/pedido/${encodeURIComponent(vendaIdPosEnvio)}`,
+      { replace: true }
+    );
   };
 
   const validar = (): boolean => {
@@ -250,15 +197,31 @@ export function DeliveryCheckoutPage() {
 
       console.log('Final Payload:', JSON.stringify(body, null, 2));
 
-      const { mensagem, venda } = await finalizarPedidoDelivery(body);
+      const respostaFinal = await finalizarPedidoDelivery(body);
+      const { mensagem, venda, pix } = respostaFinal;
+
       const senha = extrairSenhaPedidoTotem(venda);
-      limparCarrinho();
       toast.success(`${mensagem} Senha: ${senha}`);
-      if (formaPagamento === 'PIX') {
-        toast.info('PIX online em modo demonstração — o restaurante confirma o pagamento.', {
-          autoClose: 5000,
-        });
+
+      if (pix) {
+        // PIX: mantém o cliente no checkout para escanear/copiar o QR.
+        // O botão "Confirmar pedido" abaixo levará para a tela de acompanhamento.
+        setPixServidor(pix);
+        setVendaIdPosEnvio(venda.id);
+        if (pix.tipo === 'DINAMICO') {
+          toast.info('Escaneie o QR Code ou copie o código PIX para concluir o pagamento.', {
+            autoClose: 6000,
+          });
+        } else {
+          toast.info('Realize o pagamento via PIX e aguarde a confirmação manual da loja.', {
+            autoClose: 6000,
+          });
+        }
+        return;
       }
+
+      // Pagamento na entrega: navega direto para o tracking.
+      limparCarrinho();
       navigate(
         `/menu/${encodeURIComponent(lojaPublicKey)}/pedido/${encodeURIComponent(venda.id)}`,
         { replace: true }
@@ -294,82 +257,105 @@ export function DeliveryCheckoutPage() {
     }
   };
 
-  if (carrinho.length === 0) {
+  // Após confirmar o pedido limpamos o carrinho — mas se ainda há um PIX pendente
+  // para o cliente copiar/escanear, NÃO mostramos "sacola vazia" senão o card do
+  // QR Code some imediatamente.
+  if (carrinho.length === 0 && !pixServidor) {
     return (
-      <div className="px-4 py-12 text-center">
-        <p className="text-white/60">Sua sacola está vazia.</p>
-        <Link
-          to={`/menu/${encodeURIComponent(lojaPublicKey)}`}
-          className="mt-4 inline-block text-violet-300 underline"
-        >
-          Voltar ao cardápio
-        </Link>
+      <div className="px-6 py-16 text-center">
+        <div className="mx-auto max-w-xs rounded-card border border-bg-border bg-bg-surface p-6 shadow-card">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-pill bg-cta shadow-cta">
+            <ShoppingBag className="h-6 w-6 text-white" />
+          </div>
+          <p className="text-sm font-medium text-text-secondary">Sua sacola está vazia.</p>
+          <Link
+            to={`/menu/${encodeURIComponent(lojaPublicKey)}`}
+            className="mt-4 inline-flex items-center gap-1.5 rounded-pill border-2 border-accent-magenta px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-primary transition hover:bg-accent-magenta/10"
+          >
+            Voltar ao cardápio
+          </Link>
+        </div>
       </div>
     );
   }
 
+  const inputClass =
+    'w-full h-12 rounded-item border border-bg-border bg-bg-raised px-4 text-[15px] text-text-primary placeholder:text-text-muted transition focus:border-accent-purple focus:outline-none focus:ring-2 focus:ring-accent-purple/20';
+
   return (
     <div className="px-4 pb-28 pt-4">
-      <div className="mb-4 flex items-center gap-2">
+      <header className="mb-6 flex items-center justify-between gap-3">
         <Link
           to={`/menu/${encodeURIComponent(lojaPublicKey)}`}
-          className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.06] text-white/85"
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-bg-raised text-text-secondary transition hover:text-text-primary active:scale-95"
           aria-label="Voltar"
         >
-          <ArrowLeft className="h-5 w-5" />
+          <ArrowLeft className="h-4 w-4" />
         </Link>
-        <h2 className="text-lg font-semibold">Finalizar pedido</h2>
-      </div>
+        <div className="text-center min-w-0 flex-1">
+          <h1 className="font-bold text-text-primary truncate">Finalizar pedido</h1>
+          <p className="text-text-muted text-xs truncate">Confira seus dados antes de enviar</p>
+        </div>
+        <div className="w-9" aria-hidden />
+      </header>
 
-      <section className="mb-6 space-y-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-white/45">Tipo do pedido</h3>
-        <div className="grid grid-cols-2 gap-2">
+      <section className="mb-6 rounded-card border border-bg-border bg-bg-surface p-5 shadow-card">
+        <div className="mb-3 flex items-center gap-2">
+          <span className="text-accent-purple font-bold text-sm">1.</span>
+          <h2 className="text-text-secondary font-semibold text-xs uppercase tracking-wider">Tipo do pedido</h2>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
           <button
             type="button"
             onClick={() => setTipoPedido('DELIVERY')}
-            className={`rounded-xl border px-3 py-3 text-sm font-semibold transition ${
+            className={`flex flex-col items-center gap-2 p-4 text-sm font-bold uppercase transition-all duration-200 active:scale-[0.98] ${
               tipoPedido === 'DELIVERY'
-                ? 'border-violet-500/60 bg-violet-500/20 text-violet-100'
-                : 'border-white/10 bg-white/[0.04] text-white/60 hover:border-white/20'
+                ? 'rounded-item border-2 border-accent-magenta bg-bg-raised text-text-primary shadow-glow-pink'
+                : 'rounded-item border border-bg-border bg-bg-raised text-text-secondary hover:text-text-primary hover:border-accent-purple/40'
             }`}
           >
+            <Bike className={`h-6 w-6 ${tipoPedido === 'DELIVERY' ? 'text-accent-magenta' : 'text-text-muted'}`} />
             Entrega
           </button>
           <button
             type="button"
             onClick={() => setTipoPedido('RETIRADA_BALCAO')}
-            className={`rounded-xl border px-3 py-3 text-sm font-semibold transition ${
+            className={`flex flex-col items-center gap-2 p-4 text-sm font-bold uppercase transition-all duration-200 active:scale-[0.98] ${
               tipoPedido === 'RETIRADA_BALCAO'
-                ? 'border-violet-500/60 bg-violet-500/20 text-violet-100'
-                : 'border-white/10 bg-white/[0.04] text-white/60 hover:border-white/20'
+                ? 'rounded-item border-2 border-accent-magenta bg-bg-raised text-text-primary shadow-glow-pink'
+                : 'rounded-item border border-bg-border bg-bg-raised text-text-secondary hover:text-text-primary hover:border-accent-purple/40'
             }`}
           >
+            <Store className={`h-6 w-6 ${tipoPedido === 'RETIRADA_BALCAO' ? 'text-accent-magenta' : 'text-text-muted'}`} />
             Retirar no balcão
           </button>
         </div>
       </section>
 
-      <section className="mb-6 space-y-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-        <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-white/45">
-          <MapPin className="h-4 w-4" />
-          {tipoPedido === 'DELIVERY' ? 'Entrega' : 'Seus dados'}
-        </h3>
+      <section className="mb-6 space-y-4 rounded-card border border-bg-border bg-bg-surface p-5 shadow-card">
+        <div className="flex items-center gap-2">
+          <span className="text-accent-purple font-bold text-sm">2.</span>
+          <h2 className="flex items-center gap-2 text-text-secondary font-semibold text-xs uppercase tracking-wider">
+            {tipoPedido === 'DELIVERY' ? <MapPin className="h-3.5 w-3.5 text-accent-purple" /> : <User className="h-3.5 w-3.5 text-accent-purple" />}
+            {tipoPedido === 'DELIVERY' ? 'Entrega' : 'Seus dados'}
+          </h2>
+        </div>
         <div>
-          <label className="mb-1 block text-xs text-white/45">Nome completo</label>
+          <label className="mb-1.5 block text-xs font-semibold text-text-secondary">Nome completo</label>
           <input
             value={nome}
             onChange={(e) => setNome(e.target.value)}
-            className="w-full rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5 text-white placeholder:text-white/30 focus:border-violet-500/50 focus:outline-none focus:ring-2 focus:ring-violet-500/25"
+            className={inputClass}
             placeholder="Seu nome"
             autoComplete="name"
           />
         </div>
         <div>
-          <label className="mb-1 block text-xs text-white/45">WhatsApp</label>
+          <label className="mb-1.5 block text-xs font-semibold text-text-secondary">WhatsApp</label>
           <input
             value={whatsapp}
             onChange={(e) => setWhatsapp(e.target.value)}
-            className="w-full rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5 text-white placeholder:text-white/30 focus:border-violet-500/50 focus:outline-none focus:ring-2 focus:ring-violet-500/25"
+            className={inputClass}
             placeholder="(00) 00000-0000"
             inputMode="tel"
             autoComplete="tel"
@@ -379,227 +365,339 @@ export function DeliveryCheckoutPage() {
           <>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="mb-1 block text-xs text-white/45">CEP</label>
+            <label className="mb-1.5 block text-xs font-semibold text-text-secondary">CEP</label>
             <div className="relative">
               <input
                 value={cepInput}
                 onChange={(e) => handleCepChange(e.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5 pr-10 text-white placeholder:text-white/30 focus:border-violet-500/50 focus:outline-none focus:ring-2 focus:ring-violet-500/25"
+                className={`${inputClass} pr-10`}
                 placeholder="00000000"
                 inputMode="numeric"
                 maxLength={8}
                 autoComplete="postal-code"
               />
               {carregandoCep && (
-                <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-white/50" />
+                <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-text-muted" />
               )}
             </div>
             {erroCep && !carregandoCep && (
-              <p className="mt-1 text-xs text-red-400">{erroCep}</p>
+              <p className="mt-1.5 text-xs font-semibold text-danger">{erroCep}</p>
             )}
             {addressData && !carregandoCep && !erroCep && (
-              <p className="mt-1 text-xs text-emerald-400">CEP encontrado!</p>
+              <p className="mt-1.5 text-xs font-semibold text-price">CEP encontrado</p>
             )}
           </div>
           <div>
-            <label className="mb-1 block text-xs text-white/45">Número</label>
+            <label className="mb-1.5 block text-xs font-semibold text-text-secondary">Número</label>
             <input
               value={numero}
               onChange={(e) => setNumero(e.target.value)}
-              className="w-full rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5 text-white placeholder:text-white/30 focus:border-violet-500/50 focus:outline-none focus:ring-2 focus:ring-violet-500/25"
+              className={inputClass}
               placeholder="Nº"
             />
           </div>
         </div>
         <div>
-          <label className="mb-1 block text-xs text-white/45">Rua</label>
+          <label className="mb-1.5 block text-xs font-semibold text-text-secondary">Rua</label>
           <input
             value={rua}
             onChange={(e) => setRua(e.target.value)}
-            className="w-full rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5 text-white placeholder:text-white/30 focus:border-violet-500/50 focus:outline-none focus:ring-2 focus:ring-violet-500/25"
+            className={inputClass}
             placeholder="Logradouro"
             autoComplete="street-address"
           />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="mb-1 block text-xs text-white/45">Bairro</label>
+            <label className="mb-1.5 block text-xs font-semibold text-text-secondary">Bairro</label>
             <input
               value={bairro}
               onChange={(e) => setBairro(e.target.value)}
-              className="w-full rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5 text-white placeholder:text-white/30 focus:border-violet-500/50 focus:outline-none focus:ring-2 focus:ring-violet-500/25"
+              className={inputClass}
               placeholder="Bairro"
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs text-white/45">Cidade <span className="text-red-400">*</span></label>
+            <label className="mb-1.5 block text-xs font-semibold text-text-secondary">Cidade <span className="text-red-400">*</span></label>
             <input
               value={cidade}
               onChange={(e) => setCidade(e.target.value)}
-              className="w-full rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5 text-white placeholder:text-white/30 focus:border-violet-500/50 focus:outline-none focus:ring-2 focus:ring-violet-500/25"
+              className={inputClass}
               placeholder="Cidade"
             />
           </div>
         </div>
         <div>
-          <label className="mb-1 block text-xs text-white/45">Complemento (opcional)</label>
+          <label className="mb-1.5 block text-xs font-semibold text-text-secondary">Complemento (opcional)</label>
           <input
             value={complemento}
             onChange={(e) => setComplemento(e.target.value)}
-            className="w-full rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5 text-white placeholder:text-white/30 focus:border-violet-500/50 focus:outline-none focus:ring-2 focus:ring-violet-500/25"
+            className={inputClass}
             placeholder="Apto, bloco, referência…"
           />
         </div>
           </>
         )}
         <div>
-          <label className="mb-1 block text-xs text-white/45">Observações do pedido (opcional)</label>
+          <label className="mb-1.5 block text-xs font-semibold text-text-secondary">Observações do pedido (opcional)</label>
           <textarea
             value={observacaoPedido}
             onChange={(e) => setObservacaoPedido(e.target.value)}
             rows={2}
-            className="w-full resize-none rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2.5 text-white placeholder:text-white/30 focus:border-violet-500/50 focus:outline-none focus:ring-2 focus:ring-violet-500/25"
+            className={`${inputClass} resize-none`}
             placeholder="Ex.: interfone, ponto da carne…"
           />
         </div>
         </section>
 
-      <section className="mb-6 space-y-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-white/45">Pagamento</h3>
-        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/10 bg-white/[0.04] p-3">
+      <section className="mb-6 space-y-3 rounded-card border border-bg-border bg-bg-surface p-5 shadow-card">
+        <div className="flex items-center gap-2">
+          <span className="text-accent-purple font-bold text-sm">3.</span>
+          <h2 className="flex items-center gap-2 text-text-secondary font-semibold text-xs uppercase tracking-wider">
+            <Wallet className="h-3.5 w-3.5 text-accent-purple" />
+            Pagamento
+          </h2>
+        </div>
+        <label className={`flex cursor-pointer items-start gap-3 p-4 transition active:scale-[0.99] ${
+          formaPagamento === 'NA_ENTREGA'
+            ? 'rounded-item border-2 border-accent-magenta bg-bg-raised shadow-glow-pink'
+            : 'rounded-item border border-bg-border bg-bg-raised hover:border-accent-purple/40'
+        }`}>
+          <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${
+            formaPagamento === 'NA_ENTREGA' ? 'border-accent-magenta bg-accent-magenta' : 'border-bg-border'
+          }`}>
+            {formaPagamento === 'NA_ENTREGA' && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+          </span>
           <input
             type="radio"
             name="pag"
             checked={formaPagamento === 'NA_ENTREGA'}
             onChange={() => setFormaPagamento('NA_ENTREGA')}
-            className="mt-1"
+            className="sr-only"
           />
-          <div>
-            <p className="font-medium text-white">Pagar na entrega</p>
-            <p className="text-sm text-white/45">Dinheiro ou cartão na porta (registrado como dinheiro no caixa).</p>
+          <div className="min-w-0 flex-1">
+            <p className="font-bold text-text-primary">Pagar na entrega</p>
+            <p className="mt-0.5 text-xs text-text-muted">Dinheiro ou cartão na porta (registrado como dinheiro no caixa).</p>
           </div>
         </label>
-        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/10 bg-white/[0.04] p-3">
+        <label className={`relative flex cursor-pointer items-start gap-3 p-4 transition active:scale-[0.99] ${
+          formaPagamento === 'PIX'
+            ? 'rounded-item border-2 border-accent-magenta bg-bg-raised shadow-glow-pink'
+            : 'rounded-item border border-bg-border bg-bg-raised hover:border-accent-purple/40'
+        }`}>
+          <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${
+            formaPagamento === 'PIX' ? 'border-accent-magenta bg-accent-magenta' : 'border-bg-border'
+          }`}>
+            {formaPagamento === 'PIX' && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+          </span>
           <input
             type="radio"
             name="pag"
             checked={formaPagamento === 'PIX'}
             onChange={() => setFormaPagamento('PIX')}
-            className="mt-1"
+            className="sr-only"
           />
           <div className="flex-1">
-            <p className="font-medium text-white">PIX online</p>
-            <p className="text-sm text-white/45">Pagamento instantâneo via PIX Copia e Cola.</p>
+            <div className="flex items-center gap-2">
+              <p className="font-bold text-text-primary">PIX online</p>
+              <span className="inline-flex items-center gap-1 rounded-pill bg-price/15 text-price px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                <Sparkles className="h-2.5 w-2.5" /> Recomendado
+              </span>
+            </div>
+            <p className="mt-0.5 text-xs text-text-muted">Pagamento instantâneo via PIX Copia e Cola.</p>
           </div>
         </label>
 
-        {formaPagamento === 'PIX' && !loja?.chavePix && (
-          <div className="mt-3 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
-            <p className="text-center text-sm text-amber-300">
-              Configure a chave PIX no painel da loja para ativar o pagamento instantâneo.
+        {/* Antes do envio: apenas info — QR é gerado pelo servidor após confirmar pedido */}
+        {formaPagamento === 'PIX' && !!loja?.chavePix && !pixServidor && (
+          <div className="mt-3 rounded-item border border-bg-border bg-bg-raised p-4">
+            <p className="text-center text-sm text-text-secondary">
+              O QR Code PIX será gerado ao confirmar o pedido.
             </p>
           </div>
         )}
 
-        {formaPagamento === 'PIX' && !!loja?.chavePix && (
-          <div className="mt-3 rounded-2xl border border-violet-500/20 bg-[#0b1324] p-4">
+        {/* Depois do envio: PIX dinâmico (QR real do PSP) */}
+        {pixServidor?.tipo === 'DINAMICO' && (
+          <div className="mt-3 rounded-item border border-price/30 bg-bg-raised p-4">
             <div className="mb-3 flex items-center gap-2">
-              <QrCode className="h-4 w-4 text-emerald-400" />
-              <span className="text-xs font-medium uppercase tracking-wide text-emerald-400">
-                QR Code PIX
+              <QrCode className="h-4 w-4 text-price" />
+              <span className="text-xs font-bold uppercase tracking-wide text-price">
+                QR Code PIX — escaneie ou copie o código
               </span>
             </div>
-            {pixCopiaCola ? (
-              <>
-                <div className="mb-4 flex justify-center rounded-xl border border-white/10 bg-white p-3">
-                  <div className="flex h-32 w-32 items-center justify-center bg-white">
-                    <QrCode className="h-24 w-24 text-[#060816]" />
-                  </div>
-                </div>
-                <div className="mb-3">
-                  <p className="mb-1 text-xs text-white/45">Código Copia e Cola:</p>
-                  <div className="relative">
-                    <textarea
-                      readOnly
-                      value={pixCopiaCola}
-                      rows={3}
-                      className="w-full resize-none rounded-xl border border-violet-500/20 bg-[#060816] px-3 py-2 text-[10px] leading-tight text-emerald-400 placeholder:text-white/20"
-                      placeholder="Código PIX gerado automaticamente..."
-                    />
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={copiarCodigoPix}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 py-2.5 text-sm font-medium text-emerald-300 transition hover:bg-emerald-500/20 active:scale-[0.99]"
-                >
-                  <Copy className="h-4 w-4" />
-                  {copiaColaCopiado ? 'Copiado!' : 'Copiar Código PIX'}
-                </button>
-                <p className="mt-2 text-center text-[10px] text-white/35">
-                  Valor: <span className="font-semibold text-emerald-400">{formatBrl(totalPedido)}</span>
-                </p>
-              </>
-            ) : (
-              <p className="text-center text-sm text-amber-300">
-                Erro ao gerar código PIX. Verifique a configuração.
-              </p>
+            {pixServidor.qrCodeBase64 && (
+              <div className="mb-4 flex justify-center rounded-item border border-bg-border bg-white p-3">
+                <img
+                  src={`data:image/png;base64,${pixServidor.qrCodeBase64}`}
+                  alt="QR Code PIX"
+                  className="h-40 w-40 object-contain"
+                />
+              </div>
             )}
+            <div className="mb-3">
+              <p className="mb-1 text-xs text-text-muted">Código Copia e Cola:</p>
+              <textarea
+                readOnly
+                value={pixServidor.pixCopiaCola}
+                rows={3}
+                className="w-full resize-none rounded-item border border-bg-border bg-bg-base px-3 py-2 text-[10px] leading-tight text-price"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => void copiarPixServidor()}
+              className="flex w-full items-center justify-center gap-2 rounded-pill border border-price/40 bg-price/10 py-2.5 text-sm font-bold text-price transition hover:bg-price/20 active:scale-[0.99]"
+            >
+              <Copy className="h-4 w-4" />
+              {copiaColaCopiado ? 'Copiado!' : 'Copiar Código PIX'}
+            </button>
+            <p className="mt-2 text-center text-[10px] text-text-muted">
+              Aguardando confirmação do pagamento… Valor:{' '}
+              <span className="font-bold text-price">{formatBrl(totalPedido)}</span>
+            </p>
+          </div>
+        )}
+
+        {/* Depois do envio: PIX estático (chave do local de cobrança) */}
+        {pixServidor?.tipo === 'ESTATICO' && (
+          <div className="mt-3 rounded-card border border-amber-500/30 bg-bg-base p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <QrCode className="h-4 w-4 text-amber-300" />
+              <span className="text-xs font-bold uppercase tracking-wide text-amber-300">
+                {pixServidor.qrCodeBase64
+                  ? 'PIX — escaneie ou copie o código'
+                  : 'Chave PIX — confirmação manual'}
+              </span>
+            </div>
+            <p className="mb-3 text-xs text-amber-200/85">
+              {pixServidor.mensagem ?? 'Realize o pagamento e aguarde confirmação manual.'}
+            </p>
+
+            {pixServidor.qrCodeBase64 && (
+              <div className="mb-4 flex justify-center rounded-item border border-bg-border bg-white p-3">
+                <img
+                  src={`data:image/png;base64,${pixServidor.qrCodeBase64}`}
+                  alt="QR Code PIX"
+                  className="h-40 w-40 object-contain"
+                />
+              </div>
+            )}
+
+            {pixServidor.pixCopiaCola ? (
+              <div className="mb-3">
+                <p className="mb-1 text-xs text-text-muted">Código Copia e Cola:</p>
+                <textarea
+                  readOnly
+                  value={pixServidor.pixCopiaCola}
+                  rows={3}
+                  className="w-full resize-none rounded-item border border-amber-500/20 bg-bg-raised px-3 py-2 text-[10px] leading-tight text-amber-200"
+                />
+              </div>
+            ) : (
+              <div className="mb-3">
+                <p className="mb-1 text-xs text-text-muted">Chave PIX da loja:</p>
+                <input
+                  readOnly
+                  value={pixServidor.chavePix}
+                  className="w-full rounded-item border border-amber-500/20 bg-bg-raised px-3 py-2 text-xs text-amber-200"
+                />
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => void copiarPixServidor()}
+              className="flex w-full items-center justify-center gap-2 rounded-pill border border-amber-500/30 bg-amber-500/10 py-2.5 text-sm font-bold text-amber-200 transition hover:bg-amber-500/20"
+            >
+              <Copy className="h-4 w-4" />
+              {copiaColaCopiado
+                ? 'Copiado!'
+                : pixServidor.pixCopiaCola
+                  ? 'Copiar código PIX'
+                  : 'Copiar chave PIX'}
+            </button>
+            <p className="mt-2 text-center text-[10px] text-text-muted">
+              Valor:{' '}
+              <span className="font-semibold text-amber-300">{formatBrl(totalPedido)}</span>
+            </p>
           </div>
         )}
       </section>
 
-      <section className="mb-6 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-        <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/45">Sacola</h3>
-        <ul className="mb-4 space-y-2 border-b border-white/10 pb-4">
+      <section className="mb-6 rounded-card border border-bg-border bg-bg-surface p-5 shadow-card">
+        <div className="mb-3 flex items-center gap-2">
+          <span className="text-accent-purple font-bold text-sm">4.</span>
+          <h2 className="flex items-center gap-2 text-text-secondary font-semibold text-xs uppercase tracking-wider">
+            <ShoppingBag className="h-3.5 w-3.5 text-accent-purple" />
+            Resumo do pedido
+          </h2>
+        </div>
+        <ul className="mb-4 space-y-2.5 border-b border-bg-border pb-4">
           {carrinho.map((it) => {
             const { titulo, subtitulo } = rotuloLinhaCarrinho(it);
             return (
-              <li key={it.id} className="flex justify-between gap-3 text-sm text-white/80">
+              <li key={it.id} className="flex justify-between gap-3 text-sm text-text-primary">
                 <div className="min-w-0">
-                  <p className="font-medium text-white">
-                    <span className="tabular-nums text-violet-200">{it.quantidade}×</span> {titulo}
+                  <p className="font-semibold uppercase text-text-primary">
+                    <span className="mr-1 inline-flex h-5 min-w-[1.5rem] items-center justify-center rounded-pill bg-accent-purple/15 px-1 text-[11px] font-black tabular-nums text-accent-purple">{it.quantidade}×</span>
+                    {titulo}
                   </p>
                   {subtitulo && (
-                    <p className="mt-0.5 text-xs leading-snug text-slate-400">{subtitulo}</p>
+                    <p className="mt-0.5 text-xs leading-snug text-text-muted">{subtitulo}</p>
                   )}
                 </div>
-                <span className="shrink-0 tabular-nums text-white/90">{formatBrl(it.subtotal)}</span>
+                <span className="shrink-0 font-bold tabular-nums text-price">{formatBrl(it.subtotal)}</span>
               </li>
             );
           })}
         </ul>
-        <div className="flex justify-between text-sm text-white/60">
+        <div className="flex justify-between text-sm text-text-secondary">
           <span>Subtotal</span>
-          <span className="tabular-nums text-white">{formatBrl(subtotalItens)}</span>
+          <span className="font-semibold tabular-nums text-price">{formatBrl(subtotalItens)}</span>
         </div>
         {tipoPedido === 'DELIVERY' && (
-        <div className="mt-2 flex justify-between text-sm text-white/60">
+        <div className="mt-2 flex justify-between text-sm text-text-secondary">
           <span>Taxa de entrega</span>
-          <span className="tabular-nums text-white">{formatBrl(taxaEntrega)}</span>
+          <span className="font-semibold tabular-nums text-price">{formatBrl(taxaEntrega)}</span>
         </div>
         )}
-        <div className="mt-3 flex justify-between border-t border-white/10 pt-3 text-base font-semibold">
-          <span>Total</span>
-          <span className="tabular-nums text-violet-200">{formatBrl(totalPedido)}</span>
+        <div className="mt-3 flex items-end justify-between border-t border-bg-border pt-3">
+          <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-text-secondary">Total</span>
+          <span className="text-3xl font-black tabular-nums text-price">{formatBrl(totalPedido)}</span>
         </div>
       </section>
 
-      <button
-        type="button"
-        disabled={enviando || (loja ? !loja.aberto : false)}
-        onClick={() => void enviarPedido()}
-        className="flex min-h-[3.25rem] w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 px-4 text-base font-semibold text-white shadow-[0_12px_40px_rgba(109,40,217,0.4)] transition enabled:active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
-      >
-        {enviando ? (
-          <>
-            <Loader2 className="h-5 w-5 animate-spin" />
-            Enviando…
-          </>
-        ) : (
-          `Confirmar — ${formatBrl(totalPedido)}`
-        )}
-      </button>
+      {pixServidor ? (
+        <button
+          type="button"
+          onClick={irParaAcompanhamento}
+          className="flex min-h-[3.5rem] w-full items-center justify-center gap-2 rounded-pill bg-cta hover:bg-cta-hover shadow-cta px-4 text-base font-bold uppercase tracking-wide text-white transition-all duration-200 active:scale-[0.98]"
+        >
+          <span>Confirmar pedido — Acompanhar</span>
+        </button>
+      ) : (
+        <button
+          type="button"
+          disabled={enviando || (loja ? !loja.aberto : false)}
+          onClick={() => void enviarPedido()}
+          className="flex min-h-[3.5rem] w-full items-center justify-center gap-2 rounded-pill bg-cta hover:bg-cta-hover shadow-cta px-4 text-base font-bold uppercase tracking-wide text-white transition-all duration-200 enabled:active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100"
+        >
+          {enviando ? (
+            <>
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span>Enviando…</span>
+            </>
+          ) : formaPagamento === 'PIX' ? (
+            <>
+              <QrCode className="h-5 w-5" />
+              <span>Gerar QR Code — {formatBrl(totalPedido)}</span>
+            </>
+          ) : (
+            <span>Confirmar pedido — {formatBrl(totalPedido)}</span>
+          )}
+        </button>
+      )}
     </div>
   );
 }

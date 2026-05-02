@@ -94,6 +94,7 @@ import { AdminEmpresaFeaturesPage } from './pages/admin/AdminEmpresaFeaturesPage
 import { GestaoUsuariosPage } from './modules/configuracoes/pages/GestaoUsuariosPage';
 import { GestaoPermissoesPage } from './modules/configuracoes/pages/GestaoPermissoesPage';
 import { GestaoTefPage } from './modules/configuracoes/pages/GestaoTefPage';
+import { PixConfigPage } from './modules/pix/pages/PixConfigPage';
 import ConfiguracoesLoja from './modules/clientes_sistema/ConfiguracoesLoja';
 
 // 🖨️ MÓDULO DE ETIQUETAS, ESTAÇÕES DE TRABALHO E BALANÇAS
@@ -170,6 +171,7 @@ function App() {
           <Route path="/equipe" element={<GestaoUsuariosPage />} />
           <Route path="/permissoes" element={<GestaoPermissoesPage />} />
           <Route path="/configuracao-tef" element={<GestaoTefPage />} />
+          <Route path="/configuracao-pix" element={<PixConfigPage />} />
           <Route path="/configuracoes-loja" element={<ConfiguracoesLoja />} />
           
           {/* 👇 MÓDULO DE IMPRESSÃO E PRODUÇÃO E HARDWARE */}
@@ -200,12 +202,15 @@ function App() {
           <Route path="/kds-chamada-balcao" element={<KdsChamadaBalcaoPage />} />
           <Route path="/painel-senhas" element={<PainelSenhasPage />} />
           <Route path="/comanda-mobile" element={<ComandaMobile />} />
-          <Route path="/garcom" element={<GarcomLayout />}>
-            <Route index element={<Navigate to="/garcom/mesas" replace />} />
-            <Route path="mesas" element={<GarcomMesasPage />} />
-            <Route path="mesa/:numeroMesa" element={<GarcomMesaContaPage />} />
-            <Route path="mesa/:numeroMesa/fechar" element={<GarcomFechamentoPage />} />
-            <Route path="mesa/:numeroMesa/pedir" element={<GarcomPedirPage />} />
+          {/* App do garçom — restrito por role para impedir acesso externo */}
+          <Route element={<PrivateRoute rolesPermitidas={['GARCOM', 'GERENTE', 'DIRETOR', 'SUPER_ADMIN', 'SUPORTE_MASTER']} />}>
+            <Route path="/garcom" element={<GarcomLayout />}>
+              <Route index element={<Navigate to="/garcom/mesas" replace />} />
+              <Route path="mesas" element={<GarcomMesasPage />} />
+              <Route path="mesa/:numeroMesa" element={<GarcomMesaContaPage />} />
+              <Route path="mesa/:numeroMesa/fechar" element={<GarcomFechamentoPage />} />
+              <Route path="mesa/:numeroMesa/pedir" element={<GarcomPedirPage />} />
+            </Route>
           </Route>
           <Route path="/vendas/campanhas-promocionais" element={<CampanhasPromocionaisPage />} />
           <Route path="/vendas/gestao-turnos-caixa" element={<GestaoTurnosCaixaPage />} />

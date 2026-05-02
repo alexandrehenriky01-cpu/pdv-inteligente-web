@@ -513,12 +513,47 @@ export function GestaoDeliveryPage() {
   };
 
   const handleImprimirRomaneio = async () => {
-    if (selectedOrderIds.size === 0) {
-      toast.warning('Selecione ao menos um pedido para montar a rota.');
-      return;
-    }
+    // Determina os pedidos elegíveis para entrar no romaneio.
+    // Regras:
+    //  - PENDENTE de entrega
+    //  - Não retirada no balcão
+    let pedidoIds: string[] = [];
 
-    const pedidoIds = Array.from(selectedOrderIds);
+    if (selectedOrderIds.size > 0) {
+      const elegiveis = pedidos.filter(
+        (p) =>
+          selectedOrderIds.has(p.id) &&
+          p.statusEntrega === 'PENDENTE' &&
+          !isRetiradaBalcaoGestao(p.tipoPedido)
+      );
+      const ignorados = selectedOrderIds.size - elegiveis.length;
+
+      if (elegiveis.length === 0) {
+        toast.warning(
+          'Nenhum dos pedidos selecionados está apto para romaneio. Apenas pedidos PENDENTE de entrega podem ser incluídos.'
+        );
+        return;
+      }
+      if (ignorados > 0) {
+        toast.info(
+          `${ignorados} pedido(s) ignorado(s) por já estarem em rota, entregues ou serem retirada no balcão.`
+        );
+      }
+      pedidoIds = elegiveis.map((p) => p.id);
+    } else {
+      // Sem seleção explícita → monta romaneio com todos os pendentes da loja
+      pedidoIds = pedidos
+        .filter(
+          (p) =>
+            p.statusEntrega === 'PENDENTE' && !isRetiradaBalcaoGestao(p.tipoPedido)
+        )
+        .map((p) => p.id);
+
+      if (pedidoIds.length === 0) {
+        toast.warning('Nenhum pedido pendente para criar romaneio.');
+        return;
+      }
+    }
 
     setPrintingRomaneio(true);
     try {
@@ -548,7 +583,10 @@ export function GestaoDeliveryPage() {
 
       toast.success(`Romaneio #${resultado.uuid} criado com ${pedidoIds.length} pedidos!`);
 
-      setSelectedToken(resultado.uuid || '');
+      const linkToken =
+        resultado.token ||
+        (resultado.uuid ? `rom_${String(resultado.uuid).replace(/^rom_/i, '').toLowerCase()}` : '');
+      setSelectedToken(linkToken);
       setShowQrModal(true);
 
       setPedidos((prev) =>
@@ -570,8 +608,11 @@ export function GestaoDeliveryPage() {
   };
 
   const handleShareWhatsApp = async () => {
-    const trackingUrl = `https://delivery.seusite.com.br/track/${selectedToken}`;
-    const text = `🔔 Rastreie seu delivery!\n\nSiga o link para acompanhar sua entrega em tempo real:\n${trackingUrl}`;
+    if (!trackingPublicUrl) {
+      toast.warning('Romaneio sem token válido — gere o romaneio antes de compartilhar.');
+      return;
+    }
+    const text = `🔔 Rastreie seu delivery!\n\nSiga o link para acompanhar sua entrega em tempo real:\n${trackingPublicUrl}`;
 
     if (navigator.share) {
       try {
@@ -624,6 +665,51 @@ export function GestaoDeliveryPage() {
     emRota: pedidos.filter((p) => p.statusEntrega === 'SAIU_ENTREGA').length,
     entregue: pedidos.filter((p) => p.statusEntrega === 'ENTREGUE').length,
   };
+
+  /**
+   * Pedidos atualmente selecionados que são elegíveis para entrar num romaneio:
+   * - statusEntrega === 'PENDENTE' (não saiu, não foi entregue)
+   * - tipoPedido !== 'RETIRADA_BALCAO' (cliente busca no balcão; não vai pra rota)
+   */
+  const selectedPendentes = useMemo(
+    () =>
+      pedidos.filter(
+        (p) =>
+          selectedOrderIds.has(p.id) &&
+          p.statusEntrega === 'PENDENTE' &&
+          !isRetiradaBalcaoGestao(p.tipoPedido)
+      ),
+    [pedidos, selectedOrderIds]
+  );
+
+  /**
+   * Define se o botão "Romaneio" deve estar habilitado.
+   * - Com seleção: precisa de pelo menos 1 elegível.
+   * - Sem seleção: usa todos os pendentes da loja (modo "todos").
+   * Não bloqueia por agente offline — o romaneio digital (QR) funciona sem impressora física.
+   */
+  const podeMontarRomaneio =
+    selectedOrderIds.size > 0 ? selectedPendentes.length > 0 : contagem.pendente > 0;
+
+  const totalRomaneio =
+    selectedOrderIds.size > 0 ? selectedPendentes.length : contagem.pendente;
+
+  /**
+   * URL pública usada no QR Code e no link compartilhado por WhatsApp.
+   * Prioridade:
+   *  1. `VITE_DELIVERY_TRACKING_BASE_URL` (configurar para domínio público em produção
+   *     ou IP da máquina dev — `http://192.168.x.x:5173` — para QR funcionar no celular).
+   *  2. `window.location.origin` (fallback). Em dev este valor é `http://localhost:5173`,
+   *     que não funciona quando o QR é escaneado por outro dispositivo.
+   * O token já vem com prefixo `rom_` quando reconstruído a partir do uuid.
+   */
+  const trackingPublicUrl = useMemo(() => {
+    if (!selectedToken) return '';
+    const base = (
+      import.meta.env.VITE_DELIVERY_TRACKING_BASE_URL || window.location.origin
+    ).replace(/\/+$/, '');
+    return `${base}/#/entregas/mobile/${selectedToken}`;
+  }, [selectedToken]);
 
   const socketLabel =
     socketStatus === 'connected'
@@ -800,8 +886,13 @@ export function GestaoDeliveryPage() {
               </button>
               <button
                 type="button"
-                disabled={printingRomaneio || imprimindoRomaneioHook || !agenteOnlineRomaneio || contagem.pendente === 0}
+                disabled={printingRomaneio || imprimindoRomaneioHook || !podeMontarRomaneio}
                 onClick={() => void handleImprimirRomaneio()}
+                title={
+                  !agenteOnlineRomaneio
+                    ? 'Agente de impressão offline — o romaneio digital com QR Code será gerado mesmo assim.'
+                    : undefined
+                }
                 className="inline-flex items-center gap-2 rounded-xl border border-sky-500/35 bg-sky-500/10 px-4 py-2.5 text-sm font-bold text-sky-200 hover:bg-sky-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {printingRomaneio || imprimindoRomaneioHook ? (
@@ -809,7 +900,7 @@ export function GestaoDeliveryPage() {
                 ) : (
                   <Printer className="w-4 h-4" />
                 )}
-                Romaneio ({selectedOrderIds.size > 0 ? selectedOrderIds.size : contagem.pendente})
+                Romaneio ({totalRomaneio})
               </button>
             </div>
           </div>
@@ -1109,7 +1200,7 @@ export function GestaoDeliveryPage() {
             <div className="flex justify-center mb-6">
               <div className="rounded-2xl border border-sky-500/35 bg-white p-4">
                 <QRCodeSVG
-                  value={`https://delivery.seusite.com.br/track/${selectedToken}`}
+                  value={trackingPublicUrl}
                   size={256}
                   level="H"
                   includeMargin
@@ -1120,9 +1211,15 @@ export function GestaoDeliveryPage() {
             <h3 className="text-xl font-black text-white mb-2">
               Romaneio #{selectedToken.slice(0, 8).toUpperCase()}
             </h3>
-            <p className="text-sm text-slate-400 mb-6">
+            <p className="text-sm text-slate-400 mb-3">
               Escaneie para acompanhar a entrega
             </p>
+
+            {trackingPublicUrl && (
+              <p className="mb-6 break-all rounded-lg border border-white/5 bg-[#0b1324] px-3 py-2 text-[11px] font-mono text-violet-200/85">
+                {trackingPublicUrl}
+              </p>
+            )}
 
             <button
               type="button"

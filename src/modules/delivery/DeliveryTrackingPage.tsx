@@ -1,7 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useOutletContext, useParams } from 'react-router-dom';
 import { io, type Socket } from 'socket.io-client';
-import { Check, Loader2, MapPin, Package, Radio, Store } from 'lucide-react';
+import {
+  ArrowLeft,
+  Bell,
+  ChefHat,
+  Check,
+  CheckCircle2,
+  Loader2,
+  MapPin,
+  Package,
+  Radio,
+  Receipt,
+  ShoppingBag,
+  Store,
+  Truck,
+  type LucideIcon,
+} from 'lucide-react';
 import { resolveApiBaseUrl } from '../../services/api';
 import {
   getDeliveryPedidoTracking,
@@ -89,17 +104,36 @@ function stepIndexFromTrackingStatus(status: TrackingStatusCliente, retirada: bo
 
 const STEPS_DELIVERY = [
   { id: 'recebido', titulo: 'Recebido', subtitulo: 'Pendente' },
-  { id: 'cozinha', titulo: 'Na cozinha', subtitulo: 'Preparando / aguardando entrega' },
-  { id: 'rota', titulo: 'Saiu para entrega', subtitulo: 'Em rota' },
+  { id: 'cozinha', titulo: 'Em preparo', subtitulo: 'Preparando / aguardando entrega' },
+  { id: 'rota', titulo: 'Saiu p/ entrega', subtitulo: 'Em rota' },
   { id: 'entregue', titulo: 'Entregue', subtitulo: 'Concluído' },
 ] as const;
 
 const STEPS_RETIRADA = [
   { id: 'recebido', titulo: 'Recebido', subtitulo: 'Pendente' },
-  { id: 'cozinha', titulo: 'Na cozinha', subtitulo: 'Preparando' },
-  { id: 'pronto', titulo: 'Pronto para retirada', subtitulo: 'Compare ao balcão' },
+  { id: 'cozinha', titulo: 'Em preparo', subtitulo: 'Preparando' },
+  { id: 'pronto', titulo: 'Pronto p/ retirada', subtitulo: 'Compare ao balcão' },
   { id: 'retirado', titulo: 'Retirado', subtitulo: 'Concluído' },
 ] as const;
+
+const STEP_ICONS: Record<string, LucideIcon> = {
+  recebido: Receipt,
+  cozinha: ChefHat,
+  rota: Truck,
+  entregue: CheckCircle2,
+  pronto: Bell,
+  retirado: CheckCircle2,
+};
+
+const STATUS_LABEL: Record<TrackingStatusCliente, string> = {
+  RECEBIDO: 'Pedido recebido',
+  NA_COZINHA: 'Em preparo',
+  SAIU_PARA_ENTREGA: 'Saiu para entrega',
+  ENTREGUE: 'Pedido entregue',
+  PRONTO_PARA_RETIRADA: 'Pronto para retirada',
+  RETIRADO: 'Pedido retirado',
+  CANCELADO_LOJA: 'Cancelado',
+};
 
 type SocketStatus = 'idle' | 'connecting' | 'connected' | 'error';
 
@@ -249,9 +283,9 @@ export function DeliveryTrackingPage() {
 
   if (carregando) {
     return (
-      <div className="flex flex-col items-center justify-center gap-4 px-6 py-20">
-        <Loader2 className="h-12 w-12 animate-spin text-violet-400" />
-        <p className="text-center text-white/65">Carregando seu pedido…</p>
+      <div className="flex flex-col items-center justify-center gap-5 px-6 py-24">
+        <Loader2 className="h-12 w-12 animate-spin text-accent-purple" />
+        <p className="text-center text-sm font-medium text-text-secondary">Carregando seu pedido…</p>
       </div>
     );
   }
@@ -259,13 +293,15 @@ export function DeliveryTrackingPage() {
   if (erro || !pedido) {
     return (
       <div className="px-6 py-16 text-center">
-        <p className="text-white/65">{erro ?? 'Pedido não encontrado.'}</p>
-        <Link
-          to={`/menu/${encodeURIComponent(lojaPublicKey)}`}
-          className="mt-4 inline-block text-violet-300 underline"
-        >
-          Voltar ao cardápio
-        </Link>
+        <div className="mx-auto max-w-xs rounded-card border border-bg-border bg-bg-surface p-6 shadow-card">
+          <p className="text-sm text-text-secondary">{erro ?? 'Pedido não encontrado.'}</p>
+          <Link
+            to={`/menu/${encodeURIComponent(lojaPublicKey)}`}
+            className="mt-4 inline-flex items-center gap-1.5 rounded-pill border-2 border-accent-magenta px-4 py-2 text-sm font-bold uppercase tracking-wide text-text-primary transition hover:bg-accent-magenta/10"
+          >
+            Voltar ao cardápio
+          </Link>
+        </div>
       </div>
     );
   }
@@ -273,150 +309,218 @@ export function DeliveryTrackingPage() {
   const senha = formatSenha(pedido.numeroPedido, pedido.numeroVenda);
   const textoCancelamento =
     pedido.mensagemCliente?.trim() || 'Seu pedido foi cancelado pela loja';
+  const statusLabel = STATUS_LABEL[trackingStatus] ?? 'Pedido em andamento';
+  const HeroIcon = ehRetirada ? Store : ShoppingBag;
+
+  const scrollTimelineToView = () => {
+    if (typeof document === 'undefined') return;
+    const el = document.getElementById('tracking-timeline');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
 
   return (
-    <div className="px-4 pb-24 pt-2">
-      {/* Header com branding da loja */}
+    <div className="px-4 pb-28 pt-3">
+      <header className="mb-5 flex items-center justify-between gap-3">
+        <Link
+          to={`/menu/${encodeURIComponent(lojaPublicKey)}`}
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-bg-raised text-text-secondary transition hover:text-text-primary active:scale-95"
+          aria-label="Voltar"
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </Link>
+        <div className="min-w-0 flex-1 px-2 text-center">
+          <h1 className="truncate font-bold text-text-primary">Pedido confirmado</h1>
+          <p className="truncate text-xs text-text-muted">#{senha}</p>
+        </div>
+        <div
+          className={`flex items-center gap-1.5 rounded-pill px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ${
+            socketStatus === 'connected'
+              ? 'bg-price/15 text-price'
+              : socketStatus === 'connecting'
+                ? 'bg-amber-500/12 text-amber-100'
+                : 'bg-bg-raised text-text-muted'
+          }`}
+        >
+          {socketStatus === 'connected' ? (
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-price opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-price" />
+            </span>
+          ) : (
+            <Radio className="h-3 w-3" />
+          )}
+          {socketStatus === 'connected' ? 'Ao vivo' : socketStatus === 'connecting' ? 'Conectando' : 'Offline'}
+        </div>
+      </header>
+
       {loja && (
-        <div className="mb-4 flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] p-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-violet-500/30 bg-[#0b1324]">
+        <div className="mb-4 flex items-center gap-3 rounded-card border border-bg-border bg-bg-surface p-3 shadow-card">
+          <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-bg-raised ring-1 ring-bg-border">
             {loja.logoUrl ? (
-              <img src={loja.logoUrl} alt="" className="h-full w-full object-cover rounded-full" />
+              <img src={loja.logoUrl} alt="" className="h-full w-full object-cover" />
             ) : (
-              <Store className="h-5 w-5 text-violet-300" />
+              <Store className="h-5 w-5 text-text-secondary" />
             )}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-white">{loja.nome}</p>
-            <p className="text-xs text-white/50">Pedido #{senha}</p>
+            <p className="truncate text-sm font-bold uppercase text-text-primary">{loja.nome}</p>
+            <p className="text-xs text-text-muted">Pedido #{senha}</p>
           </div>
         </div>
       )}
 
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <Link
-          to={`/menu/${encodeURIComponent(lojaPublicKey)}`}
-          className="text-sm text-violet-300/90 underline"
-        >
-          Cardápio
-        </Link>
-        <div
-          className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${
-            socketStatus === 'connected'
-              ? 'border-emerald-500/35 bg-emerald-500/12 text-emerald-200'
-              : socketStatus === 'connecting'
-                ? 'border-amber-500/30 bg-amber-500/10 text-amber-100'
-                : 'border-white/15 bg-white/[0.06] text-white/45'
-          }`}
-        >
-          <Radio className="h-3 w-3" />
-          {socketStatus === 'connected'
-            ? 'Ao vivo'
-            : socketStatus === 'connecting'
-              ? 'Conectando…'
-              : 'Offline'}
+      {/* HERO: Acompanhamento do pedido — senha + status badge + ícone à direita + total */}
+      <div className="relative mb-5 overflow-hidden rounded-card border border-accent-magenta/30 bg-bg-surface p-5 shadow-glow-pink">
+        <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-accent-magenta/25 blur-3xl" aria-hidden />
+        <div className="pointer-events-none absolute -bottom-20 -left-10 h-40 w-40 rounded-full bg-accent-purple/25 blur-3xl" aria-hidden />
+        <div className="relative flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-accent-magenta">
+              Acompanhamento do pedido
+            </p>
+            <p className="mt-1 text-6xl font-black leading-none tabular-nums tracking-tight text-text-primary">
+              {senha}
+            </p>
+            <p className="mt-1 text-[11px] uppercase tracking-wider text-text-muted">Senha do pedido</p>
+            {!pedidoCanceladoPelaLoja && (
+              <span className="mt-3 inline-flex items-center gap-1.5 rounded-pill bg-cta px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-white shadow-cta">
+                {statusLabel}
+              </span>
+            )}
+          </div>
+          <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-pill bg-bg-raised ring-2 ring-accent-magenta/40">
+            <HeroIcon className="h-9 w-9 text-accent-magenta" strokeWidth={2} />
+          </div>
+        </div>
+        <div className="relative mt-4 flex items-end justify-between border-t border-bg-border pt-3">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-text-secondary">Total</span>
+          <span className="text-2xl font-black tabular-nums text-price">{formatBrl(pedido.valorTotal)}</span>
         </div>
       </div>
 
-      <div className="mb-6 rounded-2xl border border-white/10 bg-white/[0.05] p-4">
-        <p className="text-xs font-medium uppercase tracking-wider text-white/40">Senha do pedido</p>
-        <p className="mt-1 text-4xl font-black tabular-nums tracking-tight text-white">{senha}</p>
-        <p className="mt-2 text-sm text-white/50">Total {formatBrl(pedido.valorTotal)}</p>
-      </div>
-
       {pedidoCanceladoPelaLoja && (
-        <div
-          className="mb-6 rounded-2xl border border-red-500/40 bg-red-950/40 p-4 text-red-50"
-          role="alert"
-        >
-          <p className="text-sm font-semibold leading-snug">{textoCancelamento}</p>
+        <div className="mb-5 rounded-card border border-danger/45 bg-danger/15 p-4" role="alert">
+          <p className="text-sm font-bold uppercase leading-snug text-danger">{textoCancelamento}</p>
           {pedido.motivoCancelamentoResumo && (
-            <p className="mt-2 text-xs leading-relaxed text-red-100/85">
+            <p className="mt-2 text-xs leading-relaxed text-text-secondary">
               Motivo informado: {pedido.motivoCancelamentoResumo}
             </p>
           )}
         </div>
       )}
 
-      <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-white/45">
-        Acompanhe o status
-      </h2>
-
-      {/* Stepper: timeline vertical com animação no passo atual */}
+      {/* TIMELINE HORIZONTAL: 4 etapas com ícones, linha de progresso conectando */}
       {!pedidoCanceladoPelaLoja && (
-      <div className="relative mb-8 pl-2">
-               <div
-          className="absolute bottom-4 left-[1.15rem] top-4 w-px bg-gradient-to-b from-violet-500/50 via-white/15 to-emerald-500/40"
-          aria-hidden
-        />
-        <ol className="relative space-y-6">
-          {steps.map((step, index) => {
-            const concluido = index < stepAtivo;
-            const atual = index === stepAtivo;
-            const futuro = index > stepAtivo;
-
-            return (
-              <li key={step.id} className="relative flex gap-4 pl-1">
-                <div
-                  className={`relative z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 transition-all duration-500 ease-out ${
-                    concluido
-                      ? 'border-emerald-400/70 bg-emerald-500/25 text-emerald-100'
-                      : atual
-                        ? 'scale-110 border-violet-400/80 bg-violet-500/30 text-white shadow-[0_0_24px_rgba(139,92,246,0.45)] ring-2 ring-violet-400/50 ring-offset-2 ring-offset-[#060816]'
-                        : 'border-white/15 bg-[#0a1020]/90 text-white/35'
-                  }`}
-                >
-                  {concluido ? (
-                    <Check className="h-4 w-4" strokeWidth={2.5} />
-                  ) : (
-                    <span className="text-sm font-bold tabular-nums">{index + 1}</span>
-                  )}
-                </div>
-                <div
-                  className={`min-w-0 pt-0.5 transition-opacity duration-300 ${
-                    futuro ? 'opacity-45' : 'opacity-100'
-                  }`}
-                >
-                  <p
-                    className={`font-semibold ${
-                      atual ? 'text-violet-100' : concluido ? 'text-white' : 'text-white/55'
-                    }`}
-                  >
-                    {step.titulo}
-                  </p>
-                  <p className="text-sm text-white/45">{step.subtitulo}</p>
-                  {atual && (
-                    <p className="mt-1.5 animate-pulse text-xs font-medium text-violet-300/90">
-                      Etapa atual — atualizamos automaticamente
+        <section
+          id="tracking-timeline"
+          className="mb-5 rounded-card border border-bg-border bg-bg-surface p-5 shadow-card"
+        >
+          <h2 className="mb-5 text-xs font-semibold uppercase tracking-wider text-text-secondary">
+            Acompanhe o status
+          </h2>
+          <div className="relative">
+            <div
+              className="absolute left-[12.5%] right-[12.5%] top-5 h-[2px] rounded-pill bg-bg-border"
+              aria-hidden
+            />
+            <div
+              className="absolute left-[12.5%] top-5 h-[2px] rounded-pill bg-progress transition-all duration-700"
+              style={{
+                width: steps.length > 1 ? `${(stepAtivo / (steps.length - 1)) * 75}%` : '0%',
+              }}
+              aria-hidden
+            />
+            <ol className="relative flex items-start justify-between">
+              {steps.map((step, index) => {
+                const concluido = index < stepAtivo;
+                const atual = index === stepAtivo;
+                const Icon = STEP_ICONS[step.id] ?? Check;
+                return (
+                  <li key={step.id} className="flex flex-1 flex-col items-center px-1">
+                    <div
+                      className={`relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all duration-500 ease-out ${
+                        concluido
+                          ? 'bg-cta text-white shadow-cta'
+                          : atual
+                            ? 'scale-110 bg-cta text-white shadow-glow-pink ring-2 ring-accent-magenta'
+                            : 'border-2 border-bg-border bg-bg-raised text-text-muted'
+                      }`}
+                    >
+                      {concluido ? (
+                        <Check className="h-5 w-5" strokeWidth={3} />
+                      ) : (
+                        <Icon className="h-4 w-4" strokeWidth={2.4} />
+                      )}
+                      {atual && (
+                        <span
+                          className="pointer-events-none absolute inset-0 animate-ping rounded-full bg-accent-magenta/30"
+                          aria-hidden
+                        />
+                      )}
+                    </div>
+                    <p
+                      className={`mt-2 max-w-[6rem] text-center text-[10px] font-bold uppercase leading-tight tracking-wider ${
+                        atual
+                          ? 'text-accent-magenta'
+                          : concluido
+                            ? 'text-text-primary'
+                            : 'text-text-muted'
+                      }`}
+                    >
+                      {step.titulo}
                     </p>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ol>
-      </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
+          <p className="mt-4 text-center text-[11px] text-text-muted">
+            Atualizamos automaticamente quando a loja avança o status.
+          </p>
+        </section>
       )}
 
-      <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-white/80">
-          <Package className="h-4 w-4 text-violet-300" />
-          Itens do pedido
+      {!pedidoCanceladoPelaLoja && (
+        <div className="mb-5 flex items-start gap-3 rounded-card border border-price/30 bg-price/[0.08] p-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-pill bg-price">
+            <Check className="h-5 w-5 text-bg-base" strokeWidth={3} />
+          </div>
+          <div className="min-w-0 flex-1 pt-0.5">
+            <p className="text-sm font-black uppercase text-price">Recebemos seu pedido!</p>
+            <p className="mt-0.5 text-xs leading-snug text-text-secondary">
+              {ehRetirada
+                ? 'Estamos preparando tudo com muito carinho — venha retirar quando estiver pronto.'
+                : 'Estamos preparando tudo com muito carinho.'}
+            </p>
+          </div>
+        </div>
+      )}
+
+      <section className="mb-4 rounded-card border border-bg-border bg-bg-surface p-5 shadow-card">
+        <h3 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-text-secondary">
+          <Package className="h-3.5 w-3.5 text-accent-purple" />
+          Seu pedido
         </h3>
         <ul className="space-y-0 text-sm">
           {pedido.itens.map((it, i) => (
             <li
               key={i}
-              className={`flex flex-col justify-between gap-1 py-2.5 text-white/85 ${
-                i < pedido.itens.length - 1 ? 'border-b border-white/5' : ''
+              className={`flex flex-col gap-1 py-3 ${
+                i < pedido.itens.length - 1 ? 'border-b border-bg-border' : ''
               }`}
             >
-              <span className="min-w-0 flex items-start gap-2">
-                <span className="font-semibold tabular-nums text-violet-200">{it.quantidade}×</span>
-                <span className="leading-tight">{it.nome}</span>
+              <span className="flex min-w-0 items-start gap-2">
+                <span className="inline-flex h-6 min-w-[1.75rem] shrink-0 items-center justify-center rounded-pill bg-accent-purple/15 px-1.5 text-[12px] font-black tabular-nums text-accent-purple">
+                  {it.quantidade}×
+                </span>
+                <span className="font-semibold uppercase leading-snug text-text-primary">{it.nome}</span>
               </span>
               {it.descricao && (
-                <span className="text-[10px] italic leading-tight text-slate-400 ml-6 mt-0.5">
+                <span className="ml-9 text-[11px] italic leading-snug text-text-muted">
                   {it.descricao}
                 </span>
               )}
@@ -426,23 +530,44 @@ export function DeliveryTrackingPage() {
       </section>
 
       {ehRetiradaPedido(pedido.tipoPedido) && (
-        <section className="mt-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-          <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-white/80">
-            <MapPin className="h-4 w-4 text-violet-300" />
+        <section className="mb-4 rounded-card border border-bg-border bg-bg-surface p-5 shadow-card">
+          <h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-text-secondary">
+            <MapPin className="h-3.5 w-3.5 text-accent-purple" />
             Retirada
           </h3>
-          <p className="text-sm leading-relaxed text-white/70">Retirada no balcão — endereço não se aplica.</p>
+          <p className="text-sm leading-relaxed text-text-secondary">
+            Retirada no balcão — endereço não se aplica.
+          </p>
         </section>
       )}
       {!ehRetiradaPedido(pedido.tipoPedido) && pedido.enderecoEntrega && (
-        <section className="mt-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-          <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-white/80">
-            <MapPin className="h-4 w-4 text-emerald-300" />
-            Entrega
+        <section className="mb-4 rounded-card border border-bg-border bg-bg-surface p-5 shadow-card">
+          <h3 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-text-secondary">
+            <MapPin className="h-3.5 w-3.5 text-price" />
+            Endereço de entrega
           </h3>
-          <p className="text-sm leading-relaxed text-white/70">{pedido.enderecoEntrega}</p>
+          <p className="text-sm leading-relaxed text-text-secondary">{pedido.enderecoEntrega}</p>
         </section>
       )}
+
+      <div className="mt-6 flex flex-col gap-3">
+        {!pedidoCanceladoPelaLoja && (
+          <button
+            type="button"
+            onClick={scrollTimelineToView}
+            className="flex min-h-[3.25rem] w-full items-center justify-center gap-2 rounded-pill bg-cta px-4 text-base font-bold uppercase tracking-wide text-white shadow-cta transition-all duration-200 hover:bg-cta-hover active:scale-[0.98]"
+          >
+            <Package className="h-5 w-5" />
+            Acompanhar pedido
+          </button>
+        )}
+        <Link
+          to={`/menu/${encodeURIComponent(lojaPublicKey)}`}
+          className="flex min-h-[3rem] w-full items-center justify-center gap-2 rounded-pill border-2 border-accent-magenta px-4 text-sm font-bold uppercase tracking-wide text-text-primary transition hover:bg-accent-magenta/10 active:scale-[0.99]"
+        >
+          Fazer outro pedido
+        </Link>
+      </div>
     </div>
   );
 }

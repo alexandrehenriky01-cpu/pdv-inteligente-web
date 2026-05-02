@@ -59,6 +59,7 @@ import {
 } from '../../services/tefCncFlow';
 import { getHardwareAgent } from '../../services/hardwareAgent';
 import { useCep } from '../../hooks/useCep';
+import { PixPagamentoModal } from '../pix/components/PixPagamentoModal';
 import type {
   ClienteEntregaPdv,
   ComposicaoSaborSnapshot,
@@ -499,6 +500,12 @@ export function PdvFoodService() {
   const [finalizando, setFinalizando] = useState(false);
   const [tefFoodBusy, setTefFoodBusy] = useState(false);
   const [mesaSyncBusy, setMesaSyncBusy] = useState(false);
+
+  // PIX modal — abre após criação da venda quando há pagamento PIX
+  const [pixModalOpen, setPixModalOpen] = useState(false);
+  const [pixVendaId, setPixVendaId] = useState<string | null>(null);
+  const [pixValorVenda, setPixValorVenda] = useState<number | undefined>(undefined);
+  const [pixConfirmado, setPixConfirmado] = useState(false);
 
   const [pendentesRecebimentoBalcao, setPendentesRecebimentoBalcao] = useState<
     PendenteRecebimentoBalcaoPdv[]
@@ -1722,7 +1729,7 @@ export function PdvFoodService() {
       }
 
       const resVenda = await api.post<{
-        venda?: { id: string };
+        venda?: { id: string; valorTotal?: number | string };
         id?: string;
         pacoteImpressaoPos?: PacoteImpressaoPosPdv | null;
         auryaCorrecoesTributarias?: { nomeProduto: string; cstAnterior: string; csosnNovo: string }[];
@@ -1731,6 +1738,21 @@ export function PdvFoodService() {
           'Idempotency-Key': crypto.randomUUID(),
         },
       });
+
+      // Detecta pagamento PIX e abre modal de acompanhamento (não bloqueia impressão/fiscal)
+      const temPagamentoPix = pagamentosFinais.some(
+        (p) => String(p.tipoPagamento ?? '').toUpperCase() === 'PIX'
+      );
+      const novaVendaId = resVenda.data.venda?.id ?? resVenda.data.id ?? null;
+      const valorPixVenda = pagamentosFinais
+        .filter((p) => String(p.tipoPagamento ?? '').toUpperCase() === 'PIX')
+        .reduce((acc, p) => acc + Number(p.valor), 0);
+      if (temPagamentoPix && novaVendaId && !balcaoCozinha && !deliveryCozinhaPagarEntrega) {
+        setPixVendaId(novaVendaId);
+        setPixValorVenda(valorPixVenda > 0 ? valorPixVenda : undefined);
+        setPixConfirmado(false);
+        setPixModalOpen(true);
+      }
 
       if (tefIdsSnapshot.length > 0) {
         try {
@@ -3241,6 +3263,62 @@ export function PdvFoodService() {
           });
         }}
       />
+
+      {pixVendaId && (
+        <PixPagamentoModal
+          open={pixModalOpen}
+          vendaId={pixVendaId}
+          valor={pixValorVenda}
+          onClose={() => {
+            // Se já confirmou, limpa tudo. Caso contrário, mantém o badge persistente
+            setPixModalOpen(false);
+            if (pixConfirmado) {
+              setPixVendaId(null);
+              setPixValorVenda(undefined);
+              setPixConfirmado(false);
+            }
+          }}
+          onPago={() => {
+            setPixConfirmado(true);
+            toast.success('Pagamento PIX confirmado!', { toastId: 'pix-pdv-confirmado' });
+          }}
+        />
+      )}
+
+      {/* Indicador persistente: PIX pendente sem confirmação. Permite reabrir o modal. */}
+      {pixVendaId && !pixModalOpen && !pixConfirmado && (
+        <button
+          type="button"
+          onClick={() => setPixModalOpen(true)}
+          className="fixed bottom-4 right-4 z-40 inline-flex items-center gap-2 rounded-2xl border border-amber-500/40 bg-gradient-to-r from-amber-500/30 to-amber-600/30 px-4 py-3 text-sm font-bold text-amber-100 shadow-2xl backdrop-blur-md transition hover:brightness-110"
+          aria-label="Reabrir modal PIX pendente"
+        >
+          <QrCode className="h-4 w-4" />
+          <span>
+            PIX pendente — Venda{' '}
+            <span className="font-mono text-[11px]">#{pixVendaId.slice(0, 8)}</span>
+          </span>
+          <span className="ml-1 inline-flex h-2 w-2 animate-pulse rounded-full bg-amber-300" />
+        </button>
+      )}
+
+      {/* Indicador persistente: PIX confirmado mas modal fechado — discreto, em verde */}
+      {pixVendaId && !pixModalOpen && pixConfirmado && (
+        <button
+          type="button"
+          onClick={() => {
+            setPixVendaId(null);
+            setPixValorVenda(undefined);
+            setPixConfirmado(false);
+          }}
+          className="fixed bottom-4 right-4 z-40 inline-flex items-center gap-2 rounded-2xl border border-emerald-500/40 bg-emerald-500/15 px-4 py-3 text-sm font-bold text-emerald-100 shadow-2xl backdrop-blur-md transition hover:brightness-110"
+          aria-label="Dispensar indicador de PIX confirmado"
+        >
+          <Check className="h-4 w-4" />
+          PIX confirmado — Venda #{pixVendaId.slice(0, 8)}
+          <span className="ml-2 text-[10px] font-normal text-emerald-200/70">(clique para fechar)</span>
+        </button>
+      )}
 
     </Layout>
   );

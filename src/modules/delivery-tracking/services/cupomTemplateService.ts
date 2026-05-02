@@ -293,6 +293,8 @@ export async function criarRomaneio(
   nomeMotoboy?: string
 ): Promise<{
   sucesso: boolean;
+  /** Token público completo (`rom_…`) para link/QR. */
+  token?: string;
   uuid?: string;
   texto?: string;
   qrBase64?: string;
@@ -322,6 +324,7 @@ export async function criarRomaneio(
 
     return {
       sucesso: true,
+      token: typeof data.token === 'string' ? data.token : undefined,
       uuid: data.uuid,
       texto: data.texto,
       qrBase64: data.qrBase64,

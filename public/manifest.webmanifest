@@ -1,0 +1,39 @@
+{
+  "name": "Aurya Comanda Garçom",
+  "short_name": "Aurya Garçom",
+  "description": "App de comanda eletrônica do garçom (Aurya ERP).",
+  "start_url": "/#/garcom/mesas",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#060816",
+  "theme_color": "#08101f",
+  "lang": "pt-BR",
+  "categories": ["business", "productivity", "food"],
+  "icons": [
+    {
+      "src": "/Aurya.jpeg",
+      "sizes": "192x192",
+      "type": "image/jpeg",
+      "purpose": "any"
+    },
+    {
+      "src": "/Aurya.jpeg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any"
+    },
+    {
+      "src": "/logoAurya.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/logoAurya.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

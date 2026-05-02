@@ -53,6 +53,34 @@ export interface VendaDeliveryResposta {
   id: string;
   numeroPedido?: number | null;
   numeroVenda?: number;
+  valorTotal?: number;
+}
+
+export interface PixDeliveryDinamico {
+  tipo: 'DINAMICO';
+  txid: string;
+  qrCodeBase64: string;
+  pixCopiaCola: string;
+  expiresAt: string;
+}
+
+export interface PixDeliveryEstatico {
+  tipo: 'ESTATICO';
+  chavePix: string;
+  localCobrancaId: string | null;
+  mensagem: string;
+  /** BR Code estático completo (PNG base64) gerado pelo backend. */
+  qrCodeBase64?: string;
+  /** EMV TLV pronto para "copia e cola". */
+  pixCopiaCola?: string;
+}
+
+export type PixDeliveryResposta = PixDeliveryDinamico | PixDeliveryEstatico;
+
+export interface FinalizarPedidoDeliveryResposta {
+  mensagem: string;
+  venda: VendaDeliveryResposta;
+  pix?: PixDeliveryResposta | null;
 }
 
 export interface FinalizarPedidoDeliveryParams {
@@ -166,12 +194,12 @@ export function mensagemErroDeliveryApi(erro: unknown): string {
 
 export async function finalizarPedidoDelivery(
   body: NovaVendaDeliveryBody
-): Promise<{ mensagem: string; venda: VendaDeliveryResposta }> {
+): Promise<FinalizarPedidoDeliveryResposta> {
   console.log('PAYLOAD COMPLETO:', JSON.stringify(body, null, 2));
-  const { data } = await api.post<{
-    mensagem: string;
-    venda: VendaDeliveryResposta;
-  }>('/api/public/delivery/pedido', body);
+  const { data } = await api.post<FinalizarPedidoDeliveryResposta>(
+    '/api/public/delivery/pedido',
+    body
+  );
 
-  return { mensagem: data.mensagem, venda: data.venda };
+  return { mensagem: data.mensagem, venda: data.venda, pix: data.pix ?? null };
 }

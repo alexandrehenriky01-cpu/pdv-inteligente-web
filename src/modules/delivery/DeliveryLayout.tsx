@@ -128,36 +128,46 @@ export function DeliveryLayout() {
   };
 
   return (
-    <div className="min-h-screen bg-[#060816] text-white antialiased">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_50%_0%,rgba(139,92,246,0.1),transparent_45%)]" />
-      <div className="relative mx-auto flex min-h-screen w-full max-w-md flex-col shadow-[0_0_80px_rgba(0,0,0,0.35)]">
-        <header className="sticky top-0 z-50 border-b border-white/10 bg-[#08101f]/92 backdrop-blur-xl">
-          <div className="flex items-center gap-4 px-4 py-4">
-            <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-violet-500/50 bg-[#0b1324] shadow-[0_0_20px_rgba(139,92,246,0.3)]">
+    <div className="min-h-screen bg-bg-base text-text-primary font-sans antialiased">
+      <div className="relative mx-auto flex min-h-screen w-full max-w-md flex-col">
+        <header className="sticky top-0 z-50 bg-bg-base/95 backdrop-blur-xl border-b border-bg-border">
+          <div className="flex items-center gap-3 p-4">
+            <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full bg-bg-raised ring-1 ring-bg-border">
               {loja?.logoUrl ? (
-                <img src={loja.logoUrl} alt="" className="h-full w-full object-cover rounded-full" />
+                <img src={loja.logoUrl} alt="" className="h-full w-full object-cover" />
               ) : (
-                <Store className="h-8 w-8 text-violet-300" />
+                <div className="flex h-full w-full items-center justify-center">
+                  <Store className="h-6 w-6 text-text-secondary" />
+                </div>
               )}
             </div>
             <div className="min-w-0 flex-1">
-              <h1 className="truncate font-black text-2xl leading-tight text-white">
+              <h1 className="truncate text-base font-bold uppercase tracking-wide text-text-primary">
                 {carregandoLoja ? 'Carregando…' : loja?.nome ?? 'Delivery'}
               </h1>
-              <div className="mt-1 flex flex-wrap items-center gap-2">
+              <div className="mt-1 flex items-center gap-2 min-w-0">
                 {loja && (
                   <span
-                    className={`inline-flex rounded-full border px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${
-                      loja.aberto
-                        ? 'border-emerald-500/35 bg-emerald-500/15 text-emerald-200'
-                        : 'border-amber-500/35 bg-amber-500/12 text-amber-100'
+                    className={`inline-flex shrink-0 items-center gap-1 rounded-pill px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                      loja.aberto ? 'bg-price/15 text-price' : 'bg-danger/15 text-danger'
                     }`}
                   >
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full ${
+                        loja.aberto
+                          ? 'bg-price shadow-[0_0_8px_rgba(34,224,107,0.7)] animate-pulse'
+                          : 'bg-danger'
+                      }`}
+                      aria-hidden
+                    />
                     {loja.aberto ? 'Aberto' : 'Fechado'}
                   </span>
                 )}
+                {loja?.endereco && (
+                  <span className="truncate text-[11px] text-text-muted">{loja.endereco}</span>
+                )}
                 {!carregandoLoja && erroLoja && (
-                  <span className="text-[11px] text-red-300/90">{erroLoja}</span>
+                  <span className="truncate text-[11px] text-danger">{erroLoja}</span>
                 )}
               </div>
             </div>
@@ -167,6 +177,14 @@ export function DeliveryLayout() {
         <main className="min-h-0 flex-1">
           <Outlet context={ctx} />
         </main>
+
+        <footer className="border-t border-bg-border/40 px-4 py-3 text-center">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.25em] text-text-muted">
+            <span className="text-accent-purple">Aurya</span>
+            <span className="mx-1.5 text-bg-border">•</span>
+            Gestão de cardápio online
+          </p>
+        </footer>
       </div>
     </div>
   );

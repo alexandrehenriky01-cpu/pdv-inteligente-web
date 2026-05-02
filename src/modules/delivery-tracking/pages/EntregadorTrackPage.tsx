@@ -58,7 +58,7 @@ export function EntregadorTrackPage() {
     setErro(null);
 
     try {
-      const { data } = await api.get<RomaneioData>(`/api/vendas/gestao-food/public/romaneio/${token}`);
+      const { data } = await api.get<RomaneioData>(`/api/entregas/public/romaneio/${token}`);
 
       if (!data.sucesso) {
         setErro(data.error || 'Erro ao carregar romaneio');
@@ -84,7 +84,7 @@ export function EntregadorTrackPage() {
 
     try {
       const { data } = await api.post<{ sucesso: boolean; error?: string }>(
-        `/api/vendas/gestao-food/public/romaneio/${token}/entregar`,
+        `/api/entregas/public/romaneio/${token}/entregar`,
         { pedidoId }
       );
 

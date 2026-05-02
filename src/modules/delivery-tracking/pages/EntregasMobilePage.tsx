@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {
-  Map,
+  Map as MapIcon,
   CheckCircle,
   Package,
   User,
@@ -10,13 +10,12 @@ import {
   Navigation,
   Loader2,
   RefreshCw,
-  Clock,
-  ArrowRight,
   MessageCircle,
+  Car,
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { Layout } from '../../../components/Layout';
-import { gerarUrlGoogleMapsPorCoordenadas } from '../utils/googleMapsUtils';
+import type { RotaPublicaResponse } from '../types/rotaPublica.types';
 
 interface Parada {
   pedidoId: string;
@@ -28,6 +27,8 @@ interface Parada {
   valorReceber: number;
   observacoes?: string | null;
   status: 'PENDENTE' | 'ENTREGUE';
+  /** `ordemParada` do romaneio (API pública). */
+  ordemRomaneio?: number;
 }
 
 interface RomaneioData {
@@ -42,11 +43,6 @@ function formatCurrency(value: number): string {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-function formatTime(dateString: string): string {
-  const date = new Date(dateString);
-  return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-}
-
 function limparTelefone(telefone: string | null | undefined): string {
   if (!telefone) return '';
   return telefone.replace(/\D/g, '');
@@ -55,6 +51,7 @@ function limparTelefone(telefone: string | null | undefined): string {
 export function EntregasMobilePage() {
   const { token } = useParams<{ token: string }>();
   const [romaneio, setRomaneio] = useState<RomaneioData | null>(null);
+  const [rotaPublica, setRotaPublica] = useState<RotaPublicaResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
 
@@ -65,22 +62,55 @@ export function EntregasMobilePage() {
     }
 
     try {
-      const response = await fetch(`/api/public/romaneio/${token}`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      });
+      const [response, responseRota] = await Promise.all([
+        fetch(`/api/public/romaneio/${token}`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        }),
+        fetch(`/api/entregas/public/romaneio/${token}/rota-url`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ]);
 
       const data = await response.json();
 
       if (!response.ok || !data.sucesso) {
-        toast.error(data.error || 'Romaneio não encontrado');
+        toast.error(data.error || data.erro || 'Romaneio não encontrado');
+        setRotaPublica(null);
         return;
       }
 
-      setRomaneio(data.romaneio);
+      const nested = data.romaneio as
+        | {
+            token: string;
+            lojaNome: string;
+            paradas: Parada[];
+          }
+        | undefined;
+
+      if (nested?.token && nested.paradas) {
+        setRomaneio({
+          uuid: nested.token.startsWith('rom_')
+            ? nested.token.slice(4).toUpperCase()
+            : nested.token.toUpperCase(),
+          lojaNome: nested.lojaNome,
+          paradas: nested.paradas,
+        });
+      } else {
+        toast.error('Resposta do romaneio inválida');
+      }
+
+      const rotaJson = (await responseRota.json()) as RotaPublicaResponse;
+      if (responseRota.ok && rotaJson.sucesso) {
+        setRotaPublica(rotaJson);
+      } else {
+        setRotaPublica(null);
+      }
     } catch (e) {
       console.error('Erro ao carregar romaneio:', e);
       toast.error('Erro ao carregar romaneio');
+      setRotaPublica(null);
     } finally {
       setLoading(false);
     }
@@ -90,31 +120,46 @@ export function EntregasMobilePage() {
     void carregarRomaneio();
   }, [carregarRomaneio]);
 
-  const abrirRota = async (endereco: string) => {
-    if (!endereco) {
+  const sequenciaPorPedido = useMemo(() => {
+    const m = new Map<string, { ordemOtimizada: number; ordemOriginal: number }>();
+    rotaPublica?.sequenciaOtimizada?.forEach((s) => {
+      m.set(s.pedidoId, {
+        ordemOtimizada: s.ordemOtimizada,
+        ordemOriginal: s.ordemOriginal,
+      });
+    });
+    return m;
+  }, [rotaPublica]);
+
+  const rankPorRomaneio = useMemo(() => {
+    const m = new Map<string, number>();
+    const sorted = [...(romaneio?.paradas ?? [])].sort(
+      (a, b) => (a.ordemRomaneio ?? 0) - (b.ordemRomaneio ?? 0)
+    );
+    sorted.forEach((p, i) => {
+      m.set(p.pedidoId, i);
+    });
+    return m;
+  }, [romaneio?.paradas]);
+
+  const rankPorSequencia = useMemo(() => {
+    const m = new Map<string, number>();
+    rotaPublica?.sequenciaOtimizada?.forEach((s, i) => {
+      m.set(s.pedidoId, i);
+    });
+    return m;
+  }, [rotaPublica?.sequenciaOtimizada]);
+
+  /** Navegação pública por parada — sem JWT (link direto Waze). */
+  const abrirRotaParadaWaze = (endereco: string) => {
+    const linha = (endereco ?? '').trim();
+    if (!linha) {
       toast.error('Endereço não disponível');
       return;
     }
-    setLoadingAction('rota');
-    try {
-      const response = await fetch('/api/entregas/mapa/url', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('@PDVToken') || ''}`,
-        },
-        body: JSON.stringify({ destino: endereco }),
-      });
-      const data = await response.json();
-      if (data.url) {
-        window.open(data.url, '_blank', 'noopener,noreferrer');
-      }
-    } catch {
-      const fallbackUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(endereco)}`;
-      window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
-    } finally {
-      setLoadingAction(null);
-    }
+    const destino = encodeURIComponent(linha);
+    const wazeUrl = `https://www.waze.com/ul?q=${destino}&navigate=yes`;
+    window.open(wazeUrl, '_blank', 'noopener,noreferrer');
   };
 
   const abrirWhatsApp = (telefone: string | null, nomeCliente: string | null) => {
@@ -159,7 +204,16 @@ export function EntregasMobilePage() {
     }
   };
 
-  const pendentes = romaneio?.paradas.filter((p) => p.status === 'PENDENTE') || [];
+  const pendentes = useMemo(() => {
+    const raw = romaneio?.paradas.filter((p) => p.status === 'PENDENTE') || [];
+    const seq = rotaPublica?.sequenciaOtimizada;
+    if (!seq?.length) {
+      return [...raw].sort((a, b) => (a.ordemRomaneio ?? 0) - (b.ordemRomaneio ?? 0));
+    }
+    const rank = new Map(seq.map((s) => [s.pedidoId, s.ordemOtimizada] as const));
+    return [...raw].sort((a, b) => (rank.get(a.pedidoId) ?? 9999) - (rank.get(b.pedidoId) ?? 9999));
+  }, [romaneio?.paradas, rotaPublica?.sequenciaOtimizada]);
+
   const entregues = romaneio?.paradas.filter((p) => p.status === 'ENTREGUE') || [];
 
   const totalReceber = romaneio?.paradas
@@ -194,6 +248,34 @@ export function EntregasMobilePage() {
               <span className="text-lg font-black text-emerald-300">{formatCurrency(totalReceber)}</span>
             </div>
           )}
+
+          {romaneio && rotaPublica?.googleMapsUrl ? (
+            <div className="mt-3 grid grid-cols-1 gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  window.open(rotaPublica.googleMapsUrl, '_blank', 'noopener,noreferrer')
+                }
+                className="flex items-center justify-center gap-2 w-full rounded-xl bg-sky-600/40 hover:bg-sky-600/60 border border-sky-500/40 text-sky-100 text-xs font-black uppercase tracking-wide py-3 px-3 transition-colors"
+              >
+                <MapIcon className="w-4 h-4 shrink-0" />
+                Rota completa no Google Maps
+              </button>
+              {rotaPublica.wazeProximaEntregaUrl ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = rotaPublica.wazeProximaEntregaUrl;
+                    if (url) window.open(url, '_blank', 'noopener,noreferrer');
+                  }}
+                  className="flex items-center justify-center gap-2 w-full rounded-xl bg-violet-600/40 hover:bg-violet-600/60 border border-violet-500/40 text-violet-100 text-xs font-black uppercase tracking-wide py-3 px-3 transition-colors"
+                >
+                  <Car className="w-4 h-4 shrink-0" />
+                  Próxima entrega no Waze
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <div className="p-4 space-y-6">
@@ -232,17 +314,27 @@ export function EntregasMobilePage() {
                     </span>
                   </div>
                   <div className="space-y-4">
-                    {pendentes.map((parada, index) => (
-                      <ParadaCard
-                        key={parada.pedidoId}
-                        parada={parada}
-                        indice={index + 1}
-                        isLoading={loadingAction === parada.pedidoId}
-                        onAbrirRota={() => abrirRota(parada.endereco)}
-                        onWhatsApp={() => abrirWhatsApp(parada.clienteTelefone, parada.clienteNome)}
-                        onConfirmar={() => handleConfirmarEntrega(parada.pedidoId)}
-                      />
-                    ))}
+                    {pendentes.map((parada, index) => {
+                      const meta = sequenciaPorPedido.get(parada.pedidoId);
+                      const ordemExibir =
+                        meta?.ordemOtimizada ?? parada.ordemRomaneio ?? index + 1;
+                      const mostrarBadgeOtimizado =
+                        rotaPublica?.heuristicaRotaAtiva === true &&
+                        rankPorRomaneio.get(parada.pedidoId) !==
+                          rankPorSequencia.get(parada.pedidoId);
+                      return (
+                        <ParadaCard
+                          key={parada.pedidoId}
+                          parada={parada}
+                          indice={ordemExibir}
+                          mostrarBadgeOtimizado={mostrarBadgeOtimizado}
+                          isLoading={loadingAction === parada.pedidoId}
+                          onAbrirRota={() => abrirRotaParadaWaze(parada.endereco)}
+                          onWhatsApp={() => abrirWhatsApp(parada.clienteTelefone, parada.clienteNome)}
+                          onConfirmar={() => handleConfirmarEntrega(parada.pedidoId)}
+                        />
+                      );
+                    })}
                   </div>
                 </section>
               )}
@@ -282,6 +374,8 @@ export function EntregasMobilePage() {
 interface ParadaCardProps {
   parada: Parada;
   indice: number;
+  /** Quando a sequência sugerida difere da ordem do romaneio. */
+  mostrarBadgeOtimizado?: boolean;
   isLoading: boolean;
   isEntregue?: boolean;
   onAbrirRota?: () => void;
@@ -292,6 +386,7 @@ interface ParadaCardProps {
 function ParadaCard({
   parada,
   indice,
+  mostrarBadgeOtimizado,
   isLoading,
   isEntregue,
   onAbrirRota,
@@ -314,8 +409,13 @@ function ParadaCard({
             </div>
           )}
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="font-bold text-white">#{numeroPedido}</span>
+              {mostrarBadgeOtimizado ? (
+                <small className="text-amber-300/90 font-semibold uppercase tracking-wide">
+                  (otimizado)
+                </small>
+              ) : null}
             </div>
             <div className="flex items-center gap-2 mt-1">
               <User className="w-3 h-3 text-slate-400" />
@@ -367,11 +467,11 @@ function ParadaCard({
             <button
               type="button"
               disabled={isLoading}
-              onClick={() => void onAbrirRota?.()}
-              className="flex flex-col items-center gap-1 bg-sky-600/30 hover:bg-sky-600/50 border border-sky-500/30 text-sky-200 font-bold text-xs py-3 px-2 rounded-xl transition-all disabled:opacity-50"
+              onClick={() => onAbrirRota?.()}
+              className="flex flex-col items-center gap-1 bg-violet-600/30 hover:bg-violet-600/50 border border-violet-500/30 text-violet-200 font-bold text-xs py-3 px-2 rounded-xl transition-all disabled:opacity-50"
             >
-              <Map className="w-5 h-5" />
-              <span>Rota</span>
+              <Car className="w-5 h-5" />
+              <span>Waze</span>
             </button>
             <button
               type="button"

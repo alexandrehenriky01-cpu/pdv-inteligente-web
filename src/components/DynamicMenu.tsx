@@ -52,6 +52,7 @@ import {
   Pizza,
   ChefHat,
   Megaphone,
+  QrCode,
 } from 'lucide-react';
 import { useAuryaTheme } from '../theme/ThemeContext';
 import { isMenuFlatLinks, isMenuMacro, isMenuSection } from '../config/menuConfig';
@@ -109,6 +110,7 @@ const ICONS: Record<string, ElementType> = {
   Pizza,
   ChefHat,
   Megaphone,
+  QrCode,
 };
 
 function iconComponent(name: string): ElementType {
@@ -286,7 +288,7 @@ export function DynamicMenu({ usuario, sidebarCollapsed }: DynamicMenuProps) {
       centralAurya: prev.centralAurya || path.includes('/aurya'),
       estruturaNegocio:
         prev.estruturaNegocio ||
-        ['/produtos', '/categorias', '/embalagens', '/pessoas', '/equipe', '/permissoes', '/configuracoes-loja', '/layout-etiquetas', '/estacoes-trabalho', '/locais-cobranca', '/configuracao-caixas-pdv', '/configuracao-tef', '/balancas'].some((p) => path.includes(p)),
+        ['/produtos', '/categorias', '/embalagens', '/pessoas', '/equipe', '/permissoes', '/configuracoes-loja', '/layout-etiquetas', '/estacoes-trabalho', '/locais-cobranca', '/configuracao-caixas-pdv', '/configuracao-tef', '/configuracao-pix', '/balancas'].some((p) => path.includes(p)),
       operacaoVendas:
         prev.operacaoVendas ||
         ['/frente-caixa', '/self-checkout', '/pdv-food', '/cardapio/gestao', '/gestao-food', '/garcom', '/vendas/campanhas-promocionais', '/vendas/gestao-turnos-caixa', '/vendas/gestao-vendas', '/kds', '/kds-chamada-balcao', '/vendas/gestao-delivery', '/entregas/mobile', '/comanda-mobile'].some((p) => path.includes(p)),
