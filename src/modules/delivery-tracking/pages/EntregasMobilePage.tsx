@@ -16,6 +16,13 @@ import {
 import { toast } from 'react-toastify';
 import { Layout } from '../../../components/Layout';
 import type { RotaPublicaResponse } from '../types/rotaPublica.types';
+import { resolveApiBaseUrl } from '../../../services/apiBaseUrl';
+
+// URL absoluta para o host da API. Em produção o frontend está em
+// `app.aurya...` e a API em domínio separado, então fetch com path
+// relativo bate no host errado e retorna 405/404. Idêntico ao fix
+// aplicado em criarRomaneio (cupomTemplateService.ts).
+const API_BASE = resolveApiBaseUrl().replace(/\/$/, '');
 
 interface Parada {
   pedidoId: string;
@@ -63,11 +70,11 @@ export function EntregasMobilePage() {
 
     try {
       const [response, responseRota] = await Promise.all([
-        fetch(`/api/public/romaneio/${token}`, {
+        fetch(`${API_BASE}/api/public/romaneio/${token}`, {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
         }),
-        fetch(`/api/entregas/public/romaneio/${token}/rota-url`, {
+        fetch(`${API_BASE}/api/entregas/public/romaneio/${token}/rota-url`, {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
         }),
@@ -179,7 +186,7 @@ export function EntregasMobilePage() {
 
     setLoadingAction(pedidoId);
     try {
-      const response = await fetch(`/api/public/romaneio/${token}/entregar`, {
+      const response = await fetch(`${API_BASE}/api/public/romaneio/${token}/entregar`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

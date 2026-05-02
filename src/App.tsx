@@ -139,6 +139,11 @@ function App() {
           <Route path="checkout" element={<DeliveryCheckoutPage />} />
           <Route path="pedido/:pedidoId" element={<DeliveryTrackingPage />} />
         </Route>
+
+        {/* QR público do romaneio: o token na URL valida acesso (entregador
+            não está logado no ERP). NÃO mover para dentro de PrivateRoute. */}
+        <Route path="/entregas/mobile/:token" element={<EntregasMobilePage />} />
+        <Route path="/track/:token" element={<EntregadorTrackPage />} />
         
         {/* 👑 ROTAS SAAS (ACESSO RESTRITO AO SUPER_ADMIN) */}
         <Route element={<PrivateRoute rolesPermitidas={['SUPER_ADMIN', 'SUPORTE_MASTER']} />}>
@@ -217,9 +222,7 @@ function App() {
           <Route path="/vendas/gestao-vendas" element={<GestaoVendasPage />} />
           <Route path="/gestao-food" element={<GestaoPedidosFoodPage />} />
           <Route path="/vendas/gestao-delivery" element={<GestaoDeliveryPage />} />
-          <Route path="/entregas/mobile/:token" element={<EntregasMobilePage />} />
           <Route path="/entregas/mobile" element={<EntregasMobilePage />} />
-          <Route path="/track/:token" element={<EntregadorTrackPage />} />
           <Route
             path="/cardapio/gestao"
             element={
