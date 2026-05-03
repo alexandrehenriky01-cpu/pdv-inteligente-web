@@ -39,7 +39,7 @@ function triToPayload(s: TriBool): boolean | null {
   return s === 'true';
 }
 
-const API_BASE = '/api/producao/configuracoes/estacoes-trabalho';
+const API_BASE = '/api/estacoes-trabalho';
 /** Lista de layouts cadastrados na loja (rota registrada em `routes.ts`). */
 const LAYOUT_ETIQUETAS_API = '/api/layout-etiquetas';
 

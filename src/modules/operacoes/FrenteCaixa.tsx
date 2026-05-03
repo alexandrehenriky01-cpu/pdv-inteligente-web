@@ -31,6 +31,7 @@ import {
   getTerminalFiscalPdv,
   montarUrlVerificarCaixa,
   persistirContextoPosAberturaCaixa,
+  persistirEstacaoTrabalhoId,
   persistirModoPdvLocal,
   persistirTerminalFiscalPdv,
   getModoPdvLocalFallback,
@@ -280,15 +281,20 @@ export function FrenteCaixa() {
       try {
         const { data } = await api.get<{
           success?: boolean;
-          data?: { tipoTerminal?: string; modoPdv?: string };
+          data?: { id?: string; tipoTerminal?: string; modoPdv?: string };
         }>('/api/estacoes-trabalho/meu-terminal');
         if (cancelled) return;
         const row = data?.data;
+        const idAutoritativo = typeof row?.id === 'string' ? row.id.trim() : '';
+        if (idAutoritativo && idAutoritativo !== estId) {
+          persistirEstacaoTrabalhoId(idAutoritativo);
+        }
+        const idEfetivo = idAutoritativo || estId;
         const tipo: 'PDV' | 'TOTEM' = row?.tipoTerminal === 'TOTEM' ? 'TOTEM' : 'PDV';
         const modoPdv: 'NFCE' | 'CONSUMIDOR' =
           row?.modoPdv === 'CONSUMIDOR' ? 'CONSUMIDOR' : 'NFCE';
         setPerfilTerminalPdv({ tipo, modoPdv });
-        if (tipo === 'PDV') persistirModoPdvLocal(estId, modoPdv);
+        if (tipo === 'PDV') persistirModoPdvLocal(idEfetivo, modoPdv);
       } catch {
         if (cancelled) return;
         const fb = getModoPdvLocalFallback(estId);

@@ -10,13 +10,17 @@ import {
   getEstacaoTrabalhoIdPdv,
   getModoPdvLocalFallback,
   getSessaoCaixaIdPdv,
+  persistirCaixaFiscalId,
+  persistirEstacaoTrabalhoId,
   persistirModoPdvLocal,
+  persistirSessaoCaixaIdPdv,
 } from '../../utils/estacaoWorkstationStorage';
 import {
   Search, ShoppingCart, CreditCard, Banknote, QrCode,
   Trash2, Check, User, UtensilsCrossed, Monitor,
   Bike, Plus, Minus, Tag, Coffee, Pizza, AlertCircle, RefreshCw,
   Users, Calculator, Bot, ShieldAlert, XCircle, Keyboard, Printer, ClipboardList, MapPin,
+  ChevronUp, Pencil,
 } from 'lucide-react';
 import { AxiosError } from 'axios';
 import { toast } from 'react-toastify';
@@ -83,6 +87,8 @@ type FinalizarFoodOptions = {
   balcaoEnviarCozinhaSemPagamento?: boolean;
   /** Entrega: envia à cozinha com pagamento na entrega (pendente), sem modal de cobrança. */
   deliveryEnviarCozinhaPagarNaEntrega?: boolean;
+  /** Override da forma de pagamento prevista na entrega (evita race com setState do select). */
+  formaPagamentoEntregaOverride?: FormaPagamentoFood;
 };
 
 type PdvFoodCartLine = CartItem & {
@@ -158,6 +164,17 @@ const OPCOES_FORMA_PAGAMENTO_PREVISTA_ENTREGA: { value: FormaPagamentoFood; labe
   { value: 'PIX', label: 'PIX' },
   { value: 'CARTAO_CREDITO', label: 'Cartão de crédito' },
   { value: 'CARTAO_DEBITO', label: 'Cartão de débito' },
+];
+
+const OPCOES_PAGAR_NA_ENTREGA_PDV: {
+  value: FormaPagamentoFood;
+  label: string;
+  precisaMaquininha: boolean;
+}[] = [
+  { value: 'DINHEIRO', label: 'Dinheiro', precisaMaquininha: false },
+  { value: 'PIX', label: 'PIX', precisaMaquininha: false },
+  { value: 'CARTAO_CREDITO', label: 'Cartão crédito', precisaMaquininha: true },
+  { value: 'CARTAO_DEBITO', label: 'Cartão débito', precisaMaquininha: true },
 ];
 
 function readImprimirAutomaticoInitial(): boolean {
@@ -391,9 +408,30 @@ function rotuloLinhaFoodPdv(line: PdvFoodCartLine): { titulo: string; subtitulo?
   const tNome = line.itemCardapioTamanhoId
     ? line.produto.tamanhos.find((t) => t.id === line.itemCardapioTamanhoId)?.nome
     : undefined;
-  const nomesSabores = (line.saboresItemCardapioIds ?? [])
-    .map((sid) => line.produto.saboresOpcoes?.find((s) => s.id === sid)?.nome.trim())
-    .filter((n): n is string => Boolean(n && n.length > 0));
+  const ids = line.saboresItemCardapioIds ?? [];
+  const opcoes = line.produto.saboresOpcoes ?? [];
+  const nomesResolvidos: string[] = [];
+  for (const sid of ids) {
+    const hit = opcoes.find((s) => s.id === sid)?.nome?.trim();
+    if (hit) nomesResolvidos.push(hit);
+  }
+  if (
+    line.produto.tipoItem === 'PIZZA' &&
+    line.produto.permiteMultiplosSabores === true &&
+    nomesResolvidos.length < ids.length
+  ) {
+    const baseNome = line.produto.nome.trim();
+    if (baseNome && !nomesResolvidos.some((n) => n.toLowerCase() === baseNome.toLowerCase())) {
+      nomesResolvidos.unshift(baseNome);
+    }
+  }
+  const seen = new Set<string>();
+  const nomesSabores = nomesResolvidos.filter((n) => {
+    const k = n.toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
   return rotuloLinhaFood({
     tipoItem: line.produto.tipoItem,
     permiteMultiplosSabores: line.produto.permiteMultiplosSabores,
@@ -435,6 +473,34 @@ export function PdvFoodService() {
     ...CLIENTE_ENTREGA_PDV_INICIAL,
     endereco: { ...CLIENTE_ENTREGA_PDV_INICIAL.endereco },
   }));
+  const [enderecoExpandido, setEnderecoExpandido] = useState(true);
+  const enderecoMinimoPreenchido = useMemo(() => {
+    const c = clienteEntregaPdv;
+    return (
+      c.nomeCompleto.trim().length > 0 &&
+      c.whatsapp.trim().length > 0 &&
+      c.endereco.cep.replace(/\D/g, '').length === 8 &&
+      c.endereco.rua.trim().length > 0 &&
+      c.endereco.numero.trim().length > 0 &&
+      c.endereco.bairro.trim().length > 0 &&
+      c.endereco.cidade.trim().length > 0 &&
+      c.endereco.uf.trim().length === 2
+    );
+  }, [clienteEntregaPdv]);
+  const resumoEnderecoEntrega = useMemo(() => {
+    const c = clienteEntregaPdv;
+    const partes: string[] = [];
+    const r = c.endereco.rua.trim();
+    const n = c.endereco.numero.trim();
+    if (r) partes.push(n ? `${r}, ${n}` : r);
+    const b = c.endereco.bairro.trim();
+    if (b) partes.push(b);
+    const cd = c.endereco.cidade.trim();
+    const uf = c.endereco.uf.trim();
+    if (cd && uf) partes.push(`${cd}/${uf}`);
+    else if (cd) partes.push(cd);
+    return partes.join(' · ');
+  }, [clienteEntregaPdv]);
   const [taxaEntregaReais, setTaxaEntregaReais] = useState(0);
   const [formaPagamentoPrevistaEntrega, setFormaPagamentoPrevistaEntrega] =
     useState<FormaPagamentoFood>('DINHEIRO');
@@ -695,15 +761,20 @@ export function PdvFoodService() {
       try {
         const { data } = await api.get<{
           success?: boolean;
-          data?: { tipoTerminal?: string; modoPdv?: string };
+          data?: { id?: string; tipoTerminal?: string; modoPdv?: string };
         }>('/api/estacoes-trabalho/meu-terminal');
         if (cancelled) return;
         const row = data?.data;
+        const idAutoritativo = typeof row?.id === 'string' ? row.id.trim() : '';
+        if (idAutoritativo && idAutoritativo !== estId) {
+          persistirEstacaoTrabalhoId(idAutoritativo);
+        }
+        const idEfetivo = idAutoritativo || estId;
         const tipo: 'PDV' | 'TOTEM' = row?.tipoTerminal === 'TOTEM' ? 'TOTEM' : 'PDV';
         const modoPdv: 'NFCE' | 'CONSUMIDOR' =
           row?.modoPdv === 'CONSUMIDOR' ? 'CONSUMIDOR' : 'NFCE';
         setPerfilTerminalPdv({ tipo, modoPdv });
-        if (tipo === 'PDV') persistirModoPdvLocal(estId, modoPdv);
+        if (tipo === 'PDV') persistirModoPdvLocal(idEfetivo, modoPdv);
       } catch {
         if (cancelled) return;
         const fb = getModoPdvLocalFallback(estId);
@@ -980,6 +1051,18 @@ export function PdvFoodService() {
     fecharModalProduto();
   };
 
+  const finalizarPizzaComposicaoPdv = async (ctx: PizzaComposicaoPdvState) => {
+    await confirmarModalProduto({
+      produto: ctx.produtoBase,
+      quantidade: ctx.quantidade,
+      adicionais: { ...ctx.adicionais },
+      observacao: ctx.observacao,
+      total: 0,
+      itemCardapioTamanhoId: ctx.itemCardapioTamanhoId,
+      saboresItemCardapioIds: [...ctx.saboresItemCardapioIds],
+    });
+  };
+
   const adicionarAoCarrinho = async (produto: TotemMockProduto) => {
     if (pizzaEmComposicao) {
       const base = pizzaEmComposicao.produtoBase;
@@ -992,9 +1075,6 @@ export function PdvFoodService() {
       const sabores = [...pizzaEmComposicao.saboresItemCardapioIds];
       if (sabores.includes(novoSabor)) {
         toast.info('Este sabor já está na pizza.');
-        setLinhaEdicao(null);
-        setProdutoModal(pizzaEmComposicao.produtoBase);
-        setModalProdutoAberto(true);
         return;
       }
       if (sabores.length >= maxS) {
@@ -1004,9 +1084,6 @@ export function PdvFoodService() {
       const tamanhoBaseId = String(pizzaEmComposicao.itemCardapioTamanhoId ?? '').trim();
       if (tamanhoBaseId && !saborDaPizzaSuportaTamanho(base, novoSabor, tamanhoBaseId)) {
         toast.error('Este sabor não possui o tamanho selecionado para a pizza.');
-        setLinhaEdicao(null);
-        setProdutoModal(pizzaEmComposicao.produtoBase);
-        setModalProdutoAberto(true);
         return;
       }
       const next: PizzaComposicaoPdvState = {
@@ -1020,9 +1097,13 @@ export function PdvFoodService() {
         totalSabores: next.saboresItemCardapioIds.length,
       });
       setPizzaEmComposicao(next);
-      setLinhaEdicao(null);
-      setProdutoModal(next.produtoBase);
-      setModalProdutoAberto(true);
+      if (next.saboresItemCardapioIds.length >= next.maxSabores) {
+        await finalizarPizzaComposicaoPdv(next);
+        return;
+      }
+      toast.info(
+        `Sabor adicionado (${next.saboresItemCardapioIds.length}/${next.maxSabores}). Toque em outro sabor ou finalize a pizza.`
+      );
       return;
     }
 
@@ -1549,6 +1630,8 @@ export function PdvFoodService() {
     async (opts?: FinalizarFoodOptions) => {
     const balcaoCozinha = opts?.balcaoEnviarCozinhaSemPagamento === true;
     const deliveryCozinhaPagarEntrega = opts?.deliveryEnviarCozinhaPagarNaEntrega === true;
+    const formaEntregaEfetiva: FormaPagamentoFood =
+      opts?.formaPagamentoEntregaOverride ?? formaPagamentoPrevistaEntrega;
     if (balcaoCozinha && modoAtendimento !== 'BALCAO') return;
     if (deliveryCozinhaPagarEntrega && modoAtendimento !== 'DELIVERY') return;
 
@@ -1569,7 +1652,7 @@ export function PdvFoodService() {
 
     if (deliveryCozinhaPagarEntrega) {
       const previstaOk = OPCOES_FORMA_PAGAMENTO_PREVISTA_ENTREGA.some(
-        (o) => o.value === formaPagamentoPrevistaEntrega
+        (o) => o.value === formaEntregaEfetiva
       );
       if (!previstaOk) {
         toast.error('Selecione a forma de pagamento prevista para pagamento na entrega.');
@@ -1653,7 +1736,7 @@ export function PdvFoodService() {
       const formaPagamentoResumo =
         modoAtendimento === 'DELIVERY'
           ? pagPosteriorFood
-            ? rotuloFormaPagamentoFood(formaPagamentoPrevistaEntrega)
+            ? rotuloFormaPagamentoFood(formaEntregaEfetiva)
             : resumoPagamentosPdvFood(pagamentosFinais)
           : undefined;
 
@@ -1703,8 +1786,10 @@ export function PdvFoodService() {
             })),
         ...(pagPosteriorFood ? { pagamentoPosterior: true } : {}),
         ...(estacaoId ? { estacaoTrabalhoId: estacaoId } : {}),
-        ...(sessaoId ? { sessaoCaixaId: sessaoId } : {}),
-        ...(caixaFiscalId ? { caixaFiscalId } : {}),
+        // pagamento posterior (cozinha pagar depois): NÃO amarra sessão/caixa atuais.
+        // O recebimento futuro (Gestão Delivery / Pendentes Balcão) usa a sessão aberta no momento.
+        ...(!pagPosteriorFood && sessaoId ? { sessaoCaixaId: sessaoId } : {}),
+        ...(!pagPosteriorFood && caixaFiscalId ? { caixaFiscalId } : {}),
       };
       if (modoAtendimento === 'MESA') {
         console.log('[PDV FOOD][MESA][POST VENDAS]', {
@@ -1824,6 +1909,7 @@ export function PdvFoodService() {
           ...CLIENTE_ENTREGA_PDV_INICIAL,
           endereco: { ...CLIENTE_ENTREGA_PDV_INICIAL.endereco },
         });
+        setEnderecoExpandido(true);
         setFormaPagamentoPrevistaEntrega('DINHEIRO');
         setClienteBalcao({ nome: '', telefone: '' });
         setTimingCobrancaFood('AGORA');
@@ -1844,7 +1930,25 @@ export function PdvFoodService() {
         void tefFalhaSalvarVendaCnc(tefIdsRollback).catch(() => undefined);
       }
 
-      if (mensagemErro.includes('Rejeição Sefaz Evitada')) {
+      const fkSessao =
+        mensagemErro.includes('vendas_sessaoCaixaId_fkey') ||
+        (mensagemErro.includes('Foreign key') && mensagemErro.includes('sessaoCaixa'));
+      const fkCaixa =
+        mensagemErro.includes('vendas_caixaFiscalId_fkey') ||
+        mensagemErro.includes('vendas_caixaId_fkey');
+      if (fkSessao) {
+        persistirSessaoCaixaIdPdv(null);
+        toast.error(
+          'Sessão de caixa stale (já foi fechada). Limpei o vínculo local — reabra o caixa antes de continuar.',
+          { toastId: 'pdv-food-fk-sessao', autoClose: 6000 }
+        );
+      } else if (fkCaixa) {
+        persistirCaixaFiscalId(null);
+        toast.error(
+          'Caixa fiscal vinculado ao terminal não existe mais. Limpei o vínculo local — reconfigure a estação.',
+          { toastId: 'pdv-food-fk-caixa', autoClose: 6000 }
+        );
+      } else if (mensagemErro.includes('Rejeição Sefaz Evitada')) {
         setAlertaAurya(mensagemErro);
       } else {
         toast.error(mensagemErro, { toastId: 'pdv-food-final-erro' });
@@ -2107,15 +2211,26 @@ export function PdvFoodService() {
               {pizzaEmComposicao ? (
                 <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2">
                   <p className="text-xs font-medium text-amber-100/95">
-                    Montando pizza com vários sabores: toque em outro sabor no cardápio ou cancele a montagem.
+                    Pizza com vários sabores ({pizzaEmComposicao.saboresItemCardapioIds.length}/
+                    {pizzaEmComposicao.maxSabores}): toque em outro sabor no cardápio ou finalize.
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => setPizzaEmComposicao(null)}
-                    className="shrink-0 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-white/10"
-                  >
-                    Cancelar
-                  </button>
+                  <div className="flex shrink-0 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPizzaEmComposicao(null)}
+                      className="rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-white/10"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void finalizarPizzaComposicaoPdv(pizzaEmComposicao)}
+                      disabled={pizzaEmComposicao.saboresItemCardapioIds.length < 1}
+                      className="rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3 py-1.5 text-xs font-bold text-emerald-100 transition-colors hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Finalizar pizza
+                    </button>
+                  </div>
                 </div>
               ) : null}
               {modoAtendimento === 'MESA' && mesaSelecionada && (
@@ -2216,7 +2331,7 @@ export function PdvFoodService() {
         </div>
 
         {/* LADO DIREITO: CARRINHO E PAGAMENTO — min-h-0 + coluna flex permite lista com scroll em DELIVERY */}
-        <div className="flex w-full shrink-0 flex-col min-h-0 overflow-hidden bg-[#08101f]/90 backdrop-blur-xl rounded-[30px] border border-white/10 shadow-[0_25px_60px_rgba(0,0,0,0.35)] lg:h-full lg:max-h-full lg:w-[400px]">
+        <div className="flex w-full shrink-0 flex-col min-h-0 overflow-y-auto bg-[#08101f]/90 backdrop-blur-xl rounded-[30px] border border-white/10 shadow-[0_25px_60px_rgba(0,0,0,0.35)] custom-scrollbar lg:h-full lg:max-h-full lg:w-[400px] lg:overflow-hidden">
           
           <div className="bg-[#0b1324] p-5 border-b border-white/10 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-col gap-1">
@@ -2364,12 +2479,52 @@ export function PdvFoodService() {
             </>
           ) : null}
 
-          {modoAtendimento === 'DELIVERY' ? (
-            <div className="max-h-[min(42vh,300px)] shrink-0 overflow-y-auto overflow-x-hidden border-b border-white/10 bg-[#0b1324]/90 px-3 py-2 custom-scrollbar sm:max-h-[min(38vh,280px)] lg:max-h-[260px]">
-              <p className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                <MapPin className="h-3.5 w-3.5 shrink-0 text-violet-400" aria-hidden />
-                Cliente e entrega
-              </p>
+          {modoAtendimento === 'DELIVERY' && !enderecoExpandido ? (
+            <div className="shrink-0 border-b border-white/10 bg-[#0b1324]/90 px-3 py-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                    <MapPin className="h-3 w-3 shrink-0 text-violet-400" aria-hidden />
+                    Cliente e entrega
+                  </p>
+                  <p className="mt-0.5 truncate text-sm font-bold text-white">
+                    {clienteEntregaPdv.nomeCompleto.trim() || '—'}
+                  </p>
+                  <p className="truncate text-[11px] text-slate-400">
+                    {clienteEntregaPdv.whatsapp.trim() || 'sem WhatsApp'}
+                    {resumoEnderecoEntrega ? ` · ${resumoEnderecoEntrega}` : ''}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEnderecoExpandido(true)}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-1 text-[10px] font-bold uppercase text-violet-200 hover:bg-violet-500/20"
+                >
+                  <Pencil className="h-3 w-3" aria-hidden />
+                  Editar
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {modoAtendimento === 'DELIVERY' && enderecoExpandido ? (
+            <div className="max-h-[min(32vh,200px)] shrink-0 overflow-y-auto overflow-x-hidden border-b border-white/10 bg-[#0b1324]/90 px-3 py-2 custom-scrollbar sm:max-h-[min(28vh,190px)] lg:max-h-[180px]">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                  <MapPin className="h-3.5 w-3.5 shrink-0 text-violet-400" aria-hidden />
+                  Cliente e entrega
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setEnderecoExpandido(false)}
+                  disabled={!enderecoMinimoPreenchido}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-white/15 bg-white/5 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  title={enderecoMinimoPreenchido ? 'Recolher (mais espaço para os itens)' : 'Preencha os campos obrigatórios'}
+                >
+                  <ChevronUp className="h-3 w-3" aria-hidden />
+                  Recolher
+                </button>
+              </div>
               <div className="space-y-2">
                 <input
                   type="text"
@@ -2505,10 +2660,22 @@ export function PdvFoodService() {
                   rows={2}
                   className="min-h-[2.75rem] w-full resize-none rounded-lg border border-white/10 bg-[#08101f] px-2.5 py-1.5 text-sm text-white placeholder:text-slate-500 focus:border-violet-500/40 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
                 />
-                <p className="text-[10px] leading-snug text-slate-500">
-                  Taxa entrega:{' '}
-                  <span className="font-semibold text-slate-300">R$ {taxaEntregaReais.toFixed(2)}</span>
-                </p>
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <p className="text-[10px] leading-snug text-slate-500">
+                    Taxa entrega:{' '}
+                    <span className="font-semibold text-slate-300">R$ {taxaEntregaReais.toFixed(2)}</span>
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setEnderecoExpandido(false)}
+                    disabled={!enderecoMinimoPreenchido}
+                    className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-[10px] font-bold uppercase text-emerald-100 hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-40"
+                    title={enderecoMinimoPreenchido ? 'Recolher cadastro e mostrar mais itens' : 'Preencha todos os campos obrigatórios'}
+                  >
+                    <Check className="h-3 w-3" aria-hidden />
+                    Concluir cadastro
+                  </button>
+                </div>
               </div>
             </div>
           ) : null}
@@ -2610,51 +2777,65 @@ export function PdvFoodService() {
                 </button>
               </div>
             ) : modoAtendimento === 'DELIVERY' ? (
-              <div className="flex flex-col gap-3">
-                <div className="space-y-2">
-                  <label
-                    htmlFor="pdv-food-forma-prevista-entrega"
-                    className="text-[10px] font-bold uppercase tracking-widest text-amber-200/90"
-                  >
-                    Forma de pagamento prevista (pagar na entrega)
-                  </label>
-                  <select
-                    id="pdv-food-forma-prevista-entrega"
-                    value={formaPagamentoPrevistaEntrega}
-                    onChange={(e) =>
-                      setFormaPagamentoPrevistaEntrega(e.target.value as FormaPagamentoFood)
-                    }
-                    className="w-full rounded-xl border border-amber-500/25 bg-[#08101f] px-3 py-3 text-sm font-bold text-white focus:border-amber-500/40 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
-                  >
-                    {OPCOES_FORMA_PAGAMENTO_PREVISTA_ENTREGA.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <p className="text-[11px] leading-snug text-slate-500">
-                  Use cobrar pedido para pagamento no caixa ou pagar na entrega para recebimento pelo
-                  entregador.
-                </p>
-                <button
-                  type="button"
-                  onClick={() =>
-                    void finalizarVenda({ deliveryEnviarCozinhaPagarNaEntrega: true })
-                  }
-                  disabled={getCarrinhoAtual().length === 0 || finalizando}
-                  className="order-1 w-full rounded-xl border border-violet-500/40 bg-[#0b1324] py-3.5 px-4 text-[11px] font-black uppercase leading-snug tracking-wide text-violet-200 transition-all hover:bg-violet-500/10 sm:text-xs disabled:opacity-45 disabled:hover:bg-[#0b1324]"
-                >
-                  {finalizando ? 'Enviando…' : 'Enviar para cozinha — pagar na entrega'}
-                </button>
+              <div className="flex flex-col gap-2">
                 <button
                   type="button"
                   onClick={abrirModalPagamento}
                   disabled={getCarrinhoAtual().length === 0 || finalizando}
-                  className="order-2 w-full rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 py-4 text-base font-black uppercase tracking-wide text-white shadow-[0_0_20px_rgba(16,185,129,0.30)] transition-all hover:-translate-y-0.5 disabled:transform-none disabled:opacity-50 sm:text-lg"
+                  className="w-full rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 py-2.5 text-sm font-black uppercase tracking-wide text-white shadow-[0_0_15px_rgba(16,185,129,0.25)] transition hover:-translate-y-0.5 disabled:transform-none disabled:opacity-50"
                 >
-                  Cobrar pedido
+                  Cobrar agora
                 </button>
+                <div className="flex items-center gap-1.5">
+                  <Bike className="h-3 w-3 shrink-0 text-amber-300" aria-hidden />
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-amber-200/80">
+                    Enviar à cozinha — pagar na entrega
+                  </p>
+                </div>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {OPCOES_PAGAR_NA_ENTREGA_PDV.map((op) => {
+                    const Icon =
+                      op.value === 'DINHEIRO' ? Banknote : op.value === 'PIX' ? QrCode : CreditCard;
+                    const labelCurto =
+                      op.value === 'CARTAO_CREDITO'
+                        ? 'Crédito'
+                        : op.value === 'CARTAO_DEBITO'
+                          ? 'Débito'
+                          : op.label;
+                    return (
+                      <button
+                        key={op.value}
+                        type="button"
+                        onClick={() => {
+                          setFormaPagamentoPrevistaEntrega(op.value);
+                          void finalizarVenda({
+                            deliveryEnviarCozinhaPagarNaEntrega: true,
+                            formaPagamentoEntregaOverride: op.value,
+                          });
+                        }}
+                        disabled={getCarrinhoAtual().length === 0 || finalizando}
+                        title={
+                          op.precisaMaquininha
+                            ? `${op.label} — Levar maquininha`
+                            : op.label
+                        }
+                        className={`relative flex flex-col items-center justify-center gap-0.5 rounded-lg border px-1 py-1.5 text-[10px] font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                          op.precisaMaquininha
+                            ? 'border-orange-500/35 bg-[#0b1324] text-orange-100 hover:bg-orange-500/15'
+                            : 'border-amber-500/30 bg-[#0b1324] text-amber-100 hover:bg-amber-500/15'
+                        }`}
+                      >
+                        {op.precisaMaquininha ? (
+                          <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-orange-500 text-[9px] font-black text-white shadow" aria-label="Levar maquininha">
+                            ⚡
+                          </span>
+                        ) : null}
+                        <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        <span className="leading-tight">{labelCurto}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             ) : (
               <button

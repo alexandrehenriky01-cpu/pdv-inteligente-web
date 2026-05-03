@@ -75,7 +75,7 @@ const EstacoesTrabalhoPage: FC = () => {
 
     try {
       // Ajuste a rota conforme o seu backend
-      const response = await api.get('/api/producao/configuracoes/estacoes-trabalho', {
+      const response = await api.get('/api/estacoes-trabalho', {
         params: debouncedFilters,
       });
 
@@ -116,7 +116,7 @@ const EstacoesTrabalhoPage: FC = () => {
     setIsDeleting(true);
 
     try {
-      await api.delete(`/api/producao/configuracoes/estacoes-trabalho/${confirmDeleteId}`);
+      await api.delete(`/api/estacoes-trabalho/${confirmDeleteId}`);
       setToast('Estação excluída com sucesso!');
       setConfirmDeleteId(null);
       fetchEstacoes();
