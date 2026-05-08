@@ -77,6 +77,19 @@ api.interceptors.response.use(
       }
     }
 
+    // RC1.13 — Backend bloqueia rotas operacionais com 412 quando o
+    // snapshot inicial ainda não foi aplicado. Redireciona para a tela
+    // de Sincronização Inicial sem destruir a sessão.
+    if (status === 412) {
+      const errorData = error.response?.data as { code?: string } | undefined;
+      if (errorData?.code === 'SNAPSHOT_NOT_APPLIED') {
+        const hash = window.location.hash.replace(/^#/, '');
+        if (hash !== '/sync-inicial') {
+          window.location.hash = '#/sync-inicial';
+        }
+      }
+    }
+
     if (status !== 401) {
       return Promise.reject(error);
     }

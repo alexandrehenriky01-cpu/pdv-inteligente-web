@@ -52,6 +52,31 @@ export function Login() {
     }
   };
 
+  // RC1.13 — antes de mandar para a tela operacional, checa snapshot inicial.
+  // Em modo LOCAL com snapshotApplied=false, manda para /sync-inicial.
+  const redirecionarComBootstrapCheck = async (role?: string) => {
+    try {
+      const resp = await api.get('/api/activation/bootstrap-status');
+      const data = resp.data as {
+        mode?: string;
+        snapshotApplied?: boolean;
+        installed?: boolean;
+      };
+      if (
+        data?.installed &&
+        data?.mode === 'LOCAL' &&
+        data?.snapshotApplied === false
+      ) {
+        navigate('/sync-inicial');
+        return;
+      }
+    } catch {
+      // Se o endpoint falhar (cloud em modo CLOUD não tem bootstrap-status?),
+      // segue o fluxo normal — backend gateia via 412 se necessário.
+    }
+    redirecionarPorCargo(role);
+  };
+
   // 🚀 AUTO-LOGIN: Se já tem token, manda pra tela certa direto sem precisar logar de novo
   useEffect(() => {
     const token = localStorage.getItem(AUTH_TOKEN_KEY);
@@ -60,7 +85,7 @@ export function Login() {
     if (token && userStr) {
       try {
         const usuario = JSON.parse(userStr) as { role?: string };
-        redirecionarPorCargo(usuario.role);
+        void redirecionarComBootstrapCheck(usuario.role);
       } catch {
         localStorage.removeItem(AUTH_TOKEN_KEY);
         localStorage.removeItem(AUTH_USER_KEY);
@@ -117,7 +142,8 @@ export function Login() {
 
       window.setTimeout(() => {
         // 🚀 ROTEAMENTO DINÂMICO APÓS A ANIMAÇÃO DO PORTAL
-        redirecionarPorCargo(String(usuario.role ?? ''));
+        // RC1.13 — checa snapshot inicial antes de mandar para tela operacional.
+        void redirecionarComBootstrapCheck(String(usuario.role ?? ''));
       }, 1400);
     } catch (err) {
       const error = err as AxiosError<IAuthError>;

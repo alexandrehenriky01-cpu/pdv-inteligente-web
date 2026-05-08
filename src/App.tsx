@@ -4,6 +4,7 @@ import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { DashboardFood } from './pages/DashboardFood';
+import { SincronizacaoInicial } from './pages/SincronizacaoInicial';
 
 // Cadastros Base
 import { Categorias } from './pages/cadastros/Categorias'; 
@@ -89,6 +90,7 @@ import { DashboardGlobal } from './modules/contabil/pages/DashboardGlobal';
 import { ConsultorIA } from './pages/ConsultorIA';
 import { AdminClientesPage } from './pages/admin/AdminClientesPage';
 import { AdminEmpresaFeaturesPage } from './pages/admin/AdminEmpresaFeaturesPage';
+import { AdminRuntimePage } from './pages/admin/AdminRuntimePage';
 
 // Gestão de Usuários, Equipe e Configurações
 import { GestaoUsuariosPage } from './modules/configuracoes/pages/GestaoUsuariosPage';
@@ -134,6 +136,11 @@ function App() {
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<Login />} />
 
+        {/* RC1.13 — Tela de sincronização inicial (pós-login quando
+            snapshotApplied=false). Intencionalmente fora do PrivateRoute:
+            o backend já gateia operação real via SnapshotGate (412). */}
+        <Route path="/sync-inicial" element={<SincronizacaoInicial />} />
+
         <Route path="/menu/:slug" element={<DeliveryLayout />}>
           <Route index element={<DeliveryMenuPage />} />
           <Route path="checkout" element={<DeliveryCheckoutPage />} />
@@ -149,6 +156,8 @@ function App() {
         <Route element={<PrivateRoute rolesPermitidas={['SUPER_ADMIN', 'SUPORTE_MASTER']} />}>
           <Route path="/admin/clientes" element={<AdminClientesPage />} />
           <Route path="/admin/empresas/:empresaId/features" element={<AdminEmpresaFeaturesPage />} />
+          {/* Lote C7.C — dashboard runtime operacional */}
+          <Route path="/admin/runtime" element={<AdminRuntimePage />} />
         </Route>
 
         {/* 🔒 ROTAS PRIVADAS PADRÃO (Acesso para usuários logados) */}

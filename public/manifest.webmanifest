@@ -1,7 +1,7 @@
 {
-  "name": "Aurya Comanda Garçom",
-  "short_name": "Aurya Garçom",
-  "description": "App de comanda eletrônica do garçom (Aurya ERP).",
+  "name": "Aurya Soluções",
+  "short_name": "Aurya",
+  "description": "Aurya Soluções — ERP completo (PDV, Food, Delivery e Gestão).",
   "start_url": "/#/garcom/mesas",
   "scope": "/",
   "display": "standalone",
