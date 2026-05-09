@@ -1,6 +1,7 @@
 import { useEffect, useState, type ChangeEvent, type FC } from 'react';
 import { isAxiosError } from 'axios';
-import { Upload, Save, Building2, Phone, MapPin, UserSquare2, FileText, ShieldCheck, Key, Hash, CloudCog, Scale, Trash2, RefreshCw, Link2, MonitorSmartphone } from 'lucide-react';
+import { Upload, Save, Building2, Phone, MapPin, UserSquare2, FileText, ShieldCheck, Key, Hash, CloudCog, Scale, Trash2, RefreshCw, Link2, MonitorSmartphone, Plug } from 'lucide-react';
+import LocalFirstActivationSection from './LocalFirstActivationSection';
 // 🚀 1. IMPORTAMOS O HOOK DE NAVEGAÇÃO
 import { useNavigate } from 'react-router-dom'; 
 import { api } from '../../services/api'; 
@@ -96,7 +97,9 @@ export const ConfiguracoesLoja: FC = () => {
   // 🚀 2. INICIALIZAMOS O NAVEGADOR
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<string>('identificacao');
-  
+  // RC2.0 — id da loja em edição, usado pela seção Local-First.
+  const [lojaIdAtual, setLojaIdAtual] = useState<string | null>(null);
+
   const [lojasMatriz, setLojasMatriz] = useState<
     { id: string; nome: string; nomeFantasia?: string | null; cnpj?: string | null }[]
   >([]);
@@ -174,6 +177,10 @@ export const ConfiguracoesLoja: FC = () => {
 
         const response = await api.get('/api/lojas/minha-loja');
         const lojaDB = response.data;
+
+        if (lojaDB?.id) {
+          setLojaIdAtual(String(lojaDB.id));
+        }
 
         if (lojaDB) {
           setSettings(prev => ({
@@ -375,6 +382,7 @@ export const ConfiguracoesLoja: FC = () => {
             { id: 'responsavel', label: 'Responsável', icon: UserSquare2 },
             { id: 'documentos', label: 'Documentos Fiscais', icon: FileText },
             { id: 'totem', label: 'Totem', icon: MonitorSmartphone },
+            { id: 'local-first', label: 'Local-First', icon: Plug },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -1016,6 +1024,21 @@ export const ConfiguracoesLoja: FC = () => {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {activeTab === 'local-first' && (
+            <div className={`animate-in fade-in duration-300 ${cardClass}`}>
+              <div className="flex items-center gap-2 mb-4 border-b border-white/5 pb-3">
+                <Plug className="w-5 h-5 text-emerald-400" />
+                <h3 className="font-bold text-lg text-white">Ativação Local-First</h3>
+              </div>
+              <p className="text-sm text-slate-400 mb-5">
+                Gere e gerencie tokens de ativação que o instalador local (AuryaShellLite) usa
+                para registrar uma nova máquina/PDV vinculada a esta loja. Cada token aparece
+                apenas uma vez — copie e use imediatamente.
+              </p>
+              <LocalFirstActivationSection lojaId={lojaIdAtual} />
             </div>
           )}
 
