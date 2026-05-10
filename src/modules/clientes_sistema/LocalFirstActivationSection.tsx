@@ -207,6 +207,32 @@ const LocalFirstActivationSection: FC<Props> = ({ lojaId }) => {
   const snapshotAppliedAt = activation?.snapshot?.snapshotAppliedAt ?? null;
   const valid = activation?.validation?.valid ?? false;
 
+  /**
+   * RC2.2.1b — habilitação explícita do botão "Gerar token".
+   *
+   * Independente do status da instalação (installationId, snapshot,
+   * tokens existentes, etc.). Critérios:
+   *   - lojaId carregada (parent já bateu em /api/lojas/minha-loja)
+   *   - validade entre 1 e 365 dias
+   *   - não estiver gerando agora
+   *   - permissão não foi negada na última verificação (forbidden)
+   *
+   * `forbidden` SÓ é true quando a última GET tokens devolveu 403; é
+   * resetado para `false` no início de toda fetchTokens — então um
+   * relogin com permissão válida limpa o estado automaticamente assim
+   * que a próxima carga acontece (inclusive via botão "tentar novamente"
+   * abaixo).
+   */
+  const expiresInDaysValid = Number.isFinite(expiresInDays) && expiresInDays >= 1 && expiresInDays <= 365;
+  const disabledReason: string | null = (() => {
+    if (generating) return 'Gerando token...';
+    if (!lojaId) return 'Loja ainda não carregada — aguarde alguns segundos.';
+    if (forbidden) return 'Sem permissão para gerar tokens nesta loja. Use "tentar novamente" se você acabou de fazer login.';
+    if (!expiresInDaysValid) return 'Validade deve ser um número entre 1 e 365 dias.';
+    return null;
+  })();
+  const canGenerate = disabledReason === null;
+
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5">
@@ -291,13 +317,17 @@ const LocalFirstActivationSection: FC<Props> = ({ lojaId }) => {
         <button
           type="button"
           onClick={() => void handleGenerate()}
-          disabled={generating || !lojaId || forbidden}
-          title={forbidden ? 'Sem permissão para gerar tokens nesta loja' : ''}
+          disabled={!canGenerate}
+          title={disabledReason ?? ''}
+          aria-disabled={!canGenerate}
           className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-violet-500 hover:bg-violet-400 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
         >
           <KeyRound className="w-4 h-4" />
           {generating ? 'Gerando...' : 'Gerar token de ativação'}
         </button>
+        {disabledReason && (
+          <p className="mt-2 text-xs text-amber-300/80">{disabledReason}</p>
+        )}
 
         {error && (
           <div className="mt-4 flex items-start gap-2 p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm">
@@ -354,10 +384,21 @@ const LocalFirstActivationSection: FC<Props> = ({ lojaId }) => {
         {forbidden && !tokensLoading && (
           <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm">
             <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-            <span>
-              Seu usuário não tem permissão para gerenciar tokens Local-First desta loja.
-              Solicite a um administrador da loja ou ao SUPER_ADMIN.
-            </span>
+            <div className="flex-1">
+              <p>
+                Seu usuário não tem permissão para gerenciar tokens Local-First desta loja.
+                Solicite a um administrador da loja ou ao SUPER_ADMIN.
+              </p>
+              <button
+                type="button"
+                onClick={() => void fetchTokens()}
+                disabled={tokensLoading}
+                className="mt-2 inline-flex items-center gap-1 text-xs text-amber-200 hover:text-amber-100 underline disabled:opacity-40"
+              >
+                <RefreshCw className={`w-3 h-3 ${tokensLoading ? 'animate-spin' : ''}`} />
+                tentar novamente (após relogin/permissão concedida)
+              </button>
+            </div>
           </div>
         )}
         {!forbidden && tokens.length === 0 && !tokensLoading && (
