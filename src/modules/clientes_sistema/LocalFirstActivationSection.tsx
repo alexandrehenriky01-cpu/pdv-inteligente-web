@@ -53,15 +53,40 @@ interface NewTokenResult {
   createdAt: string;
 }
 
+/**
+ * RC2.2.1 — mensagens amigáveis para 401/403/404 da API de tokens.
+ * Nunca devolve a string técnica "Request failed with status code …".
+ */
 function describeAxiosError(err: unknown): string {
   if (isAxiosError(err)) {
+    const status = err.response?.status;
+    if (status === 401) {
+      return 'Sessão expirada — entre novamente para gerenciar tokens Local-First.';
+    }
+    if (status === 403) {
+      return 'Seu usuário não tem permissão para gerenciar tokens Local-First desta loja. Solicite a um administrador da loja.';
+    }
+    if (status === 404) {
+      return 'Loja não encontrada — confirme se a configuração está atualizada.';
+    }
     const data = err.response?.data;
-    if (data && typeof data === 'object' && 'error' in data && typeof (data as { error?: string }).error === 'string') {
-      return (data as { error: string }).error;
+    if (data && typeof data === 'object') {
+      const candidate =
+        ('error' in data && typeof (data as { error?: string }).error === 'string')
+          ? (data as { error: string }).error
+          : ('erro' in data && typeof (data as { erro?: string }).erro === 'string')
+            ? (data as { erro: string }).erro
+            : null;
+      if (candidate) return candidate;
     }
     return err.message;
   }
   return err instanceof Error ? err.message : String(err);
+}
+
+/** RC2.2.1 — flag separado para 403, permite renderizar empty state ao invés de erro genérico. */
+function isForbiddenAxiosError(err: unknown): boolean {
+  return isAxiosError(err) && err.response?.status === 403;
 }
 
 const LocalFirstActivationSection: FC<Props> = ({ lojaId }) => {
@@ -72,6 +97,8 @@ const LocalFirstActivationSection: FC<Props> = ({ lojaId }) => {
   const [newToken, setNewToken] = useState<NewTokenResult | null>(null);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** RC2.2.1 — separa 403 de erros de rede para renderizar bloco de "sem permissão". */
+  const [forbidden, setForbidden] = useState(false);
   const [copied, setCopied] = useState(false);
   const [expiresInDays, setExpiresInDays] = useState<number>(30);
   const [machineName, setMachineName] = useState<string>('');
@@ -93,13 +120,20 @@ const LocalFirstActivationSection: FC<Props> = ({ lojaId }) => {
     if (!lojaId) return;
     setTokensLoading(true);
     setError(null);
+    setForbidden(false);
     try {
       const r = await api.get<{ data: TokenSummary[] }>(
         `/api/lojas/${lojaId}/activation-tokens`
       );
       setTokens(r.data?.data ?? []);
     } catch (err) {
-      setError(describeAxiosError(err));
+      if (isForbiddenAxiosError(err)) {
+        // RC2.2.1 — apresenta empty state amigável em vez de erro técnico.
+        setForbidden(true);
+        setTokens([]);
+      } else {
+        setError(describeAxiosError(err));
+      }
     } finally {
       setTokensLoading(false);
     }
@@ -131,9 +165,15 @@ const LocalFirstActivationSection: FC<Props> = ({ lojaId }) => {
         }
       );
       setNewToken(r.data?.data ?? null);
+      setForbidden(false);
       await fetchTokens();
     } catch (err) {
-      setError(describeAxiosError(err));
+      if (isForbiddenAxiosError(err)) {
+        setForbidden(true);
+        setError(describeAxiosError(err));
+      } else {
+        setError(describeAxiosError(err));
+      }
     } finally {
       setGenerating(false);
     }
@@ -251,7 +291,8 @@ const LocalFirstActivationSection: FC<Props> = ({ lojaId }) => {
         <button
           type="button"
           onClick={() => void handleGenerate()}
-          disabled={generating || !lojaId}
+          disabled={generating || !lojaId || forbidden}
+          title={forbidden ? 'Sem permissão para gerar tokens nesta loja' : ''}
           className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-violet-500 hover:bg-violet-400 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
         >
           <KeyRound className="w-4 h-4" />
@@ -310,7 +351,16 @@ const LocalFirstActivationSection: FC<Props> = ({ lojaId }) => {
             atualizar
           </button>
         </div>
-        {tokens.length === 0 && !tokensLoading && (
+        {forbidden && !tokensLoading && (
+          <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+            <span>
+              Seu usuário não tem permissão para gerenciar tokens Local-First desta loja.
+              Solicite a um administrador da loja ou ao SUPER_ADMIN.
+            </span>
+          </div>
+        )}
+        {!forbidden && tokens.length === 0 && !tokensLoading && (
           <p className="text-sm text-slate-500 italic">Nenhum token gerado ainda para esta loja.</p>
         )}
         {tokens.length > 0 && (
