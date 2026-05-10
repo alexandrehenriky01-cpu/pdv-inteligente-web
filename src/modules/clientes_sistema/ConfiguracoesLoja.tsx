@@ -93,12 +93,58 @@ function formatarDataBr(iso: string | null | undefined): string | null {
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
+/**
+ * RC2.2.1e — resolve usuário + loja selecionada do localStorage.
+ *
+ * Para gestor da loja: `usuario.lojaId` está sempre setado.
+ * Para SUPER_ADMIN/SUPORTE_MASTER: `usuario.lojaId` pode ser null; nesses
+ * casos tentamos `usuario.loja?.id` (impersonação preservada no payload),
+ * caso contrário retornamos null para sinalizar que a tela precisa
+ * pedir seleção de loja.
+ */
+interface StoredUser {
+  role?: string;
+  lojaId?: string | null;
+  loja?: { id?: string | null } | null;
+}
+
+function readStoredUser(): StoredUser | null {
+  try {
+    const raw = localStorage.getItem('@PDVUsuario');
+    if (!raw) return null;
+    return JSON.parse(raw) as StoredUser;
+  } catch {
+    return null;
+  }
+}
+
+function isSuperAdminRole(role: string | undefined | null): boolean {
+  if (!role) return false;
+  const r = String(role).toUpperCase();
+  return r === 'SUPER_ADMIN' || r === 'SUPORTE_MASTER';
+}
+
+function resolveSelectedLojaId(u: StoredUser | null): string | null {
+  if (!u) return null;
+  if (typeof u.lojaId === 'string' && u.lojaId.trim() !== '') return u.lojaId.trim();
+  const fromLoja = u.loja && typeof u.loja.id === 'string' ? u.loja.id.trim() : '';
+  if (fromLoja) return fromLoja;
+  return null;
+}
+
 export const ConfiguracoesLoja: FC = () => {
   // 🚀 2. INICIALIZAMOS O NAVEGADOR
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<string>('identificacao');
   // RC2.0 — id da loja em edição, usado pela seção Local-First.
   const [lojaIdAtual, setLojaIdAtual] = useState<string | null>(null);
+  /**
+   * RC2.2.1e — true quando usuário é SUPER_ADMIN/SUPORTE_MASTER e ainda
+   * não selecionou (impersonou) uma loja. A tela mostra mensagem
+   * amigável em vez de chamar /api/lojas/minha-loja (que devolveria 400
+   * LOJA_NOT_SELECTED do backend RC2.2.1d).
+   */
+  const [needsLojaSelection, setNeedsLojaSelection] = useState(false);
 
   const [lojasMatriz, setLojasMatriz] = useState<
     { id: string; nome: string; nomeFantasia?: string | null; cnpj?: string | null }[]
@@ -137,8 +183,22 @@ export const ConfiguracoesLoja: FC = () => {
 
   useEffect(() => {
     const carregarMatrizes = async () => {
+      // RC2.2.1e — para SUPER_ADMIN sem loja selecionada, não chama
+      // estabelecimentos-matriz (backend devolve 200 [] mas evita request
+      // desnecessária e ruído no console em telas mais sensíveis).
+      const u = readStoredUser();
+      const selectedLojaId = resolveSelectedLojaId(u);
+      const isSuper = isSuperAdminRole(u?.role);
+      if (isSuper && !selectedLojaId) {
+        setLojasMatriz([]);
+        return;
+      }
       try {
-        const r = await api.get('/api/lojas/estabelecimentos-matriz');
+        // RC2.2.1e — propaga loja selecionada via x-tenant-id quando SUPER_ADMIN
+        // tem impersonação no payload do localStorage.
+        const headers: Record<string, string> = {};
+        if (isSuper && selectedLojaId) headers['x-tenant-id'] = selectedLojaId;
+        const r = await api.get('/api/lojas/estabelecimentos-matriz', { headers });
         setLojasMatriz(Array.isArray(r.data) ? r.data : []);
       } catch {
         setLojasMatriz([]);
@@ -175,7 +235,31 @@ export const ConfiguracoesLoja: FC = () => {
           }
         }
 
-        const response = await api.get('/api/lojas/minha-loja');
+        // RC2.2.1e — SUPER_ADMIN sem loja selecionada NÃO chama /minha-loja
+        // (evita 400 LOJA_NOT_SELECTED no console). Em vez disso renderiza
+        // banner amigável solicitando seleção de loja.
+        const u = readStoredUser();
+        const selectedLojaId = resolveSelectedLojaId(u);
+        const isSuper = isSuperAdminRole(u?.role);
+        if (isSuper && !selectedLojaId) {
+          setNeedsLojaSelection(true);
+          setLojaIdAtual(null);
+          return;
+        }
+        setNeedsLojaSelection(false);
+        // Se há loja selecionada (gestor comum ou super admin impersonando),
+        // antecipa o estado para a aba Local-First antes mesmo do GET responder.
+        if (selectedLojaId) {
+          setLojaIdAtual(selectedLojaId);
+        }
+
+        // RC2.2.1e — propaga x-tenant-id quando SUPER_ADMIN está impersonando
+        // uma loja (backend RC2.2.1d resolve via header). Gestor comum manda
+        // sem header — backend usa req.usuario.lojaId direto.
+        const headers: Record<string, string> = {};
+        if (isSuper && selectedLojaId) headers['x-tenant-id'] = selectedLojaId;
+
+        const response = await api.get('/api/lojas/minha-loja', { headers });
         const lojaDB = response.data;
 
         if (lojaDB?.id) {
@@ -268,6 +352,17 @@ export const ConfiguracoesLoja: FC = () => {
           setRemoverCertificado(false);
         }
       } catch (error) {
+        // RC2.2.1e — 400 LOJA_NOT_SELECTED para SUPER_ADMIN não é erro —
+        // é estado esperado. Renderiza banner amigável em vez de console.error.
+        if (
+          isAxiosError(error) &&
+          error.response?.status === 400 &&
+          ((error.response.data as { code?: string })?.code === 'LOJA_NOT_SELECTED')
+        ) {
+          setNeedsLojaSelection(true);
+          setLojaIdAtual(null);
+          return;
+        }
         console.error('Erro ao buscar dados completos da loja na API:', error);
       }
     };
@@ -1038,7 +1133,19 @@ export const ConfiguracoesLoja: FC = () => {
                 para registrar uma nova máquina/PDV vinculada a esta loja. Cada token aparece
                 apenas uma vez — copie e use imediatamente.
               </p>
-              <LocalFirstActivationSection lojaId={lojaIdAtual} />
+              {/* RC2.2.1e — banner amigável quando SUPER_ADMIN ainda não selecionou loja. */}
+              {needsLojaSelection ? (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-5 text-sm text-amber-200">
+                  <p className="font-semibold mb-1">Selecione uma loja para configurar o Local-First.</p>
+                  <p className="text-amber-200/80">
+                    Como SUPER_ADMIN/SUPORTE_MASTER você precisa impersonar uma loja específica para
+                    gerar tokens de ativação. Use o seletor de loja na navegação ou faça login no
+                    contexto de um operador da loja.
+                  </p>
+                </div>
+              ) : (
+                <LocalFirstActivationSection lojaId={lojaIdAtual} />
+              )}
             </div>
           )}
 
