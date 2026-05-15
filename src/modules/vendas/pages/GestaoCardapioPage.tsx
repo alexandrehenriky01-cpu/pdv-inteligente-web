@@ -1,4 +1,5 @@
 import React, { FormEvent, useEffect, useMemo, useState, useRef, useCallback } from 'react';
+import { isAxiosError } from 'axios';
 import { Layout } from '../../../components/Layout';
 import { api } from '../../../services/api';
 import { resolveCardapioImageUrl } from '../../../utils/resolveCardapioImageUrl';
@@ -149,6 +150,25 @@ function toUpperAurya(value: string | null | undefined): string {
   return String(value).trim().toLocaleUpperCase('pt-BR');
 }
 
+/**
+ * Extrai mensagem útil de erro priorizando o que o backend retornou em
+ * `response.data.erro|error|message`. Sem isso o usuário só vê o genérico
+ * "Request failed with status code 400" do axios.
+ */
+function extractApiError(error: unknown, fallback: string): string {
+  if (isAxiosError<{ erro?: string; error?: string; message?: string }>(error)) {
+    const data = error.response?.data;
+    const detail = data?.erro || data?.error || data?.message;
+    if (typeof detail === 'string' && detail.trim()) return detail;
+    if (error.response?.statusText) {
+      return `${error.message} — ${error.response.statusText}`;
+    }
+    return error.message || fallback;
+  }
+  if (error instanceof Error) return error.message;
+  return fallback;
+}
+
 export function GestaoCardapioPage() {
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [itens, setItens] = useState<ItemCardapio[]>([]);
@@ -218,7 +238,7 @@ export function GestaoCardapioPage() {
       setProdutos(resProdutos.data);
       setCatalogoAdicionais(resCatalogo.data.dados?.itens ?? []);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Falha ao carregar dados do cardápio.';
+      const msg = extractApiError(e, 'Falha ao carregar dados do cardápio.');
       setErro(msg);
     } finally {
       setLoading(false);
@@ -288,7 +308,7 @@ export function GestaoCardapioPage() {
       setImagensComErro(new Set());
       await carregar();
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Falha ao criar item de cardápio.';
+      const msg = extractApiError(e, 'Falha ao criar item de cardápio.');
       setErro(msg);
     }
   }
@@ -405,7 +425,7 @@ export function GestaoCardapioPage() {
       setItemEdicaoId(null);
       await carregar();
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Falha ao salvar item.';
+      const msg = extractApiError(e, 'Falha ao salvar item.');
       setErro(msg);
     }
   }
@@ -428,7 +448,7 @@ export function GestaoCardapioPage() {
       setShowImportRevenda(false);
       await carregar();
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Falha ao importar produto de revenda.';
+      const msg = extractApiError(e, 'Falha ao importar produto de revenda.');
       setErro(msg);
     }
   }
@@ -438,7 +458,7 @@ export function GestaoCardapioPage() {
       await api.put(`/api/cardapio/${item.id}`, { ativo: !item.ativo });
       await carregar();
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Falha ao atualizar status do item.';
+      const msg = extractApiError(e, 'Falha ao atualizar status do item.');
       setErro(msg);
     }
   }
@@ -829,7 +849,7 @@ export function GestaoCardapioPage() {
         }
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Erro de conexão ao gerar imagem.';
+      const msg = extractApiError(e, 'Erro de conexão ao gerar imagem.');
       setErroGeracao(msg);
     } finally {
       setGerandoAurya(false);
@@ -896,7 +916,7 @@ export function GestaoCardapioPage() {
       setMensagemOrigemImagem('Imagem enviada do dispositivo.');
       setTipoMensagemOrigem('info');
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Falha ao enviar imagem.';
+      const msg = extractApiError(e, 'Falha ao enviar imagem.');
       setErroGeracao(msg);
     } finally {
       setEnviandoUpload(false);
@@ -927,7 +947,7 @@ function fecharModalAurya() {
       await api.delete(`/api/cardapio/${itemId}`);
       await carregar();
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Falha ao remover item do cardápio.';
+      const msg = extractApiError(e, 'Falha ao remover item do cardápio.');
       setErro(msg);
     }
   }
