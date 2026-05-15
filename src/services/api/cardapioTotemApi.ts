@@ -2,9 +2,30 @@ import { api } from '../api';
 import { resolveCardapioImageUrl } from '../../utils/resolveCardapioImageUrl';
 import type { TotemMockCategoria, TotemMockProduto, TotemSaborOpcao } from '../../modules/totem/types';
 
-/** Fallback Aurya quando o item não tem foto (compartilhado com PDV / delivery / modal). */
-export const IMAGEM_FALLBACK_FOOD =
-  'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"%3E%3Crect fill="%231a1a2e" width="800" height="600"/%3E%3Ccircle cx="400" cy="300" r="120" fill="%232d2d44"/%3E%3C/svg%3E';
+/**
+ * Fallback Aurya quando o item não tem foto (compartilhado com PDV / delivery / modal).
+ *
+ * Aponta para a biblioteca local oficial em `public/assets/food/default.svg`.
+ * Componentes que conheçam a categoria devem preferir
+ * `resolveAuryaFoodImage(categoria, nome)` para escolher o asset coerente.
+ *
+ * Resolvido contra `document.baseURI` em runtime para funcionar tanto no
+ * Vite dev (base `/`) quanto no Electron (base `./`).
+ */
+function resolveDefaultFoodUrl(): string {
+  const relative = 'assets/food/default.svg';
+  if (typeof document !== 'undefined' && document.baseURI) {
+    try {
+      return new URL(relative, document.baseURI).href;
+    } catch {
+      /* cai no fallback abaixo */
+    }
+  }
+  const baseRaw = (import.meta.env.BASE_URL || '/').toString();
+  const base = baseRaw.endsWith('/') ? baseRaw : `${baseRaw}/`;
+  return `${base}${relative}`;
+}
+export const IMAGEM_FALLBACK_FOOD = resolveDefaultFoodUrl();
 
 export interface CardapioAdicionalApi {
   id: string;

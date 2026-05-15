@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" role="img" aria-label="Aurya Food">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4338ca"/>
+      <stop offset="100%" stop-color="#22d3ee"/>
+    </linearGradient>
+    <linearGradient id="fork" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fff" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#cbd5e1"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="600" fill="url(#bg)"/>
+  <g transform="translate(400 280)">
+    <circle cx="0" cy="0" r="200" fill="#fff" opacity="0.15"/>
+    <circle cx="0" cy="0" r="160" fill="#fff" opacity="0.1"/>
+    <g transform="translate(-90 -90)">
+      <rect x="-8" y="-30" width="6" height="60" rx="2" fill="url(#fork)"/>
+      <rect x="6" y="-30" width="6" height="60" rx="2" fill="url(#fork)"/>
+      <rect x="20" y="-30" width="6" height="60" rx="2" fill="url(#fork)"/>
+      <rect x="-12" y="30" width="42" height="14" rx="3" fill="url(#fork)"/>
+      <rect x="0" y="44" width="18" height="120" rx="3" fill="url(#fork)"/>
+    </g>
+    <g transform="translate(90 -90)">
+      <path d="M -10 -30 Q -20 -30 -20 -10 Q -20 20 -10 40 L -10 160 L 10 160 L 10 40 Q 20 20 20 -10 Q 20 -30 10 -30 Z" fill="url(#fork)"/>
+    </g>
+    <text x="0" y="40" font-family="'Segoe UI', Arial, sans-serif" font-size="120" font-weight="900" fill="#fff" text-anchor="middle" opacity="0.9">A</text>
+  </g>
+  <text x="400" y="500" font-family="'Segoe UI', Arial, sans-serif" font-size="40" font-weight="800" fill="#fff" text-anchor="middle" letter-spacing="3">AURYA FOOD</text>
+  <text x="400" y="540" font-family="'Segoe UI', Arial, sans-serif" font-size="18" fill="#fff" opacity="0.7" text-anchor="middle" letter-spacing="2">CARDÁPIO INTELIGENTE</text>
+</svg>

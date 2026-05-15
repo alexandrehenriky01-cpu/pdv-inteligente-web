@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" role="img" aria-label="Aurya Food — Salgados">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#92400e"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+    <radialGradient id="dough" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fed7aa"/>
+      <stop offset="100%" stop-color="#9a3412"/>
+    </radialGradient>
+    <linearGradient id="dough2" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fed7aa"/>
+      <stop offset="100%" stop-color="#9a3412"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="600" fill="url(#bg)"/>
+  <g transform="translate(400 300)">
+    <ellipse cx="0" cy="170" rx="220" ry="20" fill="#000" opacity="0.2"/>
+    <g transform="translate(-130 0)">
+      <path d="M 0 -140 Q -60 -140 -60 -60 Q -60 -10 -50 50 Q -45 100 0 130 Q 45 100 50 50 Q 60 -10 60 -60 Q 60 -140 0 -140 Z" fill="url(#dough)"/>
+      <ellipse cx="0" cy="-130" rx="22" ry="14" fill="#7c2d12"/>
+    </g>
+    <g transform="translate(0 20)">
+      <path d="M -90 0 Q -90 -90 0 -90 Q 90 -90 90 0 Q 90 90 0 90 Q -90 90 -90 0 Z" fill="url(#dough2)" transform="rotate(45)"/>
+      <path d="M -80 0 Q -80 -80 0 -80 Q 80 -80 80 0 Q 80 80 0 80 Q -80 80 -80 0 Z" fill="none" stroke="#7c2d12" stroke-width="3" transform="rotate(45)"/>
+    </g>
+    <g transform="translate(150 -10)">
+      <ellipse cx="0" cy="0" rx="80" ry="100" fill="url(#dough)"/>
+      <g stroke="#7c2d12" stroke-width="2" fill="none">
+        <path d="M -60 -50 Q 0 -70 60 -50"/>
+        <path d="M -65 -10 Q 0 -30 65 -10"/>
+        <path d="M -60 30 Q 0 10 60 30"/>
+        <path d="M -55 70 Q 0 50 55 70"/>
+      </g>
+    </g>
+  </g>
+  <text x="400" y="510" font-family="'Segoe UI', Arial, sans-serif" font-size="40" font-weight="800" fill="#fff" text-anchor="middle" letter-spacing="3">SALGADOS</text>
+  <text x="400" y="550" font-family="'Segoe UI', Arial, sans-serif" font-size="18" fill="#fff" opacity="0.7" text-anchor="middle" letter-spacing="2">AURYA FOOD</text>
+</svg>

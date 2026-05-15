@@ -1,5 +1,12 @@
 import { Plus } from 'lucide-react';
 import type { TotemMockProduto } from '../types';
+import {
+  resolveAuryaFoodImage,
+  resolveAuryaCategoryKey,
+  logLocalAssetServed,
+  logInvalidImageUrl,
+  isLikelyExternalImageUrl,
+} from '../../../utils/auryaFoodImageLibrary';
 
 function formatBrl(n: number): string {
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -10,10 +17,9 @@ interface ProductCardProps {
   onSelect: (p: TotemMockProduto) => void;
 }
 
-const PLACEHOLDER_FALLBACK = 'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=800&q=80';
-
 export function ProductCard({ produto, onSelect }: ProductCardProps) {
   const temImagemReal = produto.imagemUrl && !produto.imagemUrl.includes('unsplash.com/photo-1546069901-ba9599a7');
+  const categoryKey = resolveAuryaCategoryKey(produto.categoriaId, produto.nome);
 
   return (
     <button
@@ -27,6 +33,21 @@ export function ProductCard({ produto, onSelect }: ProductCardProps) {
             src={produto.imagemUrl}
             alt={produto.nome}
             className="h-full w-full object-cover transition-all duration-700 group-hover:scale-110 group-hover:saturate-110"
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            data-aurya-category={categoryKey}
+            onError={(event) => {
+              const target = event.currentTarget;
+              if (target.dataset.auryaFallbackApplied === '1') return;
+              logInvalidImageUrl(
+                produto.imagemUrl ?? '',
+                isLikelyExternalImageUrl(produto.imagemUrl) ? 'csp-blocked' : 'render-error'
+              );
+              const localUrl = resolveAuryaFoodImage(produto.categoriaId, produto.nome, 'render-error');
+              target.dataset.auryaFallbackApplied = '1';
+              target.src = localUrl;
+              logLocalAssetServed(localUrl, categoryKey, 'totem-product-card-error');
+            }}
           />
         ) : (
           <div className="h-full w-full bg-gradient-to-br from-slate-800 via-slate-800/90 to-violet-900/30">

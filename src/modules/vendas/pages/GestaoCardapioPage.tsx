@@ -2,7 +2,14 @@ import React, { FormEvent, useEffect, useMemo, useState, useRef, useCallback } f
 import { Layout } from '../../../components/Layout';
 import { api } from '../../../services/api';
 import { resolveCardapioImageUrl } from '../../../utils/resolveCardapioImageUrl';
-import { Sparkles, ImageIcon, X, Upload, AlertCircle, Loader2 } from 'lucide-react';
+import {
+  resolveAuryaFoodImage,
+  resolveAuryaCategoryKey,
+  logLocalAssetServed,
+  logInvalidImageUrl,
+  isLikelyExternalImageUrl,
+} from '../../../utils/auryaFoodImageLibrary';
+import { Sparkles, X, Upload, AlertCircle, Loader2 } from 'lucide-react';
 
 function normalizarDecimal(valor: number | string | null | undefined): number {
   if (typeof valor === 'number') return Number.isFinite(valor) ? valor : 0;
@@ -61,15 +68,24 @@ type ItemCardapio = {
 
 type ApiData<T> = { sucesso: boolean; dados?: T; erro?: string };
 
+type AuryaImageOption = {
+  url: string;
+  provider: string;
+  score: number;
+  relevanceScore?: number;
+  matchedTags?: string[];
+  source?: string;
+};
+
 type AuryaSugestoes = {
   imagens: string[];
-  imageOptions?: Array<{ url: string; provider: string; score: number }>;
+  imageOptions?: AuryaImageOption[];
   fallbacks: string[];
   descricao: string;
   categoria: string;
   fallbackUsado?: boolean;
   avisoFallback?: string;
-  /** Provedor retornado pela API (google-imagen, google-gemini, huggingface, pexels, unsplash, placeholder). */
+  /** Provedor retornado pela API. */
   provider?: string;
 };
 
@@ -440,8 +456,6 @@ export function GestaoCardapioPage() {
   const [tipoMensagemOrigem, setTipoMensagemOrigem] = useState<'info' | 'warning'>('warning');
   const loadingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
-  const SEM_FOTO_URL = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAiIGhlaWdodD0iMTAwIiB2aWV3Qm94PSIwIDAgMTAwIDEwMCIgZm9jdXNpbmc9Im5vbmUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiMzMzMiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjNTU1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5Tb20gZm90by90ZXh0PjwvdGV4dD48L3N2Zz4=';
-
   const handleImagemErro = useCallback((url: string) => {
     setImagensComErro((prev) => {
       if (prev.has(url)) return prev;
@@ -489,26 +503,53 @@ export function GestaoCardapioPage() {
     });
   }, []);
 
-  const ImagePreview = React.memo(function ImagePreview({ src, alt, className }: { src?: string | null; alt: string; className?: string }) {
+  const ImagePreview = React.memo(function ImagePreview({
+    src,
+    alt,
+    className,
+    categoria,
+    nome,
+  }: {
+    src?: string | null;
+    alt: string;
+    className?: string;
+    categoria?: string | null;
+    nome?: string | null;
+  }) {
     const resolvedSrc = resolveCardapioImageUrl(src);
-    
+    const localFallback = useMemo(
+      () => resolveAuryaFoodImage(categoria, nome, 'no-image'),
+      [categoria, nome]
+    );
+
     if (!resolvedSrc) {
       return (
-        <div className={`bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-500 ${className}`}>
-          <ImageIcon size={16} />
-        </div>
+        <img
+          src={localFallback}
+          alt={alt}
+          className={className}
+          loading="lazy"
+          onLoad={() =>
+            logLocalAssetServed(localFallback, resolveAuryaCategoryKey(categoria, nome), 'no-source')
+          }
+        />
       );
     }
     if (imagensComErro.has(resolvedSrc)) {
       return (
         <img
-          src={SEM_FOTO_URL}
+          src={localFallback}
           alt={alt}
           className={className}
+          loading="lazy"
+          onLoad={() =>
+            logLocalAssetServed(localFallback, resolveAuryaCategoryKey(categoria, nome), 'previous-error')
+          }
         />
       );
     }
     const isLoading = imagensLoading.has(resolvedSrc);
+    const categoryKey = resolveAuryaCategoryKey(categoria, nome);
     return (
       <div className="relative">
         {isLoading && (
@@ -520,8 +561,22 @@ export function GestaoCardapioPage() {
           src={resolvedSrc}
           alt={alt}
           className={className}
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          data-aurya-category={categoryKey}
           onLoad={() => handleImagemCarregou(resolvedSrc)}
-          onError={() => handleImagemErro(resolvedSrc)}
+          onError={(event) => {
+            handleImagemErro(resolvedSrc);
+            const target = event.currentTarget;
+            if (target.dataset.auryaFallbackApplied === '1') return;
+            logInvalidImageUrl(
+              resolvedSrc,
+              isLikelyExternalImageUrl(resolvedSrc) ? 'csp-blocked' : 'render-error'
+            );
+            target.dataset.auryaFallbackApplied = '1';
+            target.src = localFallback;
+            logLocalAssetServed(localFallback, categoryKey, 'preview-img-error');
+          }}
         />
       </div>
     );
@@ -653,7 +708,7 @@ export function GestaoCardapioPage() {
           fallback?: boolean;
           fallbackUsed?: boolean;
           provider?: string;
-          imageOptions?: Array<{ url: string; provider: string; score: number }>;
+          imageOptions?: AuryaImageOption[];
           aviso?: string;
           motivoFallback?: string;
         };
@@ -1002,6 +1057,8 @@ function fecharModalAurya() {
                 src={novo.imagemUrl}
                 alt="Preview"
                 className="w-16 h-16 object-cover rounded-lg shadow-md border border-slate-600"
+                categoria={novo.categoria}
+                nome={novo.nome}
               />
               <div className="flex flex-col">
                 <span className="text-sm font-bold text-emerald-400">Imagem carregada com sucesso</span>
@@ -1334,6 +1391,8 @@ function fecharModalAurya() {
                   src={edicao.imagemUrl}
                   alt="Preview"
                   className="w-16 h-16 object-cover rounded-lg shadow-md border border-slate-600"
+                  categoria={edicao.categoria}
+                  nome={edicao.nome}
                 />
                 <div className="flex flex-col">
                   <span className="text-sm font-bold text-emerald-400">Imagem carregada com sucesso</span>
@@ -1428,6 +1487,8 @@ function fecharModalAurya() {
                           src={item.imagemUrl}
                           alt={item.nome}
                           className="w-10 h-10 rounded-lg object-cover border border-slate-700 shadow-sm"
+                          categoria={item.categoria}
+                          nome={item.nome}
                         />
                         <span className="font-semibold text-slate-200">{item.nome}</span>
                       </div>
@@ -1551,6 +1612,7 @@ function fecharModalAurya() {
                       </label>
                       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                         {sugestoesAurya.imagens.map((img, index) => {
+                          const categoryKey = resolveAuryaCategoryKey(sugestoesAurya.categoria, undefined);
                           return (
                             <button
                               key={index}
@@ -1565,7 +1627,19 @@ function fecharModalAurya() {
                               <img
                                 src={img}
                                 alt={`Imagem gerada ${index + 1}`}
-                                className="w-full h-48 object-cover"
+                                className="w-full h-48 object-cover bg-slate-900"
+                                loading="lazy"
+                                referrerPolicy="no-referrer"
+                                data-aurya-category={categoryKey}
+                                onError={(event) => {
+                                  const target = event.currentTarget;
+                                  if (target.dataset.auryaFallbackApplied === '1') return;
+                                  logInvalidImageUrl(img, isLikelyExternalImageUrl(img) ? 'csp-blocked' : 'render-error');
+                                  const localUrl = resolveAuryaFoodImage(sugestoesAurya.categoria, undefined, 'render-error');
+                                  target.dataset.auryaFallbackApplied = '1';
+                                  target.src = localUrl;
+                                  logLocalAssetServed(localUrl, categoryKey, 'card-img-error');
+                                }}
                               />
                               {imagemSelecionada === img && (
                                 <div className="absolute inset-0 flex items-center justify-center bg-violet-500/40">
@@ -1578,25 +1652,52 @@ function fecharModalAurya() {
                       </div>
                       {!!sugestoesAurya.imageOptions && sugestoesAurya.imageOptions.length > 0 && (
                         <div className="mt-3 flex items-center gap-2">
-                          {sugestoesAurya.imageOptions.map((opt, idx) => (
-                            <button
-                              key={`${opt.url}-${idx}`}
-                              type="button"
-                              onClick={() => setImagemSelecionada(opt.url)}
-                              className={`overflow-hidden rounded-md border ${
-                                imagemSelecionada === opt.url
-                                  ? 'border-violet-500 ring-2 ring-violet-500/40'
-                                  : 'border-slate-700'
-                              }`}
-                              title={`${opt.provider} • score ${opt.score}`}
-                            >
-                              <img
-                                src={opt.url}
-                                alt={`Opcao ${idx + 1}`}
-                                className="h-14 w-14 object-cover"
-                              />
-                            </button>
-                          ))}
+                          {sugestoesAurya.imageOptions.map((opt, idx) => {
+                            const categoryKey = resolveAuryaCategoryKey(sugestoesAurya.categoria, undefined);
+                            const relevancePct = typeof opt.relevanceScore === 'number'
+                              ? Math.round(opt.relevanceScore * 100)
+                              : null;
+                            const tooltip = [
+                              `Origem: ${opt.source ?? opt.provider}`,
+                              relevancePct !== null ? `Relevância: ${relevancePct}%` : `Score: ${opt.score}`,
+                              opt.matchedTags && opt.matchedTags.length > 0
+                                ? `Tags: ${opt.matchedTags.join(', ')}`
+                                : null,
+                            ]
+                              .filter(Boolean)
+                              .join(' • ');
+                            return (
+                              <button
+                                key={`${opt.url}-${idx}`}
+                                type="button"
+                                onClick={() => setImagemSelecionada(opt.url)}
+                                className={`overflow-hidden rounded-md border ${
+                                  imagemSelecionada === opt.url
+                                    ? 'border-violet-500 ring-2 ring-violet-500/40'
+                                    : 'border-slate-700'
+                                }`}
+                                title={tooltip}
+                              >
+                                <img
+                                  src={opt.url}
+                                  alt={`Opcao ${idx + 1}`}
+                                  className="h-14 w-14 object-cover bg-slate-900"
+                                  loading="lazy"
+                                  referrerPolicy="no-referrer"
+                                  data-aurya-category={categoryKey}
+                                  onError={(event) => {
+                                    const target = event.currentTarget;
+                                    if (target.dataset.auryaFallbackApplied === '1') return;
+                                    logInvalidImageUrl(opt.url, isLikelyExternalImageUrl(opt.url) ? 'csp-blocked' : 'render-error');
+                                    const localUrl = resolveAuryaFoodImage(sugestoesAurya.categoria, undefined, 'render-error');
+                                    target.dataset.auryaFallbackApplied = '1';
+                                    target.src = localUrl;
+                                    logLocalAssetServed(localUrl, categoryKey, 'option-img-error');
+                                  }}
+                                />
+                              </button>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
