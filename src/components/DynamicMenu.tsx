@@ -253,15 +253,13 @@ export function DynamicMenu({ usuario, sidebarCollapsed }: DynamicMenuProps) {
 
   const filtered = useMemo(() => {
     if (!catalog) return [];
+    // RC1.15 — userModules deixou de ser usado pelo gate do menu.
+    // Fonte de verdade: featuresAtivas do usuário + da loja.
     return buildMenu({
       catalog,
       userFeatures: [
         ...(usuario.featuresAtivas ?? []),
         ...(usuario.loja?.featuresAtivas ?? []),
-      ],
-      userModules: [
-        ...(usuario.modulosAtivos ?? []),
-        ...(usuario.loja?.modulosAtivos ?? []),
       ],
       role: usuario.role ?? '',
     });

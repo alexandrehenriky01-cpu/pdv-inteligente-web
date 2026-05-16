@@ -605,6 +605,33 @@ export function Produtos() {
         return false;
       }
 
+      // RC1.17 — antes de POST/PUT do produto, confirma que a categoria
+      // existe no backend. Se a lista estiver stale (caso do fluxo Aurya
+      // que cria categoria nova), re-fetch e checa de novo. Evita o erro
+      // "Categoria não encontrada" do backend.
+      const categoriaExisteNoEstado = categorias.some((c) => c.id === categoriaIdTrim);
+      if (!categoriaExisteNoEstado) {
+        try {
+          const refresh = await api.get<ICategoria[]>('/api/cadastros/categorias');
+          const persistida = refresh.data.some((c) => c.id === categoriaIdTrim);
+          if (persistida) {
+            flushSync(() => setCategorias(refresh.data));
+          } else {
+            alert(
+              '⚠️ Categoria não encontrada no banco. Selecione outra categoria ou clique novamente em "Preencher com Aurya".',
+            );
+            setStepAtual(1);
+            return false;
+          }
+        } catch (refreshErr) {
+          console.error('AURYA_FILL_CATEGORY_REFETCH_FAILED', refreshErr);
+          alert(
+            'Não foi possível confirmar a categoria selecionada. Verifique sua conexão e tente novamente.',
+          );
+          return false;
+        }
+      }
+
       try {
         const {
           controlaProducao,
@@ -791,6 +818,65 @@ export function Produtos() {
     setSegmentoSelecionado(null);
   };
 
+  /**
+   * RC1.17 — garante que a categoria sugerida pela IA esteja persistida no
+   * banco local ANTES de retornar o id. Reutiliza categoria existente
+   * (case-insensitive); senão cria + re-busca lista até encontrar pelo id.
+   * Lança se não conseguir resolver — chamador decide o que mostrar.
+   */
+  const garantirCategoriaPersistida = async (
+    nomeSugerido: string,
+  ): Promise<{ id: string; nome: string }> => {
+    const nomeTrim = String(nomeSugerido || '').trim();
+    if (!nomeTrim) throw new Error('Categoria sugerida está vazia.');
+
+    const nomeUpper = nomeTrim.toUpperCase();
+
+    // 1) Match local case-insensitive.
+    const existenteLocal = categorias.find(
+      (c) => c.nome.trim().toUpperCase() === nomeUpper,
+    );
+    if (existenteLocal) return { id: existenteLocal.id, nome: existenteLocal.nome };
+
+    // 2) Cria.
+    const payloadCategoria = transformarParaMaiusculas({ nome: nomeTrim }) as {
+      nome: string;
+    };
+    const catResponse = await api.post<ICategoria>(
+      '/api/cadastros/categorias',
+      payloadCategoria,
+    );
+    let resolvido = extrairIdCategoriaDaResposta(catResponse.data);
+
+    // 3) Re-fetch e confirma por nome (case-insensitive).
+    const listRes = await api.get<ICategoria[]>('/api/cadastros/categorias');
+    const fromList = listRes.data.find(
+      (c) => c.nome.trim().toUpperCase() === nomeUpper,
+    );
+    if (fromList) resolvido = fromList.id;
+
+    if (!resolvido) {
+      throw new Error(
+        'Categoria foi criada mas o backend não devolveu o id. Tente novamente.',
+      );
+    }
+
+    // 4) Confirma que está na lista atualizada (sanity).
+    const persistida = listRes.data.find((c) => c.id === resolvido);
+    if (!persistida) {
+      throw new Error(
+        'Categoria criada não apareceu na lista do backend. Recarregue e tente novamente.',
+      );
+    }
+
+    // 5) Atualiza o estado local de categorias para refletir o backend.
+    flushSync(() => {
+      setCategorias(listRes.data);
+    });
+
+    return { id: persistida.id, nome: persistida.nome };
+  };
+
   const preencherComIAReal = async () => {
     if (!formData.nome || formData.nome.length < 3) {
       alert("Digite o nome do produto primeiro! Ex: Picanha Bovina");
@@ -798,63 +884,46 @@ export function Produtos() {
     }
     setIaLoading(true);
     try {
-      const response = await api.post<IIAResponseProduto>('/api/ia/produtos/sugerir-preenchimento', { 
-        nomeProduto: formData.nome 
+      const response = await api.post<IIAResponseProduto>('/api/ia/produtos/sugerir-preenchimento', {
+        nomeProduto: formData.nome,
       });
 
       const dadosIA = response.data;
 
       let categoriaIdParaVincular: string | undefined;
       if (dadosIA.categoriaSugerida) {
-        const categoriaExistente = categorias.find(
-          (c) => c.nome.toLowerCase() === dadosIA.categoriaSugerida?.toLowerCase()
-        );
-        if (categoriaExistente) {
-          categoriaIdParaVincular = categoriaExistente.id;
-        } else {
-          const payloadCategoria = transformarParaMaiusculas({
-            nome: dadosIA.categoriaSugerida,
-          }) as { nome: string };
-          const catResponse = await api.post<ICategoria>('/api/cadastros/categorias', payloadCategoria);
-          let resolvido = extrairIdCategoriaDaResposta(catResponse.data);
-          if (!resolvido) {
-        const listRes = await api.get<ICategoria[]>('/api/cadastros/categorias');
-            const nomeU = String(dadosIA.categoriaSugerida).trim().toUpperCase();
-            resolvido = listRes.data.find((c) => c.nome.toUpperCase() === nomeU)?.id;
-          }
-          if (!resolvido) {
-            alert('Categoria criada, mas a API não retornou o ID. Recarregue a página e selecione a categoria manualmente.');
-          } else {
-            categoriaIdParaVincular = resolvido;
-            const nomeNova =
-              catResponse.data &&
-              typeof catResponse.data === 'object' &&
-              typeof catResponse.data.nome === 'string'
-                ? catResponse.data.nome
-                : String(dadosIA.categoriaSugerida).trim().toUpperCase();
-            flushSync(() => {
-              setCategorias((prev) => {
-                if (prev.some((c) => c.id === resolvido)) {
-                  return prev.map((c) => (c.id === resolvido ? { ...c, nome: nomeNova } : c));
-                }
-                return [...prev, { id: resolvido, nome: nomeNova }];
-              });
-              setFormData((f) => ({ ...f, categoriaId: resolvido }));
-            });
-            await carregarDados();
-          }
+        try {
+          const cat = await garantirCategoriaPersistida(dadosIA.categoriaSugerida);
+          categoriaIdParaVincular = cat.id;
+          console.info('AURYA_FILL_CATEGORY_PERSISTED', {
+            id: cat.id,
+            nome: cat.nome,
+            sugestao: dadosIA.categoriaSugerida,
+          });
+        } catch (catErr) {
+          const msg =
+            catErr instanceof Error
+              ? catErr.message
+              : 'Falha ao criar categoria sugerida.';
+          console.error('AURYA_FILL_CATEGORY_FAILED', msg);
+          alert(`Aurya sugeriu uma categoria, mas não foi possível persistir: ${msg}`);
+          // segue sem categoria — usuário será obrigado a selecionar manualmente.
         }
       }
 
-      setFormData((prev) => ({
-        ...prev,
-        ...(categoriaIdParaVincular ? { categoriaId: categoriaIdParaVincular } : {}),
-        ncm: dadosIA.ncm || prev.ncm,
-        precoCusto: dadosIA.precoCustoSugerido?.toString() || prev.precoCusto,
-        precoVenda: dadosIA.precoVendaSugerido?.toString() || prev.precoVenda,
-        cstCsosnIcms: dadosIA.cst || '102',
-        cfopPadrao: dadosIA.cfop || '5102',
-      }));
+      flushSync(() => {
+        setFormData((prev) => ({
+          ...prev,
+          ...(categoriaIdParaVincular
+            ? { categoriaId: categoriaIdParaVincular }
+            : {}),
+          ncm: dadosIA.ncm || prev.ncm,
+          precoCusto: dadosIA.precoCustoSugerido?.toString() || prev.precoCusto,
+          precoVenda: dadosIA.precoVendaSugerido?.toString() || prev.precoVenda,
+          cstCsosnIcms: dadosIA.cst || '102',
+          cfopPadrao: dadosIA.cfop || '5102',
+        }));
+      });
 
       setIaSugestoes({
         categoria: dadosIA.categoriaSugerida || 'Geral',
@@ -862,9 +931,12 @@ export function Produtos() {
         margem: dadosIA.margemSugerida || '30%',
       });
     } catch (err) {
-      const error = err as AxiosError<{error?: string}>;
-      console.error("Erro na IA:", error);
-      alert(error.response?.data?.error || "A Aurya não conseguiu processar este produto no momento. Tente novamente.");
+      const error = err as AxiosError<{ error?: string }>;
+      console.error('Erro na IA:', error);
+      alert(
+        error.response?.data?.error ||
+          'A Aurya não conseguiu processar este produto no momento. Tente novamente.',
+      );
     } finally {
       setIaLoading(false);
     }

@@ -1,8 +1,12 @@
 /**
  * menuBuilder — constrói o menu lateral a partir do catálogo oficial (API) +
- * featuresAtivas e modulosAtivos do usuário.
+ * featuresAtivas do usuário.
  *
- * NÃO usa MODULOS_HIERARQUICOS, listas hardcoded nem fallbacks manuais.
+ * RC1.15 — fonte de verdade: ACCESS_CATALOG + featuresAtivas + permissions.
+ * `modulosAtivos` foi removido do gate de visibilidade. Tabelas
+ * `loja_modulos` / `loja_features` não existem mais; em modo LOCAL,
+ * `modulosAtivos` chega vazio e `featuresAtivas` é a única fonte autoritativa.
+ *
  * SUPER_ADMIN e SUPORTE_MASTER enxergam todos os itens do catálogo.
  */
 import type { AccessCatalog } from './accessCatalog';
@@ -19,7 +23,11 @@ import { normalizeFeature, normalizeFeatures } from '../config/normalizeFeature'
 export interface BuildMenuParams {
   catalog: AccessCatalog;
   userFeatures: string[];
-  userModules: string[];
+  /**
+   * @deprecated RC1.15 — não é mais usado para gating do menu. Mantido na
+   * assinatura por compatibilidade de chamadores; pode ser passado vazio.
+   */
+  userModules?: string[];
   role: string;
 }
 
@@ -28,48 +36,27 @@ function isSuperAdmin(role: string): boolean {
   return r === 'SUPER_ADMIN' || r === 'SUPORTE_MASTER';
 }
 
-export function buildMenu({ catalog, userFeatures, userModules, role }: BuildMenuParams): MenuConfigEntry[] {
+export function buildMenu({ catalog, userFeatures, role }: BuildMenuParams): MenuConfigEntry[] {
   const superAdmin = isSuperAdmin(role);
-  const activeModulesUpper = new Set(userModules.map((m) => m.toUpperCase()));
 
-  // Monta o conjunto de feature codes válidos por módulo (do catálogo)
-  const catalogFeaturesByModule = new Map<string, Set<string>>();
+  // Universo de features conhecidas pelo catálogo (sanity check para SUPER_ADMIN).
+  const catalogAllFeatures = new Set<string>();
   for (const mod of catalog.modules) {
-    catalogFeaturesByModule.set(
-      mod.module.toUpperCase(),
-      new Set(mod.features.map((f) => f.code)),
-    );
-  }
-
-  // Conjunto de features do catálogo acessíveis ao usuário (baseado nos módulos ativos)
-  const validCatalogFeatures = new Set<string>();
-  if (superAdmin) {
-    // SUPER_ADMIN: enxerga todo o catálogo
-    for (const mod of catalog.modules) {
-      for (const f of mod.features) {
-        validCatalogFeatures.add(f.code);
-      }
-    }
-  } else {
-    for (const modCode of activeModulesUpper) {
-      const modFeatures = catalogFeaturesByModule.get(modCode);
-      if (modFeatures) {
-        for (const fc of modFeatures) {
-          validCatalogFeatures.add(fc);
-        }
-      }
+    for (const f of mod.features) {
+      catalogAllFeatures.add(f.code);
     }
   }
 
-  // Features do usuário normalizadas para chaves canônicas
+  // Features do usuário normalizadas — fonte ÚNICA de verdade para
+  // visibilidade em usuários de loja (RC1.15).
   const normalizedUserFeatures = new Set(normalizeFeatures(userFeatures));
 
-  console.log('[MENU DEBUG] buildMenu — entrada', {
+  // RC1.15 — log padronizado pedido pelo time. Não remover sem alinhar.
+  console.info('FRONTEND_FEATURES_LOADED', {
     role,
     superAdmin,
-    modulosAtivos: [...activeModulesUpper],
-    userFeaturesNormalizadas: [...normalizedUserFeatures],
-    catalogFeaturesDisponíveis: validCatalogFeatures.size,
+    featuresAtivas: [...normalizedUserFeatures],
+    catalogFeaturesCount: catalogAllFeatures.size,
   });
 
   function itemVisible(item: MenuItemConfig): boolean {
@@ -82,11 +69,13 @@ export function buildMenu({ catalog, userFeatures, userModules, role }: BuildMen
     const key = normalizeFeature(item.feature);
 
     if (superAdmin) {
-      // SUPER_ADMIN: visível se a feature existe no catálogo
-      if (!validCatalogFeatures.has(key)) return false;
+      // SUPER_ADMIN: visível se a feature existe no catálogo.
+      if (!catalogAllFeatures.has(key)) return false;
     } else {
-      // Usuário de loja: feature deve estar nos módulos ativos E nas featuresAtivas do usuário
-      if (!validCatalogFeatures.has(key)) return false;
+      // RC1.15 — usuário de loja: única regra é featuresAtivas.
+      // modulosAtivos foi removido do gate. Catálogo NÃO é cross-checado
+      // aqui porque featuresAtivas já é controlada pelo backend
+      // (ACCESS_CATALOG + permissions + featureMasterMap).
       if (!normalizedUserFeatures.has(key)) return false;
     }
 
@@ -95,7 +84,7 @@ export function buildMenu({ catalog, userFeatures, userModules, role }: BuildMen
       for (const ex of item.extraRequiredFeatures) {
         const exKey = normalizeFeature(ex);
         if (superAdmin) {
-          if (!validCatalogFeatures.has(exKey)) return false;
+          if (!catalogAllFeatures.has(exKey)) return false;
         } else {
           if (!normalizedUserFeatures.has(exKey)) return false;
         }
@@ -156,7 +145,8 @@ export function buildMenu({ catalog, userFeatures, userModules, role }: BuildMen
     return [];
   });
 
-  console.log('[MENU DEBUG] buildMenu — resultado', {
+  // RC1.15 — log padronizado pedido pelo time. Não remover sem alinhar.
+  console.info('FRONTEND_MENU_BUILT', {
     totalItens: featuresExibidas.length,
     modulosExibidos,
     featuresExibidas,
