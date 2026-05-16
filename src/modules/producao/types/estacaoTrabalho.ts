@@ -51,3 +51,29 @@ export interface EstacaoTrabalho {
   layoutRecebimento?: { id: string; nome: string } | null;
   layoutExpedicao?: { id: string; nome: string } | null;
 }
+
+export type TipoImpressora = 'ZPL' | 'TERMICA' | 'A4' | 'ETIQUETA';
+
+export type TipoUsoImpressora =
+  | 'CUPOM_FISCAL'
+  | 'CUPOM_NAO_FISCAL'
+  | 'DELIVERY'
+  | 'ETIQUETA'
+  | 'RELATORIO'
+  | 'PADRAO';
+
+export interface WorkstationPrinter {
+  id: string;
+  lojaId: string;
+  workstationId: string;
+  nome: string;
+  isDefault: boolean;
+  driver?: string | null;
+  port?: string | null;
+  status: 'ONLINE' | 'OFFLINE' | 'ERRO' | 'SEM_PAPEL';
+  tipo: TipoImpressora;
+  tipoUso: TipoUsoImpressora;
+  deviceId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}

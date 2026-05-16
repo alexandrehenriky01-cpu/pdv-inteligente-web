@@ -23,9 +23,16 @@ import {
   Network,
   Tag,
   Search,
+  Trash2,
 } from 'lucide-react';
 import { api } from '../../../services/api';
-import { EstacaoTrabalho, ModoOperacaoEstacao } from '../types/estacaoTrabalho';
+import {
+  EstacaoTrabalho,
+  ModoOperacaoEstacao,
+  WorkstationPrinter,
+  TipoImpressora,
+  TipoUsoImpressora,
+} from '../types/estacaoTrabalho';
 
 type TriBool = '' | 'true' | 'false';
 
@@ -162,6 +169,13 @@ const EstacaoTrabalhoFormModal: FC<Props> = ({
   const [impressoraComboAberto, setImpressoraComboAberto] = useState(false);
   const impressoraComboRef = useRef<HTMLDivElement>(null);
 
+  const [printers, setPrinters] = useState<WorkstationPrinter[]>([]);
+  const [printersLoading, setPrintersLoading] = useState(false);
+  const [addingPrinter, setAddingPrinter] = useState(false);
+  const [newPrinterNome, setNewPrinterNome] = useState('');
+  const [newPrinterTipo, setNewPrinterTipo] = useState<TipoImpressora>('TERMICA');
+  const [newPrinterTipoUso, setNewPrinterTipoUso] = useState<TipoUsoImpressora>('PADRAO');
+
   const getErrorMessage = (err: unknown): string => {
     if (err && typeof err === 'object' && 'response' in err) {
       const axiosError = err as {
@@ -275,6 +289,28 @@ const EstacaoTrabalhoFormModal: FC<Props> = ({
   }, [isOpen]);
 
   useEffect(() => {
+    if (!isOpen || !estacao) {
+      setPrinters([]);
+      return;
+    }
+    let cancelled = false;
+    const fetchPrinters = async () => {
+      setPrintersLoading(true);
+      try {
+        const res = await api.get(`${API_BASE}/${estacao.id}/impressoras`);
+        const body = res.data as { success?: boolean; data?: WorkstationPrinter[] };
+        if (!cancelled) setPrinters(body.data || []);
+      } catch {
+        if (!cancelled) setPrinters([]);
+      } finally {
+        if (!cancelled) setPrintersLoading(false);
+      }
+    };
+    void fetchPrinters();
+    return () => { cancelled = true; };
+  }, [estacao, isOpen]);
+
+  useEffect(() => {
     const root = impressoraComboRef.current;
     if (!root) return;
     const onDocMouseDown = (e: MouseEvent) => {
@@ -298,6 +334,44 @@ const EstacaoTrabalhoFormModal: FC<Props> = ({
       setBuscandoImpressoras(false);
     }
   }, []);
+
+  const handleAddPrinter = useCallback(async () => {
+    if (!estacao || !newPrinterNome.trim()) return;
+    setAddingPrinter(true);
+    setError(null);
+    try {
+      const res = await api.post(`${API_BASE}/${estacao.id}/impressoras`, {
+        nome: newPrinterNome.trim().toUpperCase(),
+        tipo: newPrinterTipo,
+        tipoUso: newPrinterTipoUso,
+      });
+      const body = res.data as { success?: boolean; data?: WorkstationPrinter };
+      if (body.data) {
+        setPrinters((prev) => [...prev, body.data as WorkstationPrinter]);
+      }
+      setNewPrinterNome('');
+      setNewPrinterTipo('TERMICA');
+      setNewPrinterTipoUso('PADRAO');
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setAddingPrinter(false);
+    }
+  }, [estacao, newPrinterNome, newPrinterTipo, newPrinterTipoUso]);
+
+  const handleRemovePrinter = useCallback(
+    async (printerId: string) => {
+      if (!estacao) return;
+      setError(null);
+      try {
+        await api.delete(`${API_BASE}/${estacao.id}/impressoras/${printerId}`);
+        setPrinters((prev) => prev.filter((p) => p.id !== printerId));
+      } catch (err) {
+        setError(getErrorMessage(err));
+      }
+    },
+    [estacao],
+  );
 
   const impressorasFiltradas = useMemo(() => {
     const q = form.nomeImpressora.trim().toLowerCase();
@@ -832,6 +906,132 @@ const EstacaoTrabalhoFormModal: FC<Props> = ({
                   nome exato como no Windows. Com QZ Tray, esta lista virá das
                   impressoras reais instaladas.
                 </p>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-4 bg-[#131b2f]/50 p-5 rounded-2xl border border-gray-800">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2 mb-4">
+              <Printer size={16} className="text-amber-400" />
+              Impressoras Vinculadas (Multi-impressora)
+            </h3>
+
+            {!estacao ? (
+              <p className="text-sm text-gray-500">
+                Salve a estação primeiro para gerenciar impressoras.
+              </p>
+            ) : printersLoading ? (
+              <div className="flex items-center gap-2 text-sm text-gray-400">
+                <Loader2 size={16} className="animate-spin" />
+                Carregando impressoras...
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {printers.length === 0 && (
+                  <p className="text-sm text-gray-500">
+                    Nenhuma impressora vinculada.
+                  </p>
+                )}
+                {printers.map((printer) => (
+                  <div
+                    key={printer.id}
+                    className="flex items-center justify-between gap-3 p-3 rounded-xl bg-[#0b1324] border border-gray-700/50"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-white truncate">
+                        {printer.nome}
+                      </p>
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                          {printer.tipo}
+                        </span>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-violet-500/10 text-violet-300 border border-violet-500/20">
+                          {printer.tipoUso}
+                        </span>
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                            printer.status === 'ONLINE'
+                              ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
+                              : printer.status === 'OFFLINE'
+                                ? 'bg-gray-500/10 text-gray-400 border border-gray-500/20'
+                                : 'bg-red-500/10 text-red-300 border border-red-500/20'
+                          }`}
+                        >
+                          {printer.status}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleRemovePrinter(printer.id)}
+                      className="p-2 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+                      title="Remover impressora"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+
+                <div className="pt-3 border-t border-gray-800">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+                    Adicionar Impressora
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                    <div className="sm:col-span-2">
+                      <input
+                        type="text"
+                        value={newPrinterNome}
+                        onChange={(e) => setNewPrinterNome(e.target.value)}
+                        placeholder="Nome da impressora"
+                        className={inputClass}
+                      />
+                    </div>
+                    <select
+                      value={newPrinterTipo}
+                      onChange={(e) =>
+                        setNewPrinterTipo(e.target.value as TipoImpressora)
+                      }
+                      className={inputClass}
+                    >
+                      <option value="TERMICA">Térmica</option>
+                      <option value="ZPL">ZPL</option>
+                      <option value="A4">A4</option>
+                      <option value="ETIQUETA">Etiqueta</option>
+                    </select>
+                    <div className="flex gap-2">
+                      <select
+                        value={newPrinterTipoUso}
+                        onChange={(e) =>
+                          setNewPrinterTipoUso(
+                            e.target.value as TipoUsoImpressora,
+                          )
+                        }
+                        className={inputClass}
+                      >
+                        <option value="PADRAO">Padrão</option>
+                        <option value="CUPOM_FISCAL">Cupom Fiscal</option>
+                        <option value="CUPOM_NAO_FISCAL">
+                          Cupom Não Fiscal
+                        </option>
+                        <option value="DELIVERY">Delivery</option>
+                        <option value="ETIQUETA">Etiqueta</option>
+                        <option value="RELATORIO">Relatório</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => void handleAddPrinter()}
+                        disabled={addingPrinter || !newPrinterNome.trim()}
+                        className="shrink-0 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-r from-amber-600 to-orange-600 rounded-xl hover:scale-[1.02] transition-transform disabled:opacity-50 disabled:scale-100 flex items-center gap-2 shadow-lg shadow-amber-500/20"
+                      >
+                        {addingPrinter ? (
+                          <Loader2 size={16} className="animate-spin" />
+                        ) : (
+                          '+'
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
           </div>
