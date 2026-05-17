@@ -5,6 +5,7 @@ import { api, resolveApiBaseUrl } from '../../services/api';
 import { buildKdsSocketAuth } from '../../services/socket/kdsSocketAuth';
 import { TOTAL_MESAS } from './constants';
 import type { MesaApi } from './types';
+import { extractMesaDelta, applyMesaDelta } from './mesaDelta';
 
 export interface UseMesasOptions {
   /** Quando false, não dispara GET /api/mesas. */
@@ -80,8 +81,23 @@ export function useMesas(options: UseMesasOptions = {}) {
       });
     };
 
-    const onMesaContaAtualizada = () => {
-      void carregar();
+    // RC2.5x — PR-6: aplica delta quando o payload trouxer `mesa` rico
+    // (rota `adicionarItens` do backend). Para outros emit sites
+    // legados (sem `mesa`), cai no refetch full.
+    const onMesaContaAtualizada = (payload: unknown) => {
+      const delta = extractMesaDelta(payload);
+      if (!delta) {
+        void carregar();
+        return;
+      }
+      setMesas((prev) => {
+        const result = applyMesaDelta(prev, delta);
+        if (result.needsRefetch) {
+          void carregar();
+          return prev;
+        }
+        return result.next;
+      });
     };
 
     socket.on('mesa-liberada', onMesaLiberada);
