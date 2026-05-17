@@ -24,8 +24,11 @@ import {
   Tag,
   Search,
   Trash2,
+  Play,
 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { api } from '../../../services/api';
+import { getHardwareAgent } from '../../../services/hardwareAgent';
 import {
   EstacaoTrabalho,
   ModoOperacaoEstacao,
@@ -175,6 +178,7 @@ const EstacaoTrabalhoFormModal: FC<Props> = ({
   const [newPrinterNome, setNewPrinterNome] = useState('');
   const [newPrinterTipo, setNewPrinterTipo] = useState<TipoImpressora>('TERMICA');
   const [newPrinterTipoUso, setNewPrinterTipoUso] = useState<TipoUsoImpressora>('PADRAO');
+  const [testingPrinterId, setTestingPrinterId] = useState<string | null>(null);
 
   const getErrorMessage = (err: unknown): string => {
     if (err && typeof err === 'object' && 'response' in err) {
@@ -368,6 +372,65 @@ const EstacaoTrabalhoFormModal: FC<Props> = ({
         setPrinters((prev) => prev.filter((p) => p.id !== printerId));
       } catch (err) {
         setError(getErrorMessage(err));
+      }
+    },
+    [estacao],
+  );
+
+  const handleTestPrinter = useCallback(
+    async (printer: WorkstationPrinter) => {
+      if (!estacao) return;
+      setTestingPrinterId(printer.id);
+      setError(null);
+      try {
+        const res = await api.post(`${API_BASE}/${estacao.id}/impressoras/${printer.id}/testar`);
+        const body = res.data as { success?: boolean; data?: { texto: string; formato: string; impressora: string } };
+        if (!body.success || !body.data) {
+          throw new Error('Falha ao gerar conteudo de teste.');
+        }
+        const { texto, formato, impressora } = body.data;
+        const agent = getHardwareAgent();
+        if (!agent.isConnected) {
+          agent.connect();
+          const ok = await agent.waitForOpen(3000);
+          if (!ok) {
+            toast.error('Agente de Hardware offline. Verifique se o AuryaHardwareAgent esta rodando.');
+            return;
+          }
+        }
+        const result = await new Promise<{ sucesso: boolean; mensagem?: string }>((resolve) => {
+          const unsubscribe = agent.subscribe((msg) => {
+            if (msg.tipo === 'RESPOSTA_IMPRESSAO') {
+              unsubscribe();
+              resolve({ sucesso: Boolean(msg.sucesso), mensagem: String(msg.mensagem || '') });
+            }
+          });
+          const sent = agent.send({
+            acao: 'IMPRIMIR_CUPOM',
+            formato,
+            payload: texto,
+            impressora,
+            codepage: formato === 'texto' ? '860' : '',
+          });
+          if (!sent) {
+            unsubscribe();
+            resolve({ sucesso: false, mensagem: 'Falha ao enviar comando para o Agente de Hardware.' });
+          }
+          setTimeout(() => {
+            unsubscribe();
+            resolve({ sucesso: false, mensagem: 'Tempo limite aguardando resposta do Agente de Hardware.' });
+          }, 10000);
+        });
+        if (result.sucesso) {
+          toast.success(`Teste enviado para "${impressora}"!`);
+        } else {
+          toast.error(result.mensagem || 'Falha ao testar impressora.');
+        }
+      } catch (err) {
+        const msg = getErrorMessage(err);
+        toast.error(msg);
+      } finally {
+        setTestingPrinterId(null);
       }
     },
     [estacao],
@@ -961,14 +1024,29 @@ const EstacaoTrabalhoFormModal: FC<Props> = ({
                         </span>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => void handleRemovePrinter(printer.id)}
-                      className="p-2 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
-                      title="Remover impressora"
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => void handleTestPrinter(printer)}
+                        disabled={testingPrinterId !== null}
+                        className="p-2 rounded-lg text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        title="Testar impressão"
+                      >
+                        {testingPrinterId === printer.id ? (
+                          <Loader2 size={16} className="animate-spin" />
+                        ) : (
+                          <Play size={16} />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleRemovePrinter(printer.id)}
+                        className="p-2 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+                        title="Remover impressora"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </div>
                 ))}
 
