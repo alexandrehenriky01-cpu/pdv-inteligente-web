@@ -13,6 +13,9 @@ import {
 import { extrairIdVendaPayload } from './kdsPedidoUtils';
 
 const POLL_MS = 10_000;
+// RC2.5x — PR-5 perf audit: com socket conectado, polling cai para safety
+// net de baixa frequência. Mesma justificativa do KdsPage.tsx.
+const POLL_SAFETY_NET_MS = 60_000;
 const ROTACAO_MS = 7000;
 const MAX_LISTA_SECUNDARIA = 6;
 const SONS_INTERVALOS_MS = [0, 5000, 10000] as const;
@@ -237,9 +240,10 @@ export function KdsChamadaBalcaoPage() {
         if (import.meta.env.DEV) console.warn('[KDS_CHAMADA] poll falhou', e);
       }
     };
-    const t = window.setInterval(poll, POLL_MS);
+    const intervalMs = socketStatus === 'connected' ? POLL_SAFETY_NET_MS : POLL_MS;
+    const t = window.setInterval(poll, intervalMs);
     return () => clearInterval(t);
-  }, [carregando]);
+  }, [carregando, socketStatus]);
 
   useEffect(() => {
     const auth = buildKdsSocketAuth();
