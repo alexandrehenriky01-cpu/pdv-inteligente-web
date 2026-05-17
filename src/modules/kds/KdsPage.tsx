@@ -42,6 +42,11 @@ const COLUNAS: Array<{ id: ColunaKds; titulo: string; subtitulo: string }> = [
 
 export function KdsPage() {
   const [pedidos, setPedidos] = useState<KdsPedido[]>([]);
+  // RC2.5x — PR-9: ref para acessar a lista atual sem depender dela no
+  // useCallback. Permite memo do KdsOrderCard sem re-criar refs dos
+  // handlers a cada mudança de `pedidos`.
+  const pedidosRef = useRef(pedidos);
+  pedidosRef.current = pedidos;
   const [socketStatus, setSocketStatus] = useState<SocketStatus>('idle');
   const [carregandoLista, setCarregandoLista] = useState(true);
   const [savingIds, setSavingIds] = useState<Set<string>>(() => new Set());
@@ -244,7 +249,7 @@ export function KdsPage() {
   }, []);
 
   const avancar = useCallback(async (id: string) => {
-    const p = pedidos.find((x) => x.id === id);
+    const p = pedidosRef.current.find((x) => x.id === id);
     if (!p) return;
     const next =
       p.coluna === 'TODO' ? 'PREPARANDO' : p.coluna === 'PREPARANDO' ? 'PRONTO' : null;
@@ -263,14 +268,14 @@ export function KdsPage() {
         return n;
       });
     }
-  }, [pedidos]);
+  }, []);
 
   const abrirCancelarPedido = useCallback((id: string) => {
-    const p = pedidos.find((x) => x.id === id);
+    const p = pedidosRef.current.find((x) => x.id === id);
     if (p && colunaKdsPermiteCancelar(p.coluna)) {
       setCancelTarget(p);
     }
-  }, [pedidos]);
+  }, []);
 
   const confirmarCancelarPedido = useCallback(
     async (payload: { motivo: string; observacao: string | null }) => {

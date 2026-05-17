@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import {
   Building2,
   ChevronRight,
@@ -116,7 +117,7 @@ interface KdsOrderCardProps {
   urgente?: boolean;
 }
 
-export function KdsOrderCard({
+function KdsOrderCardComponent({
   pedido,
   nowMs,
   onAvancar,
@@ -301,3 +302,8 @@ export function KdsOrderCard({
     </article>
   );
 }
+
+// RC2.5x — PR-9 perf audit: memo evita re-render quando props relevantes
+// não mudaram. nowMs ainda fura via tick global (1Hz), mas mudanças de
+// estado não-temporais (savingIds, novo pedido) deixam de cascatear.
+export const KdsOrderCard = memo(KdsOrderCardComponent);
