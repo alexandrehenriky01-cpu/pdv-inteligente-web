@@ -27,6 +27,7 @@ import { abrirRotaDelivery } from '../../delivery-tracking/utils/googleMapsUtils
 import { useDeliveryPrint } from '../../delivery-tracking/hooks/useDeliveryPrint';
 import { useRouteManifestPrint } from '../../delivery-tracking/hooks/useRouteManifestPrint';
 import { dispararImpressaoDireta, type CupomPedidoData, criarRomaneio } from '../../delivery-tracking/services/cupomTemplateService';
+import { DeliveryRow } from '../components/DeliveryRow';
 
 const SOCKET_URL = resolveApiBaseUrl();
 
@@ -464,7 +465,10 @@ export function GestaoDeliveryPage() {
     };
   }, [socketOptions, impressaoAutomatica, agentOnline, imprimirPedidoAutomatico]);
 
-  const sairParaEntrega = async (id: string, endereco: string) => {
+  // RC2.5x — PR-7: callbacks via useCallback estabilizam refs para que o
+  // React.memo do DeliveryRow funcione (linhas que não mudaram não re-rendam).
+  const sairParaEntrega = useCallback(async (id: string, endereco: string) => {
+    void endereco;
     setSavingIds((s) => new Set(s).add(id));
     try {
       await api.post(`/api/entregas/${id}/sair-entrega`);
@@ -484,9 +488,9 @@ export function GestaoDeliveryPage() {
         return n;
       });
     }
-  };
+  }, [carregarPedidos]);
 
-  const confirmarEntrega = async (id: string) => {
+  const confirmarEntrega = useCallback(async (id: string) => {
     setSavingIds((s) => new Set(s).add(id));
     try {
       await api.post(`/api/entregas/${id}/confirmar-entrega`);
@@ -502,15 +506,28 @@ export function GestaoDeliveryPage() {
         return n;
       });
     }
-  };
+  }, [carregarPedidos]);
 
-  const verRota = (endereco: string) => {
+  const verRota = useCallback((endereco: string) => {
     if (!endereco) {
       toast.error('Endereço não disponível para calcular rota.');
       return;
     }
     abrirRotaDelivery('Loja', endereco);
-  };
+  }, []);
+
+  const handleImprimirCupomRow = useCallback(async (id: string) => {
+    setPrintingIds((s) => new Set(s).add(id));
+    try {
+      await imprimirCupom(id, true);
+    } finally {
+      setPrintingIds((s) => {
+        const n = new Set(s);
+        n.delete(id);
+        return n;
+      });
+    }
+  }, [imprimirCupom]);
 
   const handleImprimirRomaneio = async () => {
     // Determina os pedidos elegíveis para entrar no romaneio.
@@ -629,7 +646,7 @@ export function GestaoDeliveryPage() {
     window.open(whatsappUrl, '_blank');
   };
 
-  const toggleSelectOrder = (id: string) => {
+  const toggleSelectOrder = useCallback((id: string) => {
     setSelectedOrderIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) {
@@ -639,7 +656,7 @@ export function GestaoDeliveryPage() {
       }
       return next;
     });
-  };
+  }, []);
 
   const toggleSelectAll = () => {
     const pendentes = filteredPedidos
@@ -985,195 +1002,21 @@ export function GestaoDeliveryPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredPedidos.map((row) => {
-                      const busy = savingIds.has(row.id);
-                      const isPrinting = printingIds.has(row.id);
-                      const statusBadge = badgeStatusEntrega(row.statusEntrega);
-                      const retirada = isRetiradaBalcaoGestao(row.tipoPedido);
-                      const podeSairEntrega = row.statusEntrega === 'PENDENTE' && !retirada;
-                      const podeConfirmar = row.statusEntrega === 'SAIU_ENTREGA' && !retirada;
-                      const preparoU = String(row.statusPreparo ?? '').toUpperCase();
-                      const podeConcluirRetirada =
-                        retirada && row.statusEntrega === 'PENDENTE' && preparoU === 'PRONTO';
-                      const cupomPendente = row.statusEntrega === 'PENDENTE' && (podeSairEntrega || retirada);
-                      const isRecentlyUpdated = row.updatedAt && new Date(row.updatedAt).getTime() > Date.now() - 5000;
-
-                      const handleImprimirCupom = async () => {
-                        setPrintingIds((s) => new Set(s).add(row.id));
-                        try {
-                          await imprimirCupom(row.id, true);
-                        } finally {
-                          setPrintingIds((s) => {
-                            const n = new Set(s);
-                            n.delete(row.id);
-                            return n;
-                          });
-                        }
-                      };
-
-                      return (
-                        <tr
-                          key={row.id}
-                          className={`border-b border-white/5 transition-colors ${isRecentlyUpdated ? 'bg-emerald-500/5' : 'hover:bg-white/[0.03]'}`}
-                        >
-                          <td className="px-2 py-4">
-                            {podeSairEntrega ? (
-                              <input
-                                type="checkbox"
-                                checked={selectedOrderIds.has(row.id)}
-                                onChange={() => toggleSelectOrder(row.id)}
-                                className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-sky-500 focus:ring-sky-500"
-                              />
-                            ) : null}
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="flex items-center gap-2">
-                              {isRecentlyUpdated && (
-                                <Zap className="w-4 h-4 text-emerald-400 animate-pulse" />
-                              )}
-                              <div className={`font-black text-lg ${isRecentlyUpdated ? 'text-emerald-300' : 'text-white'}`}>
-                                #{row.numeroPedido || row.numeroVenda}
-                              </div>
-                            </div>
-                            <div className="text-[10px] text-slate-500 font-mono mt-1">
-                              {formatTime(row.createdAt)}
-                            </div>
-                            <div className="mt-2">
-                              <span
-                                className={`inline-flex rounded-md px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${
-                                  retirada
-                                    ? 'border border-violet-500/40 bg-violet-500/15 text-violet-200'
-                                    : 'border border-sky-500/40 bg-sky-500/15 text-sky-200'
-                                }`}
-                              >
-                                {retirada ? 'Retirada' : 'Entrega'}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="font-bold text-white">{row.nomeCliente || '—'}</div>
-                            {row.telefoneCliente && (
-                              <div className="flex items-center gap-1 mt-1">
-                                <Phone className="w-3 h-3 text-slate-400" />
-                                <span className="text-xs text-slate-400">{row.telefoneCliente}</span>
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-4 py-4 max-w-[300px]">
-                            <div className="flex items-start gap-2">
-                              <MapPin className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
-                              <span className="text-xs text-slate-300 whitespace-pre-wrap leading-snug">
-                                {retirada ? 'Retirada no balcão' : row.enderecoEntrega || 'Sem endereço'}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-4">
-                            <span
-                              className={`inline-flex rounded-lg px-2.5 py-1 text-xs font-black uppercase tracking-wide ${statusBadge.className}`}
-                            >
-                              {statusBadge.label}
-                            </span>
-                            {(row.estornoFinanceiroPendente || row.cancelamentoFiscalPendente) && (
-                              <div className="mt-1.5 space-y-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-200/90">
-                                {row.estornoFinanceiroPendente ? <div>Estorno caixa pendente</div> : null}
-                                {row.cancelamentoFiscalPendente ? <div>Cancel. fiscal pendente</div> : null}
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-4 py-4 text-right font-mono font-bold text-emerald-300">
-                            {formatCurrency(row.valorTotal)}
-                          </td>
-                          <td className="px-4 py-4 text-right">
-                            <div className="flex flex-wrap justify-end gap-2">
-                              {cupomPendente && (
-                                <button
-                                  type="button"
-                                  disabled={isPrinting || !agentOnline}
-                                  onClick={() => void handleImprimirCupom()}
-                                  className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/35 bg-sky-500/10 px-3 py-2 text-xs font-black uppercase tracking-wide text-sky-100 hover:bg-sky-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                  {isPrinting ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  ) : (
-                                    <Printer className="w-3.5 h-3.5" />
-                                  )}
-                                  Cupom
-                                </button>
-                              )}
-                              {podeSairEntrega && (
-                                <button
-                                  type="button"
-                                  disabled={busy}
-                                  onClick={() => void sairParaEntrega(row.id, row.enderecoEntrega || '')}
-                                  className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-amber-600 to-orange-600 px-3 py-2 text-xs font-black uppercase tracking-wide text-white shadow-[0_0_16px_rgba(245,158,11,0.35)] hover:scale-[1.02] transition-all disabled:opacity-50"
-                                >
-                                  {busy ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  ) : (
-                                    <Rocket className="w-3.5 h-3.5" />
-                                  )}
-                                  Sair p/ Entrega
-                                </button>
-                              )}
-                              {podeConcluirRetirada && (
-                                <button
-                                  type="button"
-                                  disabled={busy}
-                                  onClick={() => void confirmarEntrega(row.id)}
-                                  className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 px-3 py-2 text-xs font-black uppercase tracking-wide text-white shadow-[0_0_16px_rgba(16,185,129,0.35)] hover:scale-[1.02] transition-all disabled:opacity-50"
-                                >
-                                  {busy ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  ) : (
-                                    <CheckCircle className="w-3.5 h-3.5" />
-                                  )}
-                                  Concluir retirada
-                                </button>
-                              )}
-                              {podeConfirmar && (
-                                <>
-                                  <button
-                                    type="button"
-                                    disabled={isPrinting || !agentOnline}
-                                    onClick={() => void handleImprimirCupom()}
-                                    className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/35 bg-sky-500/10 px-3 py-2 text-xs font-black uppercase tracking-wide text-sky-100 hover:bg-sky-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                  >
-                                    {isPrinting ? (
-                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                    ) : (
-                                      <Printer className="w-3.5 h-3.5" />
-                                    )}
-                                    Cupom
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={busy}
-                                    onClick={() => verRota(row.enderecoEntrega || '')}
-                                    className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/35 bg-sky-500/10 px-3 py-2 text-xs font-black uppercase tracking-wide text-sky-100 hover:bg-sky-500/20 transition-all"
-                                  >
-                                    <MapPin className="w-3.5 h-3.5" />
-                                    Ver Rota
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={busy}
-                                    onClick={() => void confirmarEntrega(row.id)}
-                                    className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 px-3 py-2 text-xs font-black uppercase tracking-wide text-white shadow-[0_0_16px_rgba(16,185,129,0.35)] hover:scale-[1.02] transition-all disabled:opacity-50"
-                                  >
-                                    {busy ? (
-                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                    ) : (
-                                      <CheckCircle className="w-3.5 h-3.5" />
-                                    )}
-                                    Confirmar
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {filteredPedidos.map((row) => (
+                      <DeliveryRow
+                        key={row.id}
+                        row={row}
+                        busy={savingIds.has(row.id)}
+                        isPrinting={printingIds.has(row.id)}
+                        isSelected={selectedOrderIds.has(row.id)}
+                        agentOnline={agentOnline}
+                        onToggleSelect={toggleSelectOrder}
+                        onImprimirCupom={handleImprimirCupomRow}
+                        onSairParaEntrega={sairParaEntrega}
+                        onConfirmarEntrega={confirmarEntrega}
+                        onVerRota={verRota}
+                      />
+                    ))}
                   </tbody>
                 </table>
               </div>
