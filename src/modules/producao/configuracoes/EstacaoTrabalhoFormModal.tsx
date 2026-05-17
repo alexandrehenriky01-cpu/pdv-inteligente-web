@@ -28,7 +28,6 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { api } from '../../../services/api';
-import { getHardwareAgent } from '../../../services/hardwareAgent';
 import {
   EstacaoTrabalho,
   ModoOperacaoEstacao,
@@ -383,49 +382,23 @@ const EstacaoTrabalhoFormModal: FC<Props> = ({
       setTestingPrinterId(printer.id);
       setError(null);
       try {
-        const res = await api.post(`${API_BASE}/${estacao.id}/impressoras/${printer.id}/testar`);
-        const body = res.data as { success?: boolean; data?: { texto: string; formato: string; impressora: string } };
-        if (!body.success || !body.data) {
-          throw new Error('Falha ao gerar conteudo de teste.');
+        // RC2.5t — o agent não escuta mais em WebSocket localhost:8080.
+        // O backend agora ENFILEIRA um print_job (CUPOM_NAO_FISCAL_80MM
+        // com nomeImpressora = printer.nome) e o agent puxa via
+        // GET /api/agent/jobs no próximo ciclo (~5s).
+        const res = await api.post(
+          `${API_BASE}/${estacao.id}/impressoras/${printer.id}/testar`,
+        );
+        const body = res.data as {
+          success?: boolean;
+          data?: { jobId?: string; impressora?: string; mensagem?: string };
+          error?: string;
+        };
+        if (!body.success) {
+          throw new Error(body.error || 'Falha ao enfileirar teste.');
         }
-        const { texto, formato, impressora } = body.data;
-        const agent = getHardwareAgent();
-        if (!agent.isConnected) {
-          agent.connect();
-          const ok = await agent.waitForOpen(3000);
-          if (!ok) {
-            toast.error('Agente de Hardware offline. Verifique se o AuryaHardwareAgent esta rodando.');
-            return;
-          }
-        }
-        const result = await new Promise<{ sucesso: boolean; mensagem?: string }>((resolve) => {
-          const unsubscribe = agent.subscribe((msg) => {
-            if (msg.tipo === 'RESPOSTA_IMPRESSAO') {
-              unsubscribe();
-              resolve({ sucesso: Boolean(msg.sucesso), mensagem: String(msg.mensagem || '') });
-            }
-          });
-          const sent = agent.send({
-            acao: 'IMPRIMIR_CUPOM',
-            formato,
-            payload: texto,
-            impressora,
-            codepage: formato === 'texto' ? '860' : '',
-          });
-          if (!sent) {
-            unsubscribe();
-            resolve({ sucesso: false, mensagem: 'Falha ao enviar comando para o Agente de Hardware.' });
-          }
-          setTimeout(() => {
-            unsubscribe();
-            resolve({ sucesso: false, mensagem: 'Tempo limite aguardando resposta do Agente de Hardware.' });
-          }, 10000);
-        });
-        if (result.sucesso) {
-          toast.success(`Teste enviado para "${impressora}"!`);
-        } else {
-          toast.error(result.mensagem || 'Falha ao testar impressora.');
-        }
+        const impressora = body.data?.impressora || printer.nome;
+        toast.success(`Teste enfileirado para "${impressora}" — aguarde alguns segundos.`);
       } catch (err) {
         const msg = getErrorMessage(err);
         toast.error(msg);
