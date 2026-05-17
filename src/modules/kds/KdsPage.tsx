@@ -12,6 +12,7 @@ import {
   mergeKdsPedidoNaLista,
   vendaPayloadParaKdsPedido,
 } from './kdsPedidoUtils';
+import { kdsPollIntervalMs } from './kdsPollUtils';
 import {
   getKdsSharedAudioContext,
   tocarKdsSomAtrasado,
@@ -24,11 +25,6 @@ import type { ColunaKds, KdsPedido } from './types';
 const URGENCY_THRESHOLD_MS = 10 * 60 * 1000;
 const LS_SOM_KEY = 'kds-pro-som-ativo';
 const LS_AUDIO_UNLOCK_KEY = 'kds-pro-audio-unlocked';
-const POLL_INTERVAL_MS = 10_000;
-// RC2.5x — PR-5 perf audit: quando o socket está conectado, o poll cai
-// pra um safety net de baixa frequência (catches missed events sem
-// floodar /api/vendas/kds). Com WS down, mantém POLL_INTERVAL_MS.
-const POLL_SAFETY_NET_MS = 60_000;
 
 type KdsSomEvento = 'novo' | 'atrasado' | 'finalizado';
 
@@ -365,9 +361,7 @@ export function KdsPage() {
       }
     };
 
-    const intervalMs =
-      socketStatus === 'connected' ? POLL_SAFETY_NET_MS : POLL_INTERVAL_MS;
-    const timer = window.setInterval(poll, intervalMs);
+    const timer = window.setInterval(poll, kdsPollIntervalMs(socketStatus));
     return () => window.clearInterval(timer);
   }, [carregandoLista, socketStatus]);
 
