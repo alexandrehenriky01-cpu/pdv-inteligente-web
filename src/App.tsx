@@ -32,6 +32,7 @@ import { DeliveryTrackingPage } from './modules/delivery/DeliveryTrackingPage';
 import { EntregasMobilePage } from './modules/delivery-tracking/pages/EntregasMobilePage';
 import { EntregadorTrackPage } from './modules/delivery-tracking/pages/EntregadorTrackPage';
 import { GestaoDeliveryPage } from './modules/delivery-tracking/pages/GestaoDeliveryPage';
+import { CaixaMotoqueiroPage } from './modules/delivery-tracking/pages/CaixaMotoqueiroPage';
 
 // Estoque
 import { Estoque } from './modules/estoque/pages/Estoque';
@@ -104,6 +105,28 @@ import LayoutEtiquetasPage from './modules/producao/configuracoes/LayoutEtiqueta
 import LayoutEtiquetaEditorPage from './modules/producao/configuracoes/LayoutEtiquetaEditorPage'; 
 import EstacoesTrabalhoPage from './modules/producao/configuracoes/EstacoesTrabalhoPage'; 
 import BalancasPage from './modules/producao/configuracoes/BalancasPage';
+import RhAgentDispositivosPage from './modules/rh-agent/pages/RhAgentDispositivosPage';
+import RhDashboardPage from './modules/rh/pages/RhDashboardPage';
+import RhFuncionariosPage from './modules/rh/pages/RhFuncionariosPage';
+import RhDepartamentosPage from './modules/rh/pages/RhDepartamentosPage';
+import RhCargosPage from './modules/rh/pages/RhCargosPage';
+import RhJornadasPage from './modules/rh/pages/RhJornadasPage';
+import RhEscalasPage from './modules/rh/pages/RhEscalasPage';
+import RhDocumentosPage from './modules/rh/pages/RhDocumentosPage';
+import RhConsentimentosPage from './modules/rh/pages/RhConsentimentosPage';
+import RhMarcacoesPage from './modules/rh-ponto/pages/RhMarcacoesPage';
+import RhAjustesPage from './modules/rh-ponto/pages/RhAjustesPage';
+import RhJustificativasPage from './modules/rh-ponto/pages/RhJustificativasPage';
+import RhBancoHorasPage from './modules/rh-ponto/pages/RhBancoHorasPage';
+import RhFechamentosPage from './modules/rh-ponto/pages/RhFechamentosPage';
+import RhCartaoPontoPage from './modules/rh-ponto/pages/RhCartaoPontoPage';
+import TotemRhPage from './modules/rh-ponto/totem/TotemRhPage';
+import RhBiometryLabPage from './modules/rh-biometry-lab/pages/RhBiometryLabPage';
+import RhBiometriaFuncionarioPage from './modules/rh-biometry/pages/RhBiometriaFuncionarioPage';
+import RhPortalPage from './modules/rh-portal/pages/RhPortalPage';
+import RhOperacionalDashboardPage from './modules/rh-operacional/pages/RhDashboardPage';
+import RhDivergenciasPage from './modules/rh-operacional/pages/RhDivergenciasPage';
+import RhAssinaturasPage from './modules/rh-operacional/pages/RhAssinaturasPage';
 import { CaixasConfigPage } from './modules/vendas/pages/CaixasConfigPage';
 import { AdquirentesPage } from './modules/vendas/pages/AdquirentesPage';
 import { CampanhasPromocionaisPage } from './modules/vendas/pages/CampanhasPromocionaisPage';
@@ -195,7 +218,28 @@ function App() {
           <Route path="/locais-cobranca" element={<AdquirentesPage />} />
           <Route path="/configuracao-caixas-pdv" element={<CaixasConfigPage />} />
           <Route path="/balancas" element={<BalancasPage />} />
-          
+          <Route path="/rh-agent/dispositivos" element={<RhAgentDispositivosPage />} />
+          <Route path="/rh" element={<RhDashboardPage />} />
+          <Route path="/rh/funcionarios" element={<RhFuncionariosPage />} />
+          <Route path="/rh/departamentos" element={<RhDepartamentosPage />} />
+          <Route path="/rh/cargos" element={<RhCargosPage />} />
+          <Route path="/rh/jornadas" element={<RhJornadasPage />} />
+          <Route path="/rh/escalas" element={<RhEscalasPage />} />
+          <Route path="/rh/documentos" element={<RhDocumentosPage />} />
+          <Route path="/rh/consentimentos" element={<RhConsentimentosPage />} />
+          <Route path="/rh-ponto/marcacoes" element={<RhMarcacoesPage />} />
+          <Route path="/rh-ponto/ajustes" element={<RhAjustesPage />} />
+          <Route path="/rh-ponto/justificativas" element={<RhJustificativasPage />} />
+          <Route path="/rh-ponto/banco-horas" element={<RhBancoHorasPage />} />
+          <Route path="/rh-ponto/fechamentos" element={<RhFechamentosPage />} />
+          <Route path="/rh-ponto/cartao" element={<RhCartaoPontoPage />} />
+          <Route path="/rh/biometric-lab" element={<RhBiometryLabPage />} />
+          <Route path="/rh/biometria" element={<RhBiometriaFuncionarioPage />} />
+          <Route path="/rh/portal" element={<RhPortalPage />} />
+          <Route path="/rh/dashboard" element={<RhOperacionalDashboardPage />} />
+          <Route path="/rh/divergencias" element={<RhDivergenciasPage />} />
+          <Route path="/rh/assinaturas" element={<RhAssinaturasPage />} />
+
           {/* 🛒 Operacional & Vendas */}
           <Route path="/frente-caixa" element={<FrenteCaixa />} />
           <Route
@@ -211,6 +255,7 @@ function App() {
             <Route path="cardapio" element={<TotemMenuPage />} />
             <Route path="pagamento" element={<TotemCheckoutPage />} />
           </Route>
+          <Route path="/totem-rh" element={<TotemRhPage />} />
           <Route path="/pdv-food" element={<PdvFoodService />} />
           <Route path="/kds" element={<KdsPage />} />
           <Route path="/kds-chamada-balcao" element={<KdsChamadaBalcaoPage />} />
@@ -231,6 +276,7 @@ function App() {
           <Route path="/vendas/gestao-vendas" element={<GestaoVendasPage />} />
           <Route path="/gestao-food" element={<GestaoPedidosFoodPage />} />
           <Route path="/vendas/gestao-delivery" element={<GestaoDeliveryPage />} />
+          <Route path="/caixa-motoqueiro" element={<CaixaMotoqueiroPage />} />
           <Route path="/entregas/mobile" element={<EntregasMobilePage />} />
           <Route
             path="/cardapio/gestao"

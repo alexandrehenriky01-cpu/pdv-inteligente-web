@@ -44,6 +44,10 @@ export function Login() {
       case 'GARCOM':
         navigate('/garcom/mesas'); // App de comanda no celular
         break;
+      case 'FUNCIONARIO':
+      case 'FUNCIONARIO_PORTAL':
+        navigate('/rh/portal'); // Funcionário só acessa o portal self-service
+        break;
       case 'GERENTE':
       case 'DIRETOR':
       default:

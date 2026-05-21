@@ -12,6 +12,8 @@ import {
   RefreshCw,
   MessageCircle,
   Car,
+  Bike,
+  KeyRound,
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { Layout } from '../../../components/Layout';
@@ -55,12 +57,26 @@ function limparTelefone(telefone: string | null | undefined): string {
   return telefone.replace(/\D/g, '');
 }
 
+interface EntregadorOption {
+  id: string;
+  nome: string;
+}
+
 export function EntregasMobilePage() {
   const { token } = useParams<{ token: string }>();
   const [romaneio, setRomaneio] = useState<RomaneioData | null>(null);
   const [rotaPublica, setRotaPublica] = useState<RotaPublicaResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
+
+  // Caixa do Motoqueiro v2 — identificação no primeiro scan do QR.
+  // Quando o romaneio está ABERTO (sem entregador atribuído), exibe o modal
+  // de identificação. Após PIN válido, transita para EM_ROTA e libera as paradas.
+  const [needsIdent, setNeedsIdent] = useState(false);
+  const [entregadores, setEntregadores] = useState<EntregadorOption[]>([]);
+  const [selEntregadorId, setSelEntregadorId] = useState('');
+  const [pin, setPin] = useState('');
+  const [identificando, setIdentificando] = useState(false);
 
   const carregarRomaneio = useCallback(async () => {
     if (!token) {
@@ -114,6 +130,25 @@ export function EntregasMobilePage() {
       } else {
         setRotaPublica(null);
       }
+
+      // Detecta romaneio ABERTO → exige identificação antes de mostrar entregas.
+      if (data.status === 'ABERTO') {
+        setNeedsIdent(true);
+        try {
+          const resEnt = await fetch(
+            `${API_BASE}/api/entregas/public/romaneio/${token}/entregadores`,
+            { headers: { 'Content-Type': 'application/json' } }
+          );
+          const entJson = await resEnt.json();
+          if (resEnt.ok && entJson.ok) {
+            setEntregadores(entJson.entregadores || []);
+          }
+        } catch {
+          /* lista vazia mostra mensagem amigável no modal */
+        }
+      } else {
+        setNeedsIdent(false);
+      }
     } catch (e) {
       console.error('Erro ao carregar romaneio:', e);
       toast.error('Erro ao carregar romaneio');
@@ -122,6 +157,42 @@ export function EntregasMobilePage() {
       setLoading(false);
     }
   }, [token]);
+
+  const handleIdentificar = async () => {
+    if (!selEntregadorId) {
+      toast.warn('Selecione seu nome.');
+      return;
+    }
+    if (!/^\d{4}$/.test(pin)) {
+      toast.warn('PIN deve ter 4 dígitos.');
+      return;
+    }
+    setIdentificando(true);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/entregas/public/romaneio/${token}/iniciar-rota`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entregadorId: selEntregadorId, pin }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        toast.error(data.error || 'Identificação ou PIN incorreto.');
+        return;
+      }
+      toast.success(`Rota iniciada para ${data.romaneio?.entregadorNome ?? 'você'}.`);
+      setNeedsIdent(false);
+      setPin('');
+      void carregarRomaneio();
+    } catch (e) {
+      console.error('Erro ao iniciar rota:', e);
+      toast.error('Erro ao iniciar rota.');
+    } finally {
+      setIdentificando(false);
+    }
+  };
 
   useEffect(() => {
     void carregarRomaneio();
@@ -232,8 +303,85 @@ export function EntregasMobilePage() {
   // interno usa o Layout admin com menu lateral.
   const ehAcessoPublico = Boolean(token);
 
+  const modalIdentificacao = needsIdent ? (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm px-4">
+      <div className="w-full max-w-sm rounded-3xl border border-amber-500/30 bg-slate-900 shadow-2xl">
+        <div className="flex items-center gap-3 border-b border-white/10 px-5 py-4">
+          <div className="rounded-2xl bg-amber-500/20 p-2 text-amber-300">
+            <Bike className="h-6 w-6" />
+          </div>
+          <div>
+            <h2 className="text-base font-black text-white">Iniciar rota</h2>
+            <p className="text-xs text-slate-400">Identifique-se para carregar suas entregas</p>
+          </div>
+        </div>
+        <div className="space-y-4 px-5 py-5">
+          <label className="block">
+            <span className="mb-1 block text-xs font-bold uppercase tracking-wider text-slate-400">
+              Quem é você?
+            </span>
+            <select
+              value={selEntregadorId}
+              onChange={(e) => setSelEntregadorId(e.target.value)}
+              disabled={identificando || entregadores.length === 0}
+              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-3 text-base text-white disabled:opacity-50"
+            >
+              <option value="">
+                {entregadores.length === 0 ? 'Nenhum motoqueiro cadastrado' : 'Selecione…'}
+              </option>
+              {entregadores.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.nome}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1 flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-slate-400">
+              <KeyRound className="h-3 w-3" />
+              PIN de 4 dígitos
+            </span>
+            <input
+              type="tel"
+              inputMode="numeric"
+              pattern="\d{4}"
+              maxLength={4}
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              disabled={identificando}
+              autoComplete="one-time-code"
+              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-3 text-center text-2xl tracking-[0.5em] text-white disabled:opacity-50"
+              placeholder="••••"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => void handleIdentificar()}
+            disabled={identificando || !selEntregadorId || pin.length !== 4}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-4 py-3 text-base font-black text-slate-950 shadow-lg shadow-amber-500/30 disabled:opacity-50"
+          >
+            {identificando ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <>
+                <Bike className="h-5 w-5" />
+                Iniciar rota
+              </>
+            )}
+          </button>
+          {entregadores.length === 0 && (
+            <p className="text-center text-xs text-amber-300/80">
+              Peça ao gerente para cadastrar você como entregador e definir seu PIN.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   const conteudo = (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 text-white pb-24">
+        {modalIdentificacao}
         <div className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur-md border-b border-white/10 px-4 py-4">
           <div className="flex items-center justify-between">
             <div>

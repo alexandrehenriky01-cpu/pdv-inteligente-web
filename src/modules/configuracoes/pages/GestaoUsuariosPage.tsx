@@ -16,7 +16,10 @@ import {
   Hash,
   CheckCircle2,
   Pencil,
+  KeyRound,
+  Bike,
 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { AxiosError } from 'axios';
 import { MODULES_CONFIG, permissionsForModules } from '../../../config/permissions';
 import { fetchAccessCatalog, type CatalogModule } from '../../../services/accessCatalog';
@@ -576,11 +579,18 @@ export function GestaoUsuariosPage() {
                           >
                             <option value="CAIXA">Operador de Caixa</option>
                             <option value="VENDEDOR">Vendedor</option>
+                            <option value="ENTREGADOR">Entregador (motoqueiro)</option>
+                            <option value="FUNCIONARIO">Funcionário (somente Portal RH)</option>
                             <option value="GERENTE">Gerente</option>
                             <option value="DIRETOR">Diretor</option>
                           </select>
                         </div>
                       </div>
+
+                      {/* PIN do entregador — visível só em edição quando role=ENTREGADOR */}
+                      {modalMode === 'edit' && formData.role === 'ENTREGADOR' && (
+                        <PinEntregadorBlock usuarioId={editingId} usuarioNome={formData.nome} />
+                      )}
 
                       <div className="flex items-center justify-between rounded-xl border border-white/10 bg-[#0b1324] px-4 py-3">
                         <div>
@@ -692,5 +702,84 @@ export function GestaoUsuariosPage() {
         )}
       </div>
     </Layout>
+  );
+}
+
+interface PinEntregadorBlockProps {
+  usuarioId: string | null;
+  usuarioNome: string;
+}
+
+/**
+ * Bloco isolado para definir/atualizar o PIN de 4 dígitos do motoqueiro.
+ * Salva via POST /api/admin/usuarios/:id/entregador-pin (endpoint separado
+ * do PUT /admin/usuarios/:id porque o hash bcrypt é gerado server-side).
+ */
+function PinEntregadorBlock({ usuarioId, usuarioNome }: PinEntregadorBlockProps) {
+  const [pin, setPin] = useState('');
+  const [pinSaving, setPinSaving] = useState(false);
+
+  const handleSalvar = async () => {
+    if (!usuarioId) {
+      toast.error('Salve o usuário antes de definir o PIN.');
+      return;
+    }
+    if (!/^\d{4}$/.test(pin)) {
+      toast.warn('PIN deve ter 4 dígitos.');
+      return;
+    }
+    setPinSaving(true);
+    try {
+      await api.post(`/api/admin/usuarios/${usuarioId}/entregador-pin`, { pin });
+      toast.success(`PIN definido para ${usuarioNome || 'entregador'}.`);
+      setPin('');
+    } catch (err) {
+      const msg = err instanceof AxiosError ? err.response?.data?.error : null;
+      toast.error(msg || 'Erro ao definir PIN.');
+    } finally {
+      setPinSaving(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+      <div className="mb-2 flex items-center gap-2">
+        <div className="rounded-lg bg-amber-500/20 p-1.5 text-amber-300">
+          <Bike className="h-4 w-4" />
+        </div>
+        <div>
+          <p className="text-sm font-bold text-amber-100">PIN do entregador</p>
+          <p className="text-[11px] text-amber-200/70">
+            4 dígitos que o motoqueiro digita ao escanear o QR do romaneio.
+          </p>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <KeyRound className="h-4 w-4 shrink-0 text-amber-300" />
+        <input
+          type="tel"
+          inputMode="numeric"
+          pattern="\d{4}"
+          maxLength={4}
+          value={pin}
+          onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+          disabled={pinSaving}
+          placeholder="••••"
+          className="w-32 rounded-xl border border-amber-500/30 bg-[#0b1324] px-3 py-2 text-center text-xl tracking-[0.5em] text-amber-100 focus:outline-none focus:ring-1 focus:ring-amber-500/50 disabled:opacity-50"
+        />
+        <button
+          type="button"
+          onClick={() => void handleSalvar()}
+          disabled={pinSaving || pin.length !== 4}
+          className="inline-flex items-center gap-1 rounded-xl bg-amber-500 px-3 py-2 text-xs font-black uppercase text-slate-950 hover:bg-amber-400 disabled:opacity-50"
+        >
+          {pinSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+          Salvar PIN
+        </button>
+      </div>
+      <p className="mt-2 text-[10px] text-amber-200/60">
+        Definir um PIN novo substitui o anterior. O PIN é guardado com hash (bcrypt) e não pode ser recuperado — só substituído.
+      </p>
+    </div>
   );
 }

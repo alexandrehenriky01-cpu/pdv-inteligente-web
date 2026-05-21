@@ -53,6 +53,9 @@ import {
   ChefHat,
   Megaphone,
   QrCode,
+  Bike,
+  Cpu,
+  CheckCircle2,
 } from 'lucide-react';
 import { useAuryaTheme } from '../theme/ThemeContext';
 import { isMenuFlatLinks, isMenuMacro, isMenuSection } from '../config/menuConfig';
@@ -111,6 +114,9 @@ const ICONS: Record<string, ElementType> = {
   ChefHat,
   Megaphone,
   QrCode,
+  Bike,
+  Cpu,
+  CheckCircle2,
 };
 
 function iconComponent(name: string): ElementType {
