@@ -41,6 +41,8 @@ export interface NovaVendaDeliveryBody {
   origem?: string;
   taxaEntrega: number;
   cidade?: string;
+  /** RC2.7+1 — backend resolve a região (taxa + pedido mínimo) a partir desse campo. */
+  bairro?: string;
   enderecoEntrega?: string;
   tipoPedido: TipoPedidoDelivery;
   observacoes: string;
@@ -90,6 +92,8 @@ export interface FinalizarPedidoDeliveryParams {
   subtotalItens: number;
   taxaEntrega: number;
   cidade?: string;
+  /** RC2.7+1 — opcional; backend resolve a região para taxa+pedido mínimo. */
+  bairro?: string;
   enderecoEntrega?: string;
   tipoPedido: TipoPedidoDelivery;
   /** Texto único: cliente, WhatsApp, observações do pedido (vai para `observacoes` da venda). */
@@ -106,6 +110,7 @@ export function montarPayloadVendaDelivery(params: FinalizarPedidoDeliveryParams
     subtotalItens,
     taxaEntrega,
     cidade,
+    bairro,
     observacoesVenda,
     nomeCliente,
     formaPagamento,
@@ -167,9 +172,11 @@ export function montarPayloadVendaDelivery(params: FinalizarPedidoDeliveryParams
   };
 
   if (tipoPedido === 'DELIVERY') {
+    const bairroTrim = (bairro ?? '').trim();
     return {
       ...base,
       cidade: (cidade ?? '').trim(),
+      ...(bairroTrim !== '' ? { bairro: bairroTrim } : {}),
       enderecoEntrega: (enderecoEntrega ?? '').trim(),
     };
   }

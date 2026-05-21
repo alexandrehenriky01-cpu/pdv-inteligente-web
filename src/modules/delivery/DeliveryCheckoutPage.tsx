@@ -1,7 +1,7 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useOutletContext } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { ArrowLeft, Bike, Copy, Loader2, MapPin, QrCode, ShoppingBag, Sparkles, Store, User, Wallet } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Bike, Copy, Loader2, MapPin, QrCode, ShoppingBag, Sparkles, Store, User, Wallet } from 'lucide-react';
 import {
   finalizarPedidoDelivery,
   mensagemErroDeliveryApi,
@@ -10,6 +10,10 @@ import {
   type PixDeliveryResposta,
   type TipoPedidoDelivery,
 } from '../../services/api/deliveryApi';
+import {
+  resolverRegiaoPorEndereco,
+  type ResolverRegiaoResposta,
+} from '../../services/api/regioesEntregaApi';
 import { extrairSenhaPedidoTotem } from '../../services/api/totemApi';
 import {
   useDeliveryCartStore,
@@ -20,6 +24,21 @@ import type { CartItem } from '../totem/types';
 import { useCep } from '../../hooks/useCep';
 import type { DeliveryOutletContext } from './deliveryOutletContext';
 import { rotuloLinhaCarrinho } from './cartItemDisplay';
+
+type RegiaoCheckout = {
+  id: string;
+  nome: string;
+  taxaEntrega: number;
+  pedidoMinimo: number | null;
+  tempoEstimadoMinutos: number | null;
+};
+
+type StatusResolverRegiao =
+  | 'idle'
+  | 'loading'
+  | 'matched'
+  | 'fallback'
+  | 'blocked';
 
 function formatBrl(n: number): string {
   return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -75,6 +94,13 @@ export function DeliveryCheckoutPage() {
   const { addressData, isLoading: carregandoCep, error: erroCep, fetchAddress } = useCep();
   const [cepInput, setCepInput] = useState('');
 
+  // RC2.7+1 — região de entrega resolvida pelo backend por bairro+cidade
+  const [regiao, setRegiao] = useState<RegiaoCheckout | null>(null);
+  const [statusRegiao, setStatusRegiao] = useState<StatusResolverRegiao>('idle');
+  const [mensagemRegiao, setMensagemRegiao] = useState<string | null>(null);
+  const resolverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lojaTemRegioes = loja?.temRegioesEntrega ?? false;
+
   useEffect(() => {
     console.log('Checkout useEffect - addressData:', addressData);
     if (addressData) {
@@ -85,6 +111,75 @@ export function DeliveryCheckoutPage() {
     }
   }, [addressData]);
 
+  // Resolve região (debounce 400ms) toda vez que bairro/cidade mudam
+  useEffect(() => {
+    if (resolverTimerRef.current) {
+      clearTimeout(resolverTimerRef.current);
+      resolverTimerRef.current = null;
+    }
+
+    if (tipoPedido !== 'DELIVERY' || !lojaTemRegioes || !loja) {
+      setRegiao(null);
+      setStatusRegiao('idle');
+      setMensagemRegiao(null);
+      return;
+    }
+
+    const bairroT = bairro.trim();
+    const cidadeT = cidade.trim();
+    if (!bairroT || !cidadeT) {
+      setRegiao(null);
+      setStatusRegiao('idle');
+      setMensagemRegiao(null);
+      return;
+    }
+
+    setStatusRegiao('loading');
+    resolverTimerRef.current = setTimeout(() => {
+      void (async () => {
+        try {
+          const resp: ResolverRegiaoResposta = await resolverRegiaoPorEndereco({
+            lojaPublicKey: lojaPublicKey,
+            bairro: bairroT,
+            cidade: cidadeT,
+          });
+          if (resp.regiao) {
+            setRegiao({
+              id: resp.regiao.id,
+              nome: resp.regiao.nome,
+              taxaEntrega: resp.regiao.taxaEntrega,
+              pedidoMinimo: resp.regiao.pedidoMinimo,
+              tempoEstimadoMinutos: resp.regiao.tempoEstimadoMinutos,
+            });
+            setStatusRegiao('matched');
+            setMensagemRegiao(null);
+          } else if (resp.bloqueante) {
+            setRegiao(null);
+            setStatusRegiao('blocked');
+            setMensagemRegiao(resp.mensagem ?? 'Endereço fora da área de entrega.');
+          } else {
+            setRegiao(null);
+            setStatusRegiao('fallback');
+            setMensagemRegiao(resp.mensagem ?? null);
+          }
+        } catch (err) {
+          // Falha de rede: cai silenciosamente para taxa padrão (degradação graciosa)
+          console.warn('[delivery] resolver de região falhou — usando taxa padrão', err);
+          setRegiao(null);
+          setStatusRegiao('idle');
+          setMensagemRegiao(null);
+        }
+      })();
+    }, 400);
+
+    return () => {
+      if (resolverTimerRef.current) {
+        clearTimeout(resolverTimerRef.current);
+        resolverTimerRef.current = null;
+      }
+    };
+  }, [bairro, cidade, tipoPedido, lojaTemRegioes, loja, lojaPublicKey]);
+
   const handleCepChange = (value: string) => {
     const onlyNums = value.replace(/\D/g, '').slice(0, 8);
     setCepInput(onlyNums);
@@ -94,7 +189,17 @@ export function DeliveryCheckoutPage() {
     }
   };
 
-  const taxaEntrega = tipoPedido === 'RETIRADA_BALCAO' ? 0 : (loja?.taxaEntregaPadrao ?? 0);
+  const taxaEntrega = useMemo(() => {
+    if (tipoPedido === 'RETIRADA_BALCAO') return 0;
+    if (regiao) return regiao.taxaEntrega;
+    return loja?.taxaEntregaPadrao ?? 0;
+  }, [tipoPedido, regiao, loja]);
+
+  const pedidoMinimoNaoAtingido =
+    statusRegiao === 'matched' &&
+    regiao?.pedidoMinimo != null &&
+    subtotalItens < regiao.pedidoMinimo;
+  const bloqueadoForaArea = statusRegiao === 'blocked';
 
   const totalPedido = useMemo(
     () => Math.round((subtotalItens + taxaEntrega) * 100) / 100,
@@ -179,16 +284,28 @@ export function DeliveryCheckoutPage() {
       observacaoPedido,
     });
 
+    if (bloqueadoForaArea) {
+      toast.error(mensagemRegiao ?? 'Endereço fora da área de entrega.');
+      return;
+    }
+    if (pedidoMinimoNaoAtingido && regiao?.pedidoMinimo != null) {
+      toast.error(`Pedido mínimo para esta região: ${formatBrl(regiao.pedidoMinimo)}`);
+      return;
+    }
+
     setEnviando(true);
     try {
+      // Backend re-resolve a região pelo (bairro+cidade); taxaEntrega aqui é só
+      // referencial — o servidor sobrescreve com o valor autoritativo.
       const body = montarPayloadVendaDelivery({
         lojaId: loja?.id ?? lojaPublicKey,
         estacaoTrabalhoId: estacaoId,
         carrinho,
         subtotalItens,
-        taxaEntrega: loja?.taxaEntregaPadrao ?? 0,
+        taxaEntrega,
         tipoPedido,
         cidade: tipoPedido === 'DELIVERY' ? cidade.trim() : undefined,
+        bairro: tipoPedido === 'DELIVERY' ? bairro.trim() : undefined,
         enderecoEntrega: tipoPedido === 'DELIVERY' ? enderecoEntrega : undefined,
         observacoesVenda,
         nomeCliente: nome.trim(),
@@ -427,6 +544,56 @@ export function DeliveryCheckoutPage() {
             />
           </div>
         </div>
+
+        {/* RC2.7+1 — feedback da região resolvida pelo servidor */}
+        {tipoPedido === 'DELIVERY' && lojaTemRegioes && (
+          <div className="mt-1">
+            {statusRegiao === 'loading' && (
+              <p className="flex items-center gap-1.5 text-xs text-text-muted">
+                <Loader2 className="h-3 w-3 animate-spin" /> Calculando taxa para este endereço…
+              </p>
+            )}
+            {statusRegiao === 'matched' && regiao && (
+              <div className="rounded-item border border-price/30 bg-price/5 px-3 py-2 text-xs text-price">
+                <p className="font-bold uppercase tracking-wide">
+                  Região: {regiao.nome} · {formatBrl(regiao.taxaEntrega)}
+                </p>
+                {regiao.tempoEstimadoMinutos != null && (
+                  <p className="mt-0.5 text-[11px] text-text-muted">
+                    Tempo estimado: ~{regiao.tempoEstimadoMinutos} min
+                  </p>
+                )}
+                {regiao.pedidoMinimo != null && (
+                  <p className="mt-0.5 text-[11px] text-text-muted">
+                    Pedido mínimo: {formatBrl(regiao.pedidoMinimo)}
+                  </p>
+                )}
+              </div>
+            )}
+            {statusRegiao === 'fallback' && (
+              <p className="flex items-center gap-1.5 text-xs text-amber-300">
+                <AlertTriangle className="h-3 w-3" />
+                {mensagemRegiao ?? 'Bairro fora das regiões mapeadas — usando taxa padrão.'}
+              </p>
+            )}
+            {statusRegiao === 'blocked' && (
+              <div className="rounded-item border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                <p className="flex items-center gap-1.5 font-bold uppercase tracking-wide">
+                  <AlertTriangle className="h-3 w-3" />
+                  {mensagemRegiao ?? 'Endereço fora da área de entrega.'}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {pedidoMinimoNaoAtingido && regiao?.pedidoMinimo != null && (
+          <div className="mt-1 rounded-item border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            Pedido mínimo para esta região: <span className="font-bold">{formatBrl(regiao.pedidoMinimo)}</span>.
+            Faltam {formatBrl(regiao.pedidoMinimo - subtotalItens)} no carrinho.
+          </div>
+        )}
+
         <div>
           <label className="mb-1.5 block text-xs font-semibold text-text-secondary">Complemento (opcional)</label>
           <input
@@ -679,7 +846,11 @@ export function DeliveryCheckoutPage() {
       ) : (
         <button
           type="button"
-          disabled={enviando || (loja ? !loja.aberto : false)}
+          disabled={
+            enviando ||
+            (loja ? !loja.aberto : false) ||
+            (tipoPedido === 'DELIVERY' && (bloqueadoForaArea || pedidoMinimoNaoAtingido))
+          }
           onClick={() => void enviarPedido()}
           className="flex min-h-[3.5rem] w-full items-center justify-center gap-2 rounded-pill bg-cta hover:bg-cta-hover shadow-cta px-4 text-base font-bold uppercase tracking-wide text-white transition-all duration-200 enabled:active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100"
         >

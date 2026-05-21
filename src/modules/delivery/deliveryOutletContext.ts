@@ -8,6 +8,10 @@ export interface LojaDeliveryPublic {
   aberto: boolean;
   taxaEntregaPadrao: number;
   chavePix: string | null;
+  /** RC2.7+1 — true se a loja tem ao menos uma região de entrega ativa cadastrada. */
+  temRegioesEntrega?: boolean;
+  /** RC2.7+1 — quando true, endereço fora das regiões cadastradas rejeita o pedido. */
+  bloquearForaDaArea?: boolean;
 }
 
 export interface DeliveryOutletContext {
