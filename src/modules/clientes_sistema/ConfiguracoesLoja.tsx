@@ -1,8 +1,7 @@
 import { useEffect, useState, type ChangeEvent, type FC } from 'react';
 import { isAxiosError } from 'axios';
-import { Upload, Save, Building2, Phone, MapPin, UserSquare2, FileText, ShieldCheck, Key, Hash, CloudCog, Scale, Trash2, RefreshCw, Link2, MonitorSmartphone, Plug, Bike } from 'lucide-react';
+import { Upload, Save, Building2, Phone, MapPin, UserSquare2, FileText, ShieldCheck, Key, Hash, CloudCog, Scale, Trash2, RefreshCw, Link2, MonitorSmartphone, Plug } from 'lucide-react';
 import LocalFirstActivationSection from './LocalFirstActivationSection';
-import { RegioesEntregaTab } from './RegioesEntregaTab';
 // 🚀 1. IMPORTAMOS O HOOK DE NAVEGAÇÃO
 import { useNavigate } from 'react-router-dom'; 
 import { api } from '../../services/api'; 
@@ -477,7 +476,6 @@ export const ConfiguracoesLoja: FC = () => {
             { id: 'endereco', label: 'Endereço', icon: MapPin },
             { id: 'responsavel', label: 'Responsável', icon: UserSquare2 },
             { id: 'documentos', label: 'Documentos Fiscais', icon: FileText },
-            { id: 'delivery', label: 'Delivery', icon: Bike },
             { id: 'totem', label: 'Totem', icon: MonitorSmartphone },
             { id: 'local-first', label: 'Local-First', icon: Plug },
           ].map((tab) => {
@@ -1149,10 +1147,6 @@ export const ConfiguracoesLoja: FC = () => {
                 <LocalFirstActivationSection lojaId={lojaIdAtual} />
               )}
             </div>
-          )}
-
-          {activeTab === 'delivery' && (
-            <RegioesEntregaTab />
           )}
 
           {activeTab === 'totem' && (

@@ -91,6 +91,7 @@ export const MENU_CONFIG: MenuConfigEntry[] = [
       { label: 'Equipe', path: '/equipe', icon: 'UserCog', feature: 'ESTRUTURA.EQUIPE_VIEW', requireGestor: true },
       { label: 'Permissões', path: '/permissoes', icon: 'ShieldCheck', feature: 'ESTRUTURA.PERMISSAO_VIEW', requireGestor: true },
       { label: 'Minha Loja', path: '/configuracoes-loja', icon: 'Settings', feature: 'ESTRUTURA.LOJA_VIEW', requireGestor: true },
+      { label: 'Regiões de Entrega', path: '/regioes-entrega', icon: 'Bike', feature: 'ESTRUTURA.LOJA_VIEW', requireGestor: true },
       { label: 'Layout Etiquetas', path: '/layout-etiquetas', icon: 'Printer', feature: 'ESTRUTURA.ETIQUETA_VIEW', requireGestor: true },
       { label: 'Estações de Trabalho', path: '/estacoes-trabalho', icon: 'Monitor', feature: 'ESTRUTURA.ESTACAO_VIEW', requireGestor: true },
       { label: 'Locais de cobrança', path: '/locais-cobranca', icon: 'BadgePercent', feature: 'ESTRUTURA.LOCAL_COBRANCA_VIEW', requireGestor: true },

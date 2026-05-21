@@ -99,6 +99,7 @@ import { GestaoPermissoesPage } from './modules/configuracoes/pages/GestaoPermis
 import { GestaoTefPage } from './modules/configuracoes/pages/GestaoTefPage';
 import { PixConfigPage } from './modules/pix/pages/PixConfigPage';
 import ConfiguracoesLoja from './modules/clientes_sistema/ConfiguracoesLoja';
+import RegioesEntregaPage from './modules/clientes_sistema/RegioesEntregaPage';
 
 // 🖨️ MÓDULO DE ETIQUETAS, ESTAÇÕES DE TRABALHO E BALANÇAS
 import LayoutEtiquetasPage from './modules/producao/configuracoes/LayoutEtiquetasPage'; 
@@ -210,6 +211,7 @@ function App() {
           <Route path="/configuracao-tef" element={<GestaoTefPage />} />
           <Route path="/configuracao-pix" element={<PixConfigPage />} />
           <Route path="/configuracoes-loja" element={<ConfiguracoesLoja />} />
+          <Route path="/regioes-entrega" element={<RegioesEntregaPage />} />
           
           {/* 👇 MÓDULO DE IMPRESSÃO E PRODUÇÃO E HARDWARE */}
           <Route path="/layout-etiquetas" element={<LayoutEtiquetasPage />} />
