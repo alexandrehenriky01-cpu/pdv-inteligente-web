@@ -37,6 +37,8 @@ export interface DeliveryRowPedido {
   updatedAt?: string;
   estornoFinanceiroPendente?: boolean;
   cancelamentoFiscalPendente?: boolean;
+  /** RC2.8 — região de entrega resolvida pelo backend. Null para legados ou retirada. */
+  regiaoEntrega?: { id: string; nome: string } | null;
 }
 
 export interface DeliveryRowProps {
@@ -182,6 +184,19 @@ function DeliveryRowComponent(props: DeliveryRowProps) {
             {retirada ? 'Retirada no balcão' : row.enderecoEntrega || 'Sem endereço'}
           </span>
         </div>
+        {!retirada && (
+          <div className="mt-2">
+            {row.regiaoEntrega ? (
+              <span className="inline-flex items-center gap-1 rounded-md border border-violet-500/35 bg-violet-500/10 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-violet-200">
+                {row.regiaoEntrega.nome}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded-md border border-slate-500/30 bg-slate-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                Sem região
+              </span>
+            )}
+          </div>
+        )}
       </td>
       <td className="px-4 py-4">
         <span

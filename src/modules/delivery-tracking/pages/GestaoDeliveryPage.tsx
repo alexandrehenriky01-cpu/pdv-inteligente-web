@@ -18,6 +18,8 @@ import {
   Circle,
   QrCode,
   Share2,
+  Layers,
+  X,
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { Layout } from '../../../components/Layout';
@@ -53,6 +55,9 @@ interface PedidoDelivery {
   updatedAt?: string;
   estornoFinanceiroPendente?: boolean;
   cancelamentoFiscalPendente?: boolean;
+  /** RC2.8 — região de entrega resolvida (DELIVERY com regiões cadastradas). */
+  regiaoEntregaId?: string | null;
+  regiaoEntrega?: { id: string; nome: string; taxaEntrega: number } | null;
 }
 
 interface PedidoAtualizado {
@@ -130,6 +135,11 @@ export function GestaoDeliveryPage() {
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [showQrModal, setShowQrModal] = useState(false);
   const [selectedToken, setSelectedToken] = useState('');
+  // RC2.8 — modal de romaneios automáticos por região
+  const [showRomaneiosRegiaoModal, setShowRomaneiosRegiaoModal] = useState(false);
+  const [criandoRomaneiosRegiao, setCriandoRomaneiosRegiao] = useState(false);
+  // RC2.8.1 — quais grupos o gestor escolheu romanear (default: todos)
+  const [gruposSelecionados, setGruposSelecionados] = useState<Set<string>>(new Set());
 
   const { imprimindo, agentOnline, imprimirCupom } = useDeliveryPrint();
   const { imprimindo: imprimindoRomaneioHook, agentOnline: agenteOnlineRomaneio, imprimirRomaneio } = useRouteManifestPrint();
@@ -529,6 +539,120 @@ export function GestaoDeliveryPage() {
     }
   }, [imprimirCupom]);
 
+  /** RC2.8 — preview do agrupamento de pedidos PENDENTE por regiaoEntregaId. */
+  const pedidosPendentesPorRegiao = useMemo(() => {
+    type Grupo = {
+      key: string;
+      regiaoNome: string;
+      pedidos: PedidoDelivery[];
+      totalValor: number;
+    };
+    const grupos = new Map<string, Grupo>();
+    for (const p of pedidos) {
+      if (p.statusEntrega !== 'PENDENTE') continue;
+      if (isRetiradaBalcaoGestao(p.tipoPedido)) continue;
+      const key = p.regiaoEntregaId ?? '__sem_regiao__';
+      const regiaoNome = p.regiaoEntrega?.nome ?? 'Sem região';
+      const g = grupos.get(key) ?? { key, regiaoNome, pedidos: [], totalValor: 0 };
+      g.pedidos.push(p);
+      g.totalValor += Number(p.valorTotal) || 0;
+      grupos.set(key, g);
+    }
+    // Sem região por último; demais alfabéticos
+    return Array.from(grupos.values()).sort((a, b) => {
+      if (a.key === '__sem_regiao__') return 1;
+      if (b.key === '__sem_regiao__') return -1;
+      return a.regiaoNome.localeCompare(b.regiaoNome, 'pt-BR');
+    });
+  }, [pedidos]);
+
+  const handleGerarRomaneiosPorRegiao = useCallback(async () => {
+    const gruposEscolhidos = pedidosPendentesPorRegiao.filter((g) =>
+      gruposSelecionados.has(g.key)
+    );
+    if (gruposEscolhidos.length === 0) {
+      toast.warning('Selecione ao menos uma região para gerar romaneios.');
+      return;
+    }
+
+    setCriandoRomaneiosRegiao(true);
+    try {
+      const regiaoEntregaIds = gruposEscolhidos
+        .filter((g) => g.key !== '__sem_regiao__')
+        .map((g) => g.key);
+      const incluirSemRegiao = gruposEscolhidos.some((g) => g.key === '__sem_regiao__');
+
+      const { data } = await api.post<{
+        ok?: boolean;
+        sucesso?: boolean;
+        message?: string;
+        romaneios?: Array<{
+          romaneioId: string;
+          uuid: string;
+          regiaoNome: string;
+          totalPedidos: number;
+          totalValor: number;
+        }>;
+        error?: string;
+      }>('/api/entregas/romaneios/auto-por-regiao', {
+        regiaoEntregaIds,
+        incluirSemRegiao,
+      });
+
+      if (data.sucesso === false || data.ok === false) {
+        toast.error(data.error || data.message || 'Falha ao gerar romaneios.');
+        return;
+      }
+
+      const romaneios = data.romaneios ?? [];
+      if (romaneios.length === 0) {
+        toast.info(data.message || 'Nenhum pedido pendente para romanear.');
+        setShowRomaneiosRegiaoModal(false);
+        return;
+      }
+
+      // Otimista: marca como SAIU_ENTREGA na lista (apenas os grupos romaneados)
+      const idsRomaneados = new Set(
+        gruposEscolhidos.flatMap((g) => g.pedidos.map((p) => p.id))
+      );
+      setPedidos((prev) =>
+        prev.map((p) =>
+          idsRomaneados.has(p.id) ? { ...p, statusEntrega: 'SAIU_ENTREGA' as const } : p
+        )
+      );
+
+      toast.success(
+        `${romaneios.length} romaneio(s) criado(s) — ` +
+          romaneios.map((r) => `${r.regiaoNome} (${r.totalPedidos})`).join(', ')
+      );
+      setShowRomaneiosRegiaoModal(false);
+      setSelectedOrderIds(new Set());
+      setFilterStatus('SAIU_ENTREGA');
+    } catch (e) {
+      console.error('[romaneios-auto-por-regiao] erro', e);
+      const err = e as { response?: { data?: { error?: string } } };
+      toast.error(err.response?.data?.error || 'Erro ao gerar romaneios automáticos.');
+    } finally {
+      setCriandoRomaneiosRegiao(false);
+    }
+  }, [pedidosPendentesPorRegiao, gruposSelecionados]);
+
+  // Ao abrir o modal, pré-seleciona TODOS os grupos disponíveis
+  useEffect(() => {
+    if (showRomaneiosRegiaoModal) {
+      setGruposSelecionados(new Set(pedidosPendentesPorRegiao.map((g) => g.key)));
+    }
+  }, [showRomaneiosRegiaoModal, pedidosPendentesPorRegiao]);
+
+  const toggleGrupoRegiao = useCallback((key: string) => {
+    setGruposSelecionados((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
   const handleImprimirRomaneio = async () => {
     // Determina os pedidos elegíveis para entrar no romaneio.
     // Regras:
@@ -919,6 +1043,20 @@ export function GestaoDeliveryPage() {
                 )}
                 Romaneio ({totalRomaneio})
               </button>
+              <button
+                type="button"
+                disabled={criandoRomaneiosRegiao || pedidosPendentesPorRegiao.length === 0}
+                onClick={() => setShowRomaneiosRegiaoModal(true)}
+                title={
+                  pedidosPendentesPorRegiao.length === 0
+                    ? 'Nenhum pedido pendente para romanear'
+                    : 'Cria N romaneios agrupando pedidos pendentes por região'
+                }
+                className="inline-flex items-center gap-2 rounded-xl border border-violet-500/35 bg-violet-500/10 px-4 py-2.5 text-sm font-bold text-violet-200 hover:bg-violet-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Layers className="w-4 h-4" />
+                Por região ({pedidosPendentesPorRegiao.length})
+              </button>
             </div>
           </div>
 
@@ -1072,6 +1210,146 @@ export function GestaoDeliveryPage() {
               <Share2 className="w-5 h-5" />
               Enviar p/ WhatsApp
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* RC2.8 — Modal: preview de romaneios automáticos por região */}
+      {showRomaneiosRegiaoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => !criandoRomaneiosRegiao && setShowRomaneiosRegiaoModal(false)}
+          />
+          <div className="relative z-10 w-full max-w-lg rounded-3xl border border-white/10 bg-[#08101f] p-6 shadow-2xl">
+            <div className="mb-4 flex items-start justify-between">
+              <div>
+                <h3 className="flex items-center gap-2 text-lg font-bold text-white">
+                  <Layers className="w-5 h-5 text-violet-400" />
+                  Romaneios por região
+                </h3>
+                <p className="mt-1 text-xs text-slate-400">
+                  Será criado <strong>um romaneio por região</strong> com os pedidos pendentes
+                  abaixo. Pedidos sem região formam um grupo separado.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={criandoRomaneiosRegiao}
+                onClick={() => setShowRomaneiosRegiaoModal(false)}
+                className="rounded-full p-1 text-slate-400 hover:bg-white/10 hover:text-white transition disabled:opacity-50"
+                aria-label="Fechar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {pedidosPendentesPorRegiao.length === 0 ? (
+              <div className="rounded-xl border border-white/10 bg-white/[0.02] p-6 text-center text-sm text-slate-400">
+                Nenhum pedido pendente para romanear.
+              </div>
+            ) : (
+              <>
+                <div className="mb-2 flex items-center justify-between px-1">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                    Marque as regiões que quer romanear
+                  </p>
+                  <div className="flex gap-2 text-[11px] font-bold">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setGruposSelecionados(
+                          new Set(pedidosPendentesPorRegiao.map((g) => g.key))
+                        )
+                      }
+                      className="text-violet-300 hover:text-violet-200 transition"
+                    >
+                      Marcar todas
+                    </button>
+                    <span className="text-slate-600">|</span>
+                    <button
+                      type="button"
+                      onClick={() => setGruposSelecionados(new Set())}
+                      className="text-slate-400 hover:text-slate-200 transition"
+                    >
+                      Limpar
+                    </button>
+                  </div>
+                </div>
+                <ul className="max-h-72 overflow-y-auto divide-y divide-white/5 rounded-xl border border-white/10 bg-white/[0.02]">
+                  {pedidosPendentesPorRegiao.map((g) => {
+                    const selecionado = gruposSelecionados.has(g.key);
+                    return (
+                      <li key={g.key}>
+                        <label
+                          className={`flex cursor-pointer items-center justify-between gap-3 px-4 py-3 transition ${
+                            selecionado ? 'bg-violet-500/5' : 'hover:bg-white/[0.03]'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={selecionado}
+                              onChange={() => toggleGrupoRegiao(g.key)}
+                              disabled={criandoRomaneiosRegiao}
+                              className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-violet-500 focus:ring-violet-500"
+                            />
+                            <div className="min-w-0">
+                              <p className="font-bold text-white truncate">
+                                {g.regiaoNome}
+                                {g.key === '__sem_regiao__' && (
+                                  <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+                                    legado
+                                  </span>
+                                )}
+                              </p>
+                              <p className="text-xs text-slate-400">
+                                {g.pedidos.length} pedido{g.pedidos.length === 1 ? '' : 's'} ·{' '}
+                                {formatCurrency(g.totalValor)}
+                              </p>
+                            </div>
+                          </div>
+                          <span
+                            className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-black uppercase ${
+                              selecionado
+                                ? 'bg-violet-500/20 text-violet-200'
+                                : 'bg-slate-500/15 text-slate-400'
+                            }`}
+                          >
+                            → 1 romaneio
+                          </span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            )}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={criandoRomaneiosRegiao}
+                onClick={() => setShowRomaneiosRegiaoModal(false)}
+                className="rounded-xl border border-white/10 px-4 py-2 text-sm font-bold text-slate-300 hover:bg-white/5 transition disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={criandoRomaneiosRegiao || gruposSelecionados.size === 0}
+                onClick={() => void handleGerarRomaneiosPorRegiao()}
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2 text-sm font-black text-white shadow hover:scale-[1.02] transition disabled:opacity-50"
+              >
+                {criandoRomaneiosRegiao ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Layers className="w-4 h-4" />
+                )}
+                Gerar {gruposSelecionados.size} romaneio
+                {gruposSelecionados.size === 1 ? '' : 's'}
+              </button>
+            </div>
           </div>
         </div>
       )}
