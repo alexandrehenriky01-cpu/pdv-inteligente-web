@@ -20,6 +20,7 @@ import {
   Share2,
   Layers,
   X,
+  Copy,
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { Layout } from '../../../components/Layout';
@@ -140,6 +141,14 @@ export function GestaoDeliveryPage() {
   const [criandoRomaneiosRegiao, setCriandoRomaneiosRegiao] = useState(false);
   // RC2.8.1 — quais grupos o gestor escolheu romanear (default: todos)
   const [gruposSelecionados, setGruposSelecionados] = useState<Set<string>>(new Set());
+  // RC2.8.2 — pós-criação: array dos romaneios gerados pra exibir QR codes
+  type RomaneioGerado = {
+    uuid: string;
+    regiaoNome: string;
+    totalPedidos: number;
+    totalValor: number;
+  };
+  const [romaneiosGerados, setRomaneiosGerados] = useState<RomaneioGerado[] | null>(null);
 
   const { imprimindo, agentOnline, imprimirCupom } = useDeliveryPrint();
   const { imprimindo: imprimindoRomaneioHook, agentOnline: agenteOnlineRomaneio, imprimirRomaneio } = useRouteManifestPrint();
@@ -621,9 +630,14 @@ export function GestaoDeliveryPage() {
         )
       );
 
-      toast.success(
-        `${romaneios.length} romaneio(s) criado(s) — ` +
-          romaneios.map((r) => `${r.regiaoNome} (${r.totalPedidos})`).join(', ')
+      toast.success(`${romaneios.length} romaneio(s) criado(s).`);
+      setRomaneiosGerados(
+        romaneios.map((r) => ({
+          uuid: r.uuid,
+          regiaoNome: r.regiaoNome,
+          totalPedidos: r.totalPedidos,
+          totalValor: r.totalValor,
+        }))
       );
       setShowRomaneiosRegiaoModal(false);
       setSelectedOrderIds(new Set());
@@ -851,6 +865,36 @@ export function GestaoDeliveryPage() {
     ).replace(/\/+$/, '');
     return `${base}/#/entregas/mobile/${selectedToken}`;
   }, [selectedToken]);
+
+  /** RC2.8.2 — constrói URL pública de tracking pra qualquer token. */
+  const buildTrackingUrl = useCallback((token: string): string => {
+    const base = (
+      import.meta.env.VITE_DELIVERY_TRACKING_BASE_URL || window.location.origin
+    ).replace(/\/+$/, '');
+    return `${base}/#/entregas/mobile/${token}`;
+  }, []);
+
+  /** Compartilha um romaneio específico via WhatsApp Web. */
+  const shareRomaneioWhatsApp = useCallback(
+    (token: string, regiaoNome: string) => {
+      const url = buildTrackingUrl(token);
+      const text = `🛵 Romaneio ${regiaoNome}\n\nAbra o link para ver as paradas e confirmar as entregas:\n${url}`;
+      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+    },
+    [buildTrackingUrl]
+  );
+
+  const copyRomaneioLink = useCallback(
+    async (token: string) => {
+      try {
+        await navigator.clipboard.writeText(buildTrackingUrl(token));
+        toast.success('Link copiado!');
+      } catch {
+        toast.error('Não foi possível copiar.');
+      }
+    },
+    [buildTrackingUrl]
+  );
 
   const socketLabel =
     socketStatus === 'connected'
@@ -1348,6 +1392,96 @@ export function GestaoDeliveryPage() {
                 )}
                 Gerar {gruposSelecionados.size} romaneio
                 {gruposSelecionados.size === 1 ? '' : 's'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RC2.8.2 — Modal: QR codes dos romaneios gerados (1 card por romaneio) */}
+      {romaneiosGerados && romaneiosGerados.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setRomaneiosGerados(null)}
+          />
+          <div className="relative z-10 w-full max-w-3xl rounded-3xl border border-white/10 bg-[#08101f] p-6 shadow-2xl">
+            <div className="mb-5 flex items-start justify-between">
+              <div>
+                <h3 className="flex items-center gap-2 text-lg font-bold text-white">
+                  <QrCode className="w-5 h-5 text-emerald-400" />
+                  {romaneiosGerados.length} romaneio{romaneiosGerados.length === 1 ? '' : 's'} gerado{romaneiosGerados.length === 1 ? '' : 's'}
+                </h3>
+                <p className="mt-1 text-xs text-slate-400">
+                  Compartilhe o QR Code com cada motoqueiro — abre direto a tela
+                  de entregas no celular dele.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRomaneiosGerados(null)}
+                className="rounded-full p-1 text-slate-400 hover:bg-white/10 hover:text-white transition"
+                aria-label="Fechar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2 max-h-[60vh] overflow-y-auto pr-2">
+              {romaneiosGerados.map((r) => {
+                const url = buildTrackingUrl(r.uuid);
+                const shortId = r.uuid.replace(/^rom_/i, '').slice(0, 8).toUpperCase();
+                return (
+                  <div
+                    key={r.uuid}
+                    className="flex flex-col items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-center"
+                  >
+                    <div className="flex flex-col items-center">
+                      <span className="rounded-md bg-violet-500/15 px-2 py-0.5 text-[10px] font-black uppercase text-violet-200">
+                        {r.regiaoNome}
+                      </span>
+                      <p className="mt-2 text-xs text-slate-400">
+                        {r.totalPedidos} pedido{r.totalPedidos === 1 ? '' : 's'} ·{' '}
+                        <span className="font-mono font-bold text-emerald-300">
+                          {formatCurrency(r.totalValor)}
+                        </span>
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-sky-500/35 bg-white p-3">
+                      <QRCodeSVG value={url} size={160} level="H" includeMargin={false} />
+                    </div>
+
+                    <p className="font-mono text-[11px] text-slate-500">#{shortId}</p>
+
+                    <div className="flex w-full flex-col gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => shareRomaneioWhatsApp(r.uuid, r.regiaoNome)}
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 px-3 py-2 text-xs font-black uppercase tracking-wide text-white shadow hover:scale-[1.02] transition"
+                      >
+                        <Share2 className="w-3.5 h-3.5" /> WhatsApp
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void copyRomaneioLink(r.uuid)}
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-xs font-bold text-slate-200 hover:bg-white/[0.05] transition"
+                      >
+                        <Copy className="w-3.5 h-3.5" /> Copiar link
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setRomaneiosGerados(null)}
+                className="rounded-xl border border-white/10 px-5 py-2 text-sm font-bold text-slate-300 hover:bg-white/5 transition"
+              >
+                Fechar
               </button>
             </div>
           </div>
