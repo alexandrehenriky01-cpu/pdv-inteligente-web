@@ -18,6 +18,7 @@
     "@datadog/browser-rum": "^6.32.0",
     "@google/generative-ai": "^0.24.1",
     "@radix-ui/react-dialog": "^1.1.15",
+    "@vladmandic/face-api": "^1.7.15",
     "axios": "^1.6.8",
     "date-fns": "^4.1.0",
     "lucide-react": "^0.577.0",

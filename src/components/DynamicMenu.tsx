@@ -56,6 +56,10 @@ import {
   Bike,
   Cpu,
   CheckCircle2,
+  Fingerprint,
+  ScanFace,
+  Activity,
+  FileSignature,
 } from 'lucide-react';
 import { useAuryaTheme } from '../theme/ThemeContext';
 import { isMenuFlatLinks, isMenuMacro, isMenuSection } from '../config/menuConfig';
@@ -117,6 +121,10 @@ const ICONS: Record<string, ElementType> = {
   Bike,
   Cpu,
   CheckCircle2,
+  Fingerprint,
+  ScanFace,
+  Activity,
+  FileSignature,
 };
 
 function iconComponent(name: string): ElementType {

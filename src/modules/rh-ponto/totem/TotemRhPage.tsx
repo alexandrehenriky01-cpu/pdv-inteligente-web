@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Fingerprint, IdCard, QrCode, ArrowRight, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { totemAutenticar, totemMarcar } from '../services/pontoApi';
+import { Fingerprint, IdCard, QrCode, ArrowRight, CheckCircle2, AlertTriangle, ScanFace } from 'lucide-react';
+import { getPontoConfig, totemAutenticar, totemMarcar, type PontoConfigView } from '../services/pontoApi';
 import type { RhMetodoAutenticacao, RhTipoMarcacao } from '../types/ponto.types';
 import {
   matchAtAgent,
@@ -8,6 +8,10 @@ import {
   totemMarcarBiometria,
 } from '../../rh-biometry/services/rhBiometryApi';
 import { getAgentBridge } from '../../rh-biometry-lab/services/biometryLabApi';
+import { TotemFacialFlow } from './TotemFacialFlow';
+
+/// UI-only union; o backend continua só conhecendo RhMetodoAutenticacao.
+type MetodoUI = RhMetodoAutenticacao | 'FACIAL';
 
 type Step = 'idle' | 'auth' | 'tipo' | 'enviando' | 'sucesso' | 'erro';
 
@@ -22,7 +26,8 @@ const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paul
 
 export default function TotemRhPage(): JSX.Element {
   const [step, setStep] = useState<Step>('idle');
-  const [metodo, setMetodo] = useState<RhMetodoAutenticacao>('PIN');
+  const [metodo, setMetodo] = useState<MetodoUI>('PIN');
+  const [config, setConfig] = useState<PontoConfigView | null>(null);
   const [matricula, setMatricula] = useState('');
   const [pin, setPin] = useState('');
   const [qrToken, setQrToken] = useState('');
@@ -36,6 +41,35 @@ export default function TotemRhPage(): JSX.Element {
   useEffect(() => {
     const id = window.setInterval(() => setAgora(new Date()), 1000);
     return () => window.clearInterval(id);
+  }, []);
+
+  // Sprint 7.6: carrega config no mount e auto-seleciona o primeiro método habilitado.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const c = await getPontoConfig();
+        if (cancelled) return;
+        setConfig(c);
+        const ordem: ReadonlyArray<{ on: boolean; m: MetodoUI }> = [
+          { on: c.totemFacialHabilitado, m: 'FACIAL' },
+          { on: c.totemPinHabilitado, m: 'PIN' },
+          { on: c.totemQrHabilitado, m: 'QR' },
+          { on: c.totemBiometriaHabilitado, m: 'BIOMETRIA' },
+        ];
+        const primeiro = ordem.find((x) => x.on);
+        if (primeiro) setMetodo(primeiro.m);
+      } catch {
+        // Sem config (offline ou backend down): default — todos habilitados.
+        if (!cancelled) setConfig({
+          id: '-', lojaId: '-',
+          totemPinHabilitado: true, totemQrHabilitado: true,
+          totemBiometriaHabilitado: true, totemFacialHabilitado: true,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const reset = (): void => {
@@ -58,6 +92,8 @@ export default function TotemRhPage(): JSX.Element {
     setErro(null);
     setStep('auth');
     try {
+      // Path FACIAL não passa por este handler — TotemFacialFlow é renderizado direto.
+      if (metodo === 'FACIAL') return;
       if (metodo === 'BIOMETRIA') {
         const r = await resolverMatricula(matricula);
         setFuncionario({ ...r.funcionario, metodo });
@@ -167,11 +203,23 @@ export default function TotemRhPage(): JSX.Element {
               <h2 className="text-center text-2xl font-bold">Identifique-se</h2>
 
               <div className="flex flex-wrap justify-center gap-2">
-                <MetodoBtn icon={<IdCard className="h-5 w-5" />} label="Matrícula + PIN" active={metodo === 'PIN'} onClick={() => setMetodo('PIN')} />
-                <MetodoBtn icon={<QrCode className="h-5 w-5" />} label="QR Code" active={metodo === 'QR'} onClick={() => setMetodo('QR')} />
-                <MetodoBtn icon={<Fingerprint className="h-5 w-5" />} label="Biometria" active={metodo === 'BIOMETRIA'} onClick={() => setMetodo('BIOMETRIA')} />
+                {config?.totemFacialHabilitado ? (
+                  <MetodoBtn icon={<ScanFace className="h-5 w-5" />} label="Facial" active={metodo === 'FACIAL'} onClick={() => setMetodo('FACIAL')} />
+                ) : null}
+                {config?.totemPinHabilitado ? (
+                  <MetodoBtn icon={<IdCard className="h-5 w-5" />} label="Matrícula + PIN" active={metodo === 'PIN'} onClick={() => setMetodo('PIN')} />
+                ) : null}
+                {config?.totemQrHabilitado ? (
+                  <MetodoBtn icon={<QrCode className="h-5 w-5" />} label="QR Code" active={metodo === 'QR'} onClick={() => setMetodo('QR')} />
+                ) : null}
+                {config?.totemBiometriaHabilitado ? (
+                  <MetodoBtn icon={<Fingerprint className="h-5 w-5" />} label="Biometria" active={metodo === 'BIOMETRIA'} onClick={() => setMetodo('BIOMETRIA')} />
+                ) : null}
               </div>
 
+              {metodo === 'FACIAL' ? (
+                <TotemFacialFlow onDone={reset} />
+              ) : (
               <form onSubmit={(e) => void autenticar(e)} className="space-y-4" autoComplete="off">
                 {metodo === 'QR' ? (
                   <label className="block">
@@ -276,6 +324,7 @@ export default function TotemRhPage(): JSX.Element {
                   )}
                 </button>
               </form>
+              )}
             </section>
           ) : null}
 

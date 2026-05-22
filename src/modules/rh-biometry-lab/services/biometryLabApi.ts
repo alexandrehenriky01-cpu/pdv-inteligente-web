@@ -88,10 +88,30 @@ function agentClient(bridge: AgentBridge, labToken: string) {
   });
 }
 
+/// Sentinela exportada para a UI detectar 401 e oferecer reset do token.
+/// Lançada por qualquer chamada do agent quando o X-Lab-Token nao bate.
+export class LabAuthError extends Error {
+  constructor(message = 'Token X-Lab inválido. Verifique o campo "Lab Token" e tente novamente.') {
+    super(message);
+    this.name = 'LabAuthError';
+  }
+}
+
+function throwIf401(err: unknown): never {
+  if (axios.isAxiosError(err) && err.response?.status === 401) {
+    throw new LabAuthError();
+  }
+  throw err as Error;
+}
+
 export async function getAgentStatus(bridge: AgentBridge, labToken: string): Promise<DeviceStatusView> {
   const client = agentClient(bridge, labToken);
-  const { data } = await client.get<DeviceStatusView>('/status');
-  return data;
+  try {
+    const { data } = await client.get<DeviceStatusView>('/status');
+    return data;
+  } catch (err) {
+    throwIf401(err);
+  }
 }
 
 export async function enrollAtAgent(
@@ -103,8 +123,11 @@ export async function enrollAtAgent(
     const { data } = await client.post<EnrollResultView>('/enroll', body);
     return data;
   } catch (err) {
+    if (axios.isAxiosError(err) && err.response?.status === 401) throw new LabAuthError();
     if (axios.isAxiosError(err) && err.response?.data) {
-      return err.response.data as EnrollResultView;
+      const body = err.response.data as EnrollResultView | string;
+      if (typeof body === 'string') return { ok: false, reason: body } as EnrollResultView;
+      return body;
     }
     throw err;
   }
@@ -119,8 +142,10 @@ export async function verifyAtAgent(
     const { data } = await client.post<VerifyResultView>('/verify', body);
     return data;
   } catch (err) {
+    if (axios.isAxiosError(err) && err.response?.status === 401) throw new LabAuthError();
     if (axios.isAxiosError(err) && err.response?.data) {
-      return err.response.data as VerifyResultView;
+      const body = err.response.data;
+      if (typeof body === 'object') return body as VerifyResultView;
     }
     throw err;
   }
@@ -130,10 +155,14 @@ export async function listTemplatesAtAgent(
   bridge: AgentBridge, labToken: string, funcionarioOpaqueId: string
 ): Promise<readonly TemplateMetadataView[]> {
   const client = agentClient(bridge, labToken);
-  const { data } = await client.get<{ templates: TemplateMetadataView[] }>(
-    `/templates/${encodeURIComponent(funcionarioOpaqueId)}`
-  );
-  return data.templates ?? [];
+  try {
+    const { data } = await client.get<{ templates: TemplateMetadataView[] }>(
+      `/templates/${encodeURIComponent(funcionarioOpaqueId)}`
+    );
+    return data.templates ?? [];
+  } catch (err) {
+    throwIf401(err);
+  }
 }
 
 export async function revokeAtAgent(

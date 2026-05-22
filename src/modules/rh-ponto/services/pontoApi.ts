@@ -72,6 +72,41 @@ export async function totemMarcar(input: MarcacaoRequest): Promise<MarcacaoRespo
   return data;
 }
 
+/// Sprint 7.4 — Totem facial: backend infere tipo (entrada/intervalo/saída).
+export interface MarcacaoFacialRequest {
+  readonly funcionarioId: string;
+  readonly timezone?: string;
+  readonly observacao?: string;
+}
+export interface MarcacaoFacialResponse extends MarcacaoResponse {
+  readonly tipoInferido: 'ENTRADA' | 'INICIO_INTERVALO' | 'FIM_INTERVALO' | 'SAIDA';
+}
+export async function totemMarcarFacial(input: MarcacaoFacialRequest): Promise<MarcacaoFacialResponse> {
+  const { data } = await api.post<MarcacaoFacialResponse>(`${BASE}/totem/marcar-facial`, input);
+  return data;
+}
+
+/// Sprint 7.6 — Config do Totem por loja (quais métodos aparecem).
+export interface PontoConfigView {
+  readonly id: string;
+  readonly lojaId: string;
+  readonly totemPinHabilitado: boolean;
+  readonly totemQrHabilitado: boolean;
+  readonly totemBiometriaHabilitado: boolean;
+  readonly totemFacialHabilitado: boolean;
+  readonly updatedAt: string;
+}
+export async function getPontoConfig(): Promise<PontoConfigView> {
+  const { data } = await api.get<{ config: PontoConfigView }>(`${BASE}/configuracoes`);
+  return data.config;
+}
+export async function updatePontoConfig(input: Partial<Pick<PontoConfigView,
+  'totemPinHabilitado' | 'totemQrHabilitado' | 'totemBiometriaHabilitado' | 'totemFacialHabilitado'
+>>): Promise<PontoConfigView> {
+  const { data } = await api.put<{ config: PontoConfigView }>(`${BASE}/configuracoes`, input);
+  return data.config;
+}
+
 // ============================================================================
 // Marcações (admin)
 // ============================================================================

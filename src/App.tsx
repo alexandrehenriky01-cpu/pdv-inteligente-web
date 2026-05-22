@@ -124,6 +124,8 @@ import RhCartaoPontoPage from './modules/rh-ponto/pages/RhCartaoPontoPage';
 import TotemRhPage from './modules/rh-ponto/totem/TotemRhPage';
 import RhBiometryLabPage from './modules/rh-biometry-lab/pages/RhBiometryLabPage';
 import RhBiometriaFuncionarioPage from './modules/rh-biometry/pages/RhBiometriaFuncionarioPage';
+import RhBiometriaFacialPage from './modules/rh-biometry-facial/pages/RhBiometriaFacialPage';
+import RhPontoConfigPage from './modules/rh-ponto/pages/RhPontoConfigPage';
 import RhPortalPage from './modules/rh-portal/pages/RhPortalPage';
 import RhOperacionalDashboardPage from './modules/rh-operacional/pages/RhDashboardPage';
 import RhDivergenciasPage from './modules/rh-operacional/pages/RhDivergenciasPage';
@@ -237,6 +239,8 @@ function App() {
           <Route path="/rh-ponto/cartao" element={<RhCartaoPontoPage />} />
           <Route path="/rh/biometric-lab" element={<RhBiometryLabPage />} />
           <Route path="/rh/biometria" element={<RhBiometriaFuncionarioPage />} />
+          <Route path="/rh/biometria-facial" element={<RhBiometriaFacialPage />} />
+          <Route path="/rh-ponto/configuracoes" element={<RhPontoConfigPage />} />
           <Route path="/rh/portal" element={<RhPortalPage />} />
           <Route path="/rh/dashboard" element={<RhOperacionalDashboardPage />} />
           <Route path="/rh/divergencias" element={<RhDivergenciasPage />} />

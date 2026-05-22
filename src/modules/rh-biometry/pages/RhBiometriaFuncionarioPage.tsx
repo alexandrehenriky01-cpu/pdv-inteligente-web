@@ -7,6 +7,7 @@ import {
   getAgentBridge,
   getAgentStatus,
   enrollAtAgent,
+  LabAuthError,
   type AgentBridge,
   type DeviceStatusView,
 } from '../../rh-biometry-lab/services/biometryLabApi';
@@ -37,7 +38,16 @@ export default function RhBiometriaFuncionarioPage(): JSX.Element {
   const [funcionarios, setFuncionarios] = useState<RhFuncionarioListItem[]>([]);
   const [funcionario, setFuncionario] = useState<RhFuncionarioListItem | null>(null);
   const [bridge, setBridge] = useState<AgentBridge | null>(null);
-  const [labToken, setLabToken] = useState<string>(() => sessionStorage.getItem('rh-biometry-lab-token') ?? '');
+  const [labToken, setLabToken] = useState<string>(() => {
+    // Token padrão do agent em Dev (vem do appsettings.Development.json:
+    // BiometricSandbox.LabApiToken). Se o sessionStorage tem algo claramente
+    // inválido (< 16 chars), descarta e usa o default — evita prender o user
+    // num 401 por causa de token velho/quebrado salvo no browser.
+    const DEV_DEFAULT = 'dev-lab-token-change-me';
+    const stored = sessionStorage.getItem('rh-biometry-lab-token');
+    if (!stored || stored.length < 16) return DEV_DEFAULT;
+    return stored;
+  });
   const [agentStatus, setAgentStatus] = useState<DeviceStatusView | null>(null);
   const [consent, setConsent] = useState<ConsentResponse | null>(null);
   const [enrolls, setEnrolls] = useState<readonly BiometriaStatusView[]>([]);
@@ -87,6 +97,15 @@ export default function RhBiometriaFuncionarioPage(): JSX.Element {
     })();
   }, [funcionario]);
 
+  const resetLabToken = (): void => {
+    const DEV_DEFAULT = 'dev-lab-token-change-me';
+    sessionStorage.setItem('rh-biometry-lab-token', DEV_DEFAULT);
+    setLabToken(DEV_DEFAULT);
+    setAgentStatus(null);
+    setError(null);
+    setInfo('Token resetado para o padrão Dev. Clique em "Atualizar status".');
+  };
+
   const refreshAgent = useCallback(async () => {
     if (!bridge || !labToken) return;
     setBusy(true);
@@ -94,7 +113,12 @@ export default function RhBiometriaFuncionarioPage(): JSX.Element {
     try {
       setAgentStatus(await getAgentStatus(bridge, labToken));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Falha ao consultar o agent.');
+      if (err instanceof LabAuthError) {
+        resetLabToken();
+        setError(err.message);
+      } else {
+        setError(err instanceof Error ? err.message : 'Falha ao consultar o agent.');
+      }
     } finally {
       setBusy(false);
     }
@@ -131,7 +155,12 @@ export default function RhBiometriaFuncionarioPage(): JSX.Element {
       setInfo('Enroll cadastrado.');
       await refreshEnrolls();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Falha no enroll.');
+      if (err instanceof LabAuthError) {
+        resetLabToken();
+        setError(err.message);
+      } else {
+        setError(err instanceof Error ? err.message : 'Falha no enroll.');
+      }
     } finally {
       setBusy(false);
     }
@@ -201,13 +230,29 @@ export default function RhBiometriaFuncionarioPage(): JSX.Element {
           </label>
           <label className="block">
             <span className="text-xs uppercase tracking-wide text-slate-400">X-Lab-Token</span>
-            <input
-              type="password"
-              value={labToken}
-              onChange={(e) => setLabToken(e.target.value)}
-              placeholder="Token do agent"
-              className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 font-mono text-sm text-white"
-            />
+            <div className="mt-1 flex gap-2">
+              <input
+                type="password"
+                value={labToken}
+                onChange={(e) => setLabToken(e.target.value)}
+                placeholder="Token do agent"
+                className="w-full rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 font-mono text-sm text-white"
+              />
+              {labToken ? (
+                <button
+                  type="button"
+                  onClick={resetLabToken}
+                  title="Apagar token salvo (use se receber 401)"
+                  className="rounded-xl border border-white/10 bg-slate-950/60 px-3 text-xs text-slate-300 hover:bg-rose-500/10 hover:text-rose-200"
+                >
+                  Limpar
+                </button>
+              ) : null}
+            </div>
+            <span className="mt-1 block text-[10px] text-slate-500">
+              {labToken.length} chars. Token em <code>appsettings.Development.json</code> →
+              <code className="ml-1">BiometricSandbox.LabApiToken</code>.
+            </span>
           </label>
         </section>
 

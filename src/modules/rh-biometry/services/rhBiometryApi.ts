@@ -44,6 +44,22 @@ export async function listEnrolls(funcionarioId: string, includeRevoked = false)
   return data.items ?? [];
 }
 
+/// Sprint 7.4 — Lista enrolls FACIAL ATIVOS de toda a loja (para match 1:N no totem).
+export interface FacialEnrollDaLoja {
+  readonly id: string;
+  readonly funcionarioId: string;
+  readonly funcionarioNome: string;
+  readonly funcionarioMatricula: string;
+  readonly templateOpaqueId: string;
+  readonly dedoLabel: string;
+  readonly qualityScore: number;
+  readonly enrolledAt: string;
+}
+export async function listFaciaisDaLoja(): Promise<readonly FacialEnrollDaLoja[]> {
+  const { data } = await api.get<{ items: FacialEnrollDaLoja[] }>(`${BASE}/enrolls/facial-da-loja`);
+  return data.items ?? [];
+}
+
 export async function registrarEnroll(input: {
   funcionarioId: string;
   agentId: string;
